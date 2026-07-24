@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aces High Limit Control</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">AUTHORIZED TESTING DASHBOARD</p>
+      <h1>League limit control</h1>
+    </div>
+    <div class="account-chip">
+        <span class="status-dot"></span>
+        <div>
+          <strong id="accountName">Loading…</strong>
+          <small id="accountId">Account</small>
+        </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="summary-grid" aria-label="Dashboard summary">
+      <article class="summary-card">
+        <span>Editable rows</span>
+        <strong id="rowCount">—</strong>
+      </article>
+      <article class="summary-card">
+        <span>Visible rows</span>
+        <strong id="visibleCount">—</strong>
+      </article>
+      <article class="summary-card">
+        <span>Pending edits</span>
+        <strong id="pendingCount">0</strong>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">STRAIGHT WAGER LIMITS</p>
+          <h2>Editable leagues</h2>
+          <p>Change one value, review it, then save it directly to Aces High.</p>
+        </div>
+
+        <div class="filters">
+          <label class="search-field">
+            <span>Search</span>
+            <input id="searchInput" type="search" placeholder="League or organization">
+          </label>
+          <label class="select-field">
+            <span>Rows</span>
+            <select id="rowTypeFilter">
+              <option value="all">All editable rows</option>
+              <option value="League">Leagues only</option>
+              <option value="Summary">Summaries only</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div id="message" class="message" role="status" hidden></div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>League</th>
+              <th>Period</th>
+              <th>Spread</th>
+              <th>Money line</th>
+              <th>Total</th>
+              <th>Team total</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="leagueRows">
+            <tr>
+              <td colspan="7" class="empty-state">Loading leagues…</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="confirmDialog">
+    <form method="dialog">
+      <p class="eyebrow">CONFIRM LIMIT CHANGE</p>
+      <h2 id="confirmTitle">Save this value?</h2>
+      <p id="confirmText"></p>
+      <div class="change-preview">
+        <span id="oldValue">—</span>
+        <span aria-hidden="true">→</span>
+        <strong id="newValue">—</strong>
+      </div>
+      <label class="schedule-field">
+        <span>Schedule for Pakistan time (PKT)</span>
+        <input id="scheduleTime" type="datetime-local">
+      </label>
+      <div class="dialog-actions">
+        <button value="cancel" class="button secondary">Cancel</button>
+        <button id="confirmSchedule" value="default" class="button secondary">Schedule</button>
+        <button id="confirmSave" value="default" class="button primary">Save to Aces High</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="scheduleStatusDialog" class="schedule-status-dialog">
+    <div class="schedule-status-content">
+      <p id="scheduleStatusEyebrow" class="eyebrow">SCHEDULED LIMIT</p>
+      <h2 id="scheduleStatusTitle">Limit change scheduled</h2>
+      <p id="scheduleStatusText"></p>
+      <div id="scheduleProgress" class="schedule-progress" aria-label="Waiting for scheduled time">
+        <span></span>
+      </div>
+      <button id="closeScheduleStatus" class="button primary" type="button">Close</button>
+    </div>
+  </dialog>
+
+  <script src="/script.js" defer></script>
+</body>
+</html>
