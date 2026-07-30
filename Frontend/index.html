@@ -5,24 +5,51 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Aces High Limit Control</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/styles.css?v=20260727-agent-selector">
 </head>
 <body>
-  <header class="topbar">
+  <main id="loginView" class="login-view">
+    <form id="loginForm" class="login-card">
+      <p class="eyebrow">ACES HIGH LIMIT CONTROL</p>
+      <h1>Log in</h1>
+      <p>Use the same account you use on AccessHigh.</p>
+      <label>
+        <span>Username</span>
+        <input id="username" name="username" autocomplete="username" required maxlength="100" autofocus>
+      </label>
+      <label>
+        <span>Password</span>
+        <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="200">
+      </label>
+      <div id="loginMessage" class="message error" role="alert" hidden></div>
+      <button id="loginButton" class="button primary" type="submit">Log in</button>
+    </form>
+  </main>
+
+  <header id="dashboardHeader" class="topbar" hidden>
     <div>
       <p class="eyebrow">AUTHORIZED TESTING DASHBOARD</p>
       <h1>League limit control</h1>
     </div>
-    <div class="account-chip">
+    <div class="topbar-actions">
+      <label class="agent-selector">
+        <span>Select agent</span>
+        <select id="agentSelect" disabled>
+          <option>Loading agents...</option>
+        </select>
+      </label>
+      <div class="account-chip">
         <span class="status-dot"></span>
         <div>
           <strong id="accountName">Loading…</strong>
           <small id="accountId">Account</small>
         </div>
+      </div>
+      <button id="logoutButton" class="button secondary" type="button">Log out</button>
     </div>
   </header>
 
-  <main>
+  <main id="dashboardView" hidden>
     <section class="summary-grid" aria-label="Dashboard summary">
       <article class="summary-card">
         <span>Editable rows</span>
@@ -121,6 +148,6 @@
     </div>
   </dialog>
 
-  <script src="/script.js" defer></script>
+  <script src="/script.js?v=20260727-agent-selector" defer></script>
 </body>
 </html>

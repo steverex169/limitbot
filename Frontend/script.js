@@ -1,4 +1,6 @@
 const state = {
+  agents: [],
+  selectedAgentId: null,
   rows: [],
   filteredRows: [],
   pending: new Map(),
@@ -9,8 +11,19 @@ const state = {
 };
 
 const pendingStorageKey = "aceshighPendingLimitEdits";
+let preferenceSaveTimer = null;
 
 const elements = {
+  loginView: document.querySelector("#loginView"),
+  loginForm: document.querySelector("#loginForm"),
+  username: document.querySelector("#username"),
+  password: document.querySelector("#password"),
+  loginMessage: document.querySelector("#loginMessage"),
+  loginButton: document.querySelector("#loginButton"),
+  dashboardHeader: document.querySelector("#dashboardHeader"),
+  dashboardView: document.querySelector("#dashboardView"),
+  logoutButton: document.querySelector("#logoutButton"),
+  agentSelect: document.querySelector("#agentSelect"),
   accountName: document.querySelector("#accountName"),
   accountId: document.querySelector("#accountId"),
   rowCount: document.querySelector("#rowCount"),
@@ -44,7 +57,7 @@ const fieldLabels = {
 };
 
 function rowKey(row) {
-  return `${row.idOrganization}:${row.idLeague}:${row.idSportType}:${row.periodNumber || 0}`;
+  return `${row.accountId}:${row.idOrganization}:${row.idLeague}:${row.idSportType}:${row.periodNumber || 0}`;
 }
 
 function inputKey(row, field) {
@@ -53,6 +66,7 @@ function inputKey(row, field) {
 
 function savePendingToLocalStorage() {
   const storedChanges = [...state.pending.values()].map((change) => ({
+    accountId: change.row.accountId,
     idOrganization: change.row.idOrganization,
     idLeague: change.row.idLeague,
     idSportType: change.row.idSportType,
@@ -77,6 +91,7 @@ function restorePendingFromLocalStorage() {
   for (const stored of storedChanges) {
     const row = state.rows.find(
       (candidate) =>
+        Number(candidate.accountId) === Number(stored.accountId) &&
         Number(candidate.idOrganization) === Number(stored.idOrganization) &&
         Number(candidate.idLeague) === Number(stored.idLeague) &&
         Number(candidate.idSportType) === Number(stored.idSportType) &&
@@ -134,6 +149,7 @@ function createLimitCell(row, field) {
   const pendingChange = state.pending.get(key);
   const scheduledChanges = state.schedules.filter(
     (schedule) =>
+      Number(schedule.accountId) === Number(row.accountId) &&
       Number(schedule.idOrganization) === Number(row.idOrganization) &&
       Number(schedule.idLeague) === Number(row.idLeague) &&
       Number(schedule.idSportType) === Number(row.idSportType) &&
@@ -218,7 +234,7 @@ function openConfirmation(row) {
   state.activeChange = change;
   elements.confirmTitle.textContent = `Update ${fieldLabels[change.field]}?`;
   elements.confirmText.textContent =
-    `${row.leagueName} · Account 968877 · Organization ${row.idOrganization}`;
+    `${row.leagueName} · Account ${row.accountId} · Organization ${row.idOrganization}`;
   elements.oldValue.textContent = change.oldValue ?? "Not set";
   elements.newValue.textContent = change.newValue.toLocaleString();
   elements.scheduleTime.value = "";
@@ -312,6 +328,7 @@ async function togglePeriods(row) {
 
   if (!state.periodRows.has(key)) {
     const query = new URLSearchParams({
+      accountId: row.accountId,
       idOrganization: row.idOrganization,
       idLeague: row.idLeague,
     });
@@ -350,10 +367,15 @@ function applyFilters() {
 }
 
 async function loadLeagues() {
+  const accountId = state.selectedAgentId;
+  if (!accountId) {
+    return;
+  }
   clearMessage();
+  const query = new URLSearchParams({ accountId });
   const [response, scheduleResponse] = await Promise.all([
-    fetch("/api/leagues", { cache: "no-store" }),
-    fetch("/api/schedules", { cache: "no-store" }),
+    fetch(`/api/leagues?${query}`, { cache: "no-store" }),
+    fetch(`/api/schedules?${query}`, { cache: "no-store" }),
   ]);
   if (!response.ok || !scheduleResponse.ok) {
     throw new Error("Could not load editable leagues");
@@ -361,17 +383,83 @@ async function loadLeagues() {
 
   const data = await response.json();
   const scheduleData = await scheduleResponse.json();
+  if (accountId !== state.selectedAgentId) {
+    return;
+  }
   state.rows = data.rows;
   state.schedules = scheduleData.schedules;
   state.filteredRows = data.rows;
   restorePendingFromLocalStorage();
-  elements.accountName.textContent = data.accountName;
-  elements.accountId.textContent = `Account ${data.accountId}`;
   applyFilters();
 }
 
+async function loadAgents() {
+  const response = await fetch("/api/agents", { cache: "no-store" });
+  const data = await response.json();
+  if (!response.ok || !data.agents?.length) {
+    throw new Error(data.error || "Could not load agents");
+  }
+
+  state.agents = data.agents;
+  const preferences = data.preferences || {};
+  elements.accountName.textContent = data.parentName;
+  elements.accountId.textContent = `Account ${data.parentId}`;
+  elements.agentSelect.replaceChildren();
+  for (const agent of state.agents) {
+    const option = document.createElement("option");
+    option.value = agent.id;
+    const hierarchyIndent = "\u00a0\u00a0\u00a0".repeat(agent.depth || 0);
+    const branchMarker = agent.hasChildren ? "▾ " : "\u00a0\u00a0";
+    option.textContent =
+      `${hierarchyIndent}${branchMarker}${agent.name} (${agent.count ?? 0})`;
+    elements.agentSelect.append(option);
+  }
+
+  elements.searchInput.value = preferences.searchQuery || "";
+  elements.rowTypeFilter.value = ["all", "League", "Summary"].includes(
+    preferences.rowTypeFilter
+  ) ? preferences.rowTypeFilter : "all";
+  const defaultAgent =
+    state.agents.find(
+      (agent) => Number(agent.id) === Number(preferences.selectedAgentId)
+    ) ||
+    state.agents.find((agent) => Number(agent.id) === Number(data.parentId)) ||
+    state.agents[0];
+  state.selectedAgentId = Number(defaultAgent.id);
+  elements.agentSelect.value = String(defaultAgent.id);
+  elements.agentSelect.disabled = false;
+  await loadLeagues();
+}
+
+async function savePreferences(preferences) {
+  const response = await fetch("/api/preferences", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(preferences),
+  });
+  if (!response.ok && response.status !== 401) {
+    const data = await response.json();
+    throw new Error(data.error || "Could not save preferences");
+  }
+}
+
+function queueFilterPreferences() {
+  clearTimeout(preferenceSaveTimer);
+  preferenceSaveTimer = setTimeout(() => {
+    savePreferences({
+      searchQuery: elements.searchInput.value,
+      rowTypeFilter: elements.rowTypeFilter.value,
+    }).catch((error) => showMessage(error.message, "error"));
+  }, 300);
+}
+
 async function refreshScheduleStatuses() {
-  const response = await fetch("/api/schedules", { cache: "no-store" });
+  const accountId = state.selectedAgentId;
+  if (!accountId) {
+    return;
+  }
+  const query = new URLSearchParams({ accountId });
+  const response = await fetch(`/api/schedules?${query}`, { cache: "no-store" });
   if (!response.ok) {
     return;
   }
@@ -390,11 +478,14 @@ async function refreshScheduleStatuses() {
     );
   });
 
-  const leagueResponse = await fetch("/api/leagues", { cache: "no-store" });
+  const leagueResponse = await fetch(`/api/leagues?${query}`, { cache: "no-store" });
   if (!leagueResponse.ok) {
     return;
   }
   const leagueData = await leagueResponse.json();
+  if (accountId !== state.selectedAgentId) {
+    return;
+  }
   state.rows = leagueData.rows;
   state.schedules = data.schedules;
   restorePendingFromLocalStorage();
@@ -406,6 +497,7 @@ async function refreshScheduleStatuses() {
     ];
     const row = allRows.find(
       (candidate) =>
+        Number(candidate.accountId) === Number(finishedSchedule.accountId) &&
         Number(candidate.idOrganization) === Number(finishedSchedule.idOrganization) &&
         Number(candidate.idLeague) === Number(finishedSchedule.idLeague) &&
         Number(candidate.idSportType) === Number(finishedSchedule.idSportType) &&
@@ -466,6 +558,7 @@ async function saveActiveChange() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        accountId: change.row.accountId,
         idOrganization: change.row.idOrganization,
         idLeague: change.row.idLeague,
         idSportType: change.row.idSportType,
@@ -513,6 +606,7 @@ async function scheduleActiveChange() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        accountId: change.row.accountId,
         idOrganization: change.row.idOrganization,
         idLeague: change.row.idLeague,
         idSportType: change.row.idSportType,
@@ -547,8 +641,30 @@ async function scheduleActiveChange() {
   }
 }
 
-elements.searchInput.addEventListener("input", applyFilters);
-elements.rowTypeFilter.addEventListener("change", applyFilters);
+elements.searchInput.addEventListener("input", () => {
+  applyFilters();
+  queueFilterPreferences();
+});
+elements.rowTypeFilter.addEventListener("change", () => {
+  applyFilters();
+  queueFilterPreferences();
+});
+elements.agentSelect.addEventListener("change", async () => {
+  state.selectedAgentId = Number(elements.agentSelect.value);
+  savePreferences({ selectedAgentId: state.selectedAgentId }).catch(
+    (error) => showMessage(error.message, "error")
+  );
+  state.periodRows.clear();
+  state.expandedRows.clear();
+  state.activeChange = null;
+  elements.leagueRows.innerHTML =
+    '<tr><td colspan="7" class="empty-state">Loading leagues...</td></tr>';
+  try {
+    await loadLeagues();
+  } catch (error) {
+    showMessage(error.message, "error");
+  }
+});
 elements.confirmSchedule.addEventListener("click", (event) => {
   event.preventDefault();
   scheduleActiveChange();
@@ -565,11 +681,65 @@ elements.scheduleStatusDialog.addEventListener("click", (event) => {
     elements.scheduleStatusDialog.close();
   }
 });
-loadLeagues().catch((error) => {
-  showMessage(error.message, "error");
-  elements.leagueRows.innerHTML =
-    '<tr><td colspan="7" class="empty-state">Dashboard data could not be loaded.</td></tr>';
+function showLogin() {
+  elements.loginView.hidden = false;
+  elements.dashboardHeader.hidden = true;
+  elements.dashboardView.hidden = true;
+  elements.password.value = "";
+}
+
+async function startDashboard() {
+  elements.loginView.hidden = true;
+  elements.dashboardHeader.hidden = false;
+  elements.dashboardView.hidden = false;
+  try {
+    await loadAgents();
+  } catch (error) {
+    showMessage(error.message, "error");
+  }
+}
+
+elements.loginForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  elements.loginMessage.hidden = true;
+  elements.loginButton.disabled = true;
+  elements.loginButton.textContent = "Logging in...";
+  try {
+    const response = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: elements.username.value.trim(),
+        password: elements.password.value,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Login failed");
+    }
+    elements.password.value = "";
+    await startDashboard();
+  } catch (error) {
+    elements.loginMessage.textContent = error.message;
+    elements.loginMessage.hidden = false;
+  } finally {
+    elements.loginButton.disabled = false;
+    elements.loginButton.textContent = "Log in";
+  }
 });
+
+elements.logoutButton.addEventListener("click", async () => {
+  await fetch("/api/logout", { method: "POST" });
+  state.agents = [];
+  state.selectedAgentId = null;
+  state.rows = [];
+  clearPendingChanges();
+  showLogin();
+});
+
+fetch("/api/session", { cache: "no-store" })
+  .then((response) => response.ok ? startDashboard() : showLogin())
+  .catch(showLogin);
 
 setInterval(() => {
   refreshScheduleStatuses().catch(() => {});

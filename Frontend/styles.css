@@ -75,6 +75,34 @@ h2 {
   gap: 10px;
 }
 
+.agent-selector span {
+  display: block;
+  margin-bottom: 4px;
+  color: #98a2b3;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.agent-selector select {
+  min-width: 180px;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.agent-selector select:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
 .logout-button {
   height: 42px;
   padding: 0 14px;
@@ -628,4 +656,49 @@ dialog h2 {
     align-items: stretch;
     flex-direction: column;
   }
+}
+ [hidden] {
+  display: none !important;
+}
+
+.login-view {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.login-card {
+  width: min(100%, 410px);
+  padding: 32px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: 0 18px 50px rgba(15, 23, 42, .12);
+}
+
+.login-card > p:not(.eyebrow) {
+  color: var(--muted);
+  margin-bottom: 24px;
+}
+
+.login-card label {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+  font-size: .85rem;
+  font-weight: 700;
+}
+
+.login-card input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  font: inherit;
+}
+
+.login-card .button {
+  width: 100%;
+  margin-top: 8px;
 }
