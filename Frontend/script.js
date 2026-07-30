@@ -43,6 +43,7 @@ const elements = {
   oldValue: document.querySelector("#oldValue"),
   newValue: document.querySelector("#newValue"),
   scheduleTime: document.querySelector("#scheduleTime"),
+  scheduleDays: [...document.querySelectorAll('input[name="scheduleDay"]')],
   confirmSchedule: document.querySelector("#confirmSchedule"),
   confirmSave: document.querySelector("#confirmSave"),
   scheduleStatusDialog: document.querySelector("#scheduleStatusDialog"),
@@ -160,7 +161,12 @@ function createLimitCell(row, field) {
       Number(schedule.periodNumber || 0) === Number(row.periodNumber || 0) &&
       schedule.field === field
   );
-  const latestSchedule = scheduledChanges.at(-1);
+  const lockingSchedule = [...scheduledChanges]
+    .reverse()
+    .find(
+      (schedule) =>
+        !schedule.recurring && ["pending", "running"].includes(schedule.status)
+    );
 
   input.className = "limit-input";
   input.type = "number";
@@ -168,19 +174,19 @@ function createLimitCell(row, field) {
   input.step = "1";
   input.value =
     pendingChange?.newValue ??
-    (["pending", "running"].includes(latestSchedule?.status)
-      ? latestSchedule.value
+    (lockingSchedule
+      ? lockingSchedule.value
       : originalValue) ??
     "";
   input.disabled =
     !row.editableFields.includes(field) ||
-    ["pending", "running"].includes(latestSchedule?.status);
+    Boolean(lockingSchedule);
   if (pendingChange) {
     input.classList.add("changed");
   }
   if (input.disabled) {
     input.title =
-      ["pending", "running"].includes(latestSchedule?.status)
+      lockingSchedule
         ? "This limit is locked until its scheduled change finishes"
         : row.disabledReason;
   }
@@ -242,6 +248,9 @@ function openConfirmation(row) {
   elements.oldValue.textContent = change.oldValue ?? "Not set";
   elements.newValue.textContent = change.newValue.toLocaleString();
   elements.scheduleTime.value = "";
+  elements.scheduleDays.forEach((input) => {
+    input.checked = false;
+  });
   elements.dialog.showModal();
 }
 
@@ -552,8 +561,11 @@ async function refreshScheduleStatuses() {
   const finishedSchedule = data.schedules.find((schedule) => {
     const previous = previousSchedules.get(schedule.id);
     return (
-      ["pending", "running"].includes(previous?.status) &&
-      ["completed", "failed"].includes(schedule.status)
+      (["pending", "running"].includes(previous?.status) &&
+        ["completed", "failed"].includes(schedule.status)) ||
+      (schedule.recurring &&
+        previous?.lastRunAt !== schedule.lastRunAt &&
+        Boolean(schedule.lastRunAt))
     );
   });
 
@@ -588,16 +600,26 @@ async function refreshScheduleStatuses() {
       renderRows();
     }
     showScheduleStatus(
-      finishedSchedule.status,
+      finishedSchedule.lastRunStatus || finishedSchedule.status,
       row?.leagueName || "this league",
       finishedSchedule.value,
-      finishedSchedule.scheduledFor,
-      fieldLabels[finishedSchedule.field]
+      finishedSchedule.lastRunAt || finishedSchedule.scheduledFor,
+      fieldLabels[finishedSchedule.field],
+      finishedSchedule.recurrence,
+      finishedSchedule.scheduledFor
     );
   }
 }
 
-function showScheduleStatus(status, leagueName, value, scheduledFor, fieldLabel) {
+function showScheduleStatus(
+  status,
+  leagueName,
+  value,
+  scheduledFor,
+  fieldLabel,
+  recurrence = null,
+  nextRun = null
+) {
   const successful = status === "completed";
   const failed = status === "failed";
   elements.scheduleStatusDialog.classList.toggle("status-success", successful);
@@ -613,10 +635,10 @@ function showScheduleStatus(status, leagueName, value, scheduledFor, fieldLabel)
       ? "Limit has applied successfully"
       : "Limit change scheduled";
   elements.scheduleStatusText.textContent = successful
-    ? `${leagueName} ${fieldLabel} was changed to ${Number(value).toLocaleString()} at ${scheduledFor}.`
+    ? `${leagueName} ${fieldLabel} was changed to ${Number(value).toLocaleString()} at ${scheduledFor}.${nextRun ? ` Next run: ${nextRun}.` : ""}`
     : failed
-      ? `${leagueName} ${fieldLabel} could not be changed to ${Number(value).toLocaleString()}.`
-      : `Limit change for ${leagueName} is set to ${Number(value).toLocaleString()} ${fieldLabel} and will be applied at ${scheduledFor}.`;
+      ? `${leagueName} ${fieldLabel} could not be changed to ${Number(value).toLocaleString()}.${nextRun ? ` It will retry at the next scheduled run: ${nextRun}.` : ""}`
+      : `Limit change for ${leagueName} is set to ${Number(value).toLocaleString()} ${fieldLabel}. ${recurrence || `It will be applied at ${scheduledFor}`}. Next run: ${nextRun || scheduledFor}.`;
   elements.scheduleProgress.hidden = successful || failed;
   if (!elements.scheduleStatusDialog.open) {
     elements.scheduleStatusDialog.showModal();
@@ -673,7 +695,14 @@ async function scheduleActiveChange() {
     return;
   }
   if (!elements.scheduleTime.value) {
-    showMessage("Select a Pakistan date and time first.", "error");
+    showMessage("Select an Eastern time first.", "error");
+    return;
+  }
+  const recurrenceDays = elements.scheduleDays
+    .filter((input) => input.checked)
+    .map((input) => Number(input.value));
+  if (!recurrenceDays.length) {
+    showMessage("Select at least one weekday.", "error");
     return;
   }
 
@@ -692,7 +721,8 @@ async function scheduleActiveChange() {
         periodNumber: change.row.periodNumber || 0,
         field: change.field,
         value: change.newValue,
-        scheduledFor: elements.scheduleTime.value,
+        recurrenceDays,
+        recurrenceTime: elements.scheduleTime.value,
       }),
     });
     const data = await response.json();
@@ -709,7 +739,9 @@ async function scheduleActiveChange() {
       change.row.leagueName,
       change.newValue,
       data.scheduledFor,
-      fieldLabels[change.field]
+      fieldLabels[change.field],
+      data.recurrence,
+      data.scheduledFor
     );
   } catch (error) {
     elements.dialog.close();

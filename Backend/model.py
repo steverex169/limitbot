@@ -63,8 +63,14 @@ class ScheduledLimit(Base):
     field: Mapped[str] = mapped_column(String(20))
     value: Mapped[int] = mapped_column(BigInteger)
     scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    recurrence_days: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    recurrence_time: Mapped[str | None] = mapped_column(String(5), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_run_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

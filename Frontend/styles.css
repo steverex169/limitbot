@@ -621,6 +621,40 @@ dialog h2 {
   padding: 0 12px;
 }
 
+.schedule-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 0;
+  border: 0;
+}
+
+.schedule-days legend {
+  width: 100%;
+  margin-bottom: 7px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.schedule-days label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.schedule-days input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+}
+
 .schedule-status-dialog {
   width: min(520px, calc(100vw - 40px));
 }

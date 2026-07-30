@@ -129,9 +129,19 @@
         <span aria-hidden="true">→</span>
         <strong id="newValue">—</strong>
       </div>
+      <fieldset class="schedule-days">
+        <legend>Repeat every week on</legend>
+        <label><input type="checkbox" name="scheduleDay" value="0"> Mon</label>
+        <label><input type="checkbox" name="scheduleDay" value="1"> Tue</label>
+        <label><input type="checkbox" name="scheduleDay" value="2"> Wed</label>
+        <label><input type="checkbox" name="scheduleDay" value="3"> Thu</label>
+        <label><input type="checkbox" name="scheduleDay" value="4"> Fri</label>
+        <label><input type="checkbox" name="scheduleDay" value="5"> Sat</label>
+        <label><input type="checkbox" name="scheduleDay" value="6"> Sun</label>
+      </fieldset>
       <label class="schedule-field">
-        <span>Schedule for Pakistan time (PKT)</span>
-        <input id="scheduleTime" type="datetime-local">
+        <span>Time (U.S. Eastern / ET)</span>
+        <input id="scheduleTime" type="time">
       </label>
       <div class="dialog-actions">
         <button value="cancel" class="button secondary">Cancel</button>
@@ -153,6 +163,6 @@
     </div>
   </dialog>
 
-  <script src="/script.js?v=20260730-agent-search" defer></script>
+  <script src="/script.js?v=20260730-recurring-schedules" defer></script>
 </body>
 </html>

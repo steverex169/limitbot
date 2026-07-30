@@ -9,13 +9,14 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import uuid
 import secrets
+from zoneinfo import ZoneInfo
 from collections import defaultdict, deque
 from contextvars import ContextVar
 from urllib.parse import urlsplit
 
 import requests
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import select
+from sqlalchemy import inspect, select, text
 from urllib.parse import urlparse, parse_qs
 
 from database import Base, database_session, engine
@@ -25,7 +26,7 @@ backend_directory = Path(__file__).resolve().parent
 app_directory = backend_directory.parent / "Frontend"
 login_lock = threading.Lock()
 data_lock = threading.Lock()
-pakistan_timezone = timezone(timedelta(hours=5), name="PKT")
+schedule_timezone = ZoneInfo("America/New_York")
 
 login_url = (
     "https://aceshigh.ag/"
@@ -134,6 +135,27 @@ def build_auth_from_database(user, login_session, session_hash=None):
         "sessionHash": session_hash,
         "userId": user.id,
         "dbSessionId": login_session.id,
+    }
+
+
+def build_worker_auth(user):
+    try:
+        access_token = encryption_cipher().decrypt(
+            user.access_token_encrypted.encode("ascii")
+        ).decode("utf-8")
+    except InvalidToken as error:
+        raise PermissionError("Stored AccessHigh session is invalid") from error
+    return {
+        "http": requests.Session(),
+        "headers": {**api_headers, "Authorization": f"Bearer {access_token}"},
+        "id": int(user.accesshigh_agent_id),
+        "username": user.username,
+        "agents": None,
+        "createdAt": datetime.now(timezone.utc),
+        "lastSeen": datetime.now(timezone.utc),
+        "sessionHash": None,
+        "userId": user.id,
+        "dbSessionId": None,
     }
 
 
@@ -478,52 +500,70 @@ def search_agents(search_value):
         if agent_id in seen:
             continue
         seen.add(agent_id)
+        upstream_label = search_field(
+            "DisplayName",
+            "DisplayText",
+            "SearchDisplay",
+            "SearchText",
+            "Label",
+            "Description",
+        )
         account = search_field(
             "Account",
             "AccountName",
             "AccountCode",
+            "AccountNumber",
             "CustomerAccount",
             "Login",
+            "LoginName",
             "Username",
             "UserName",
             "Customer",
             "CustomerName",
             "AgentName",
+            "AgentCode",
             "Name",
         )
-        if not account:
-            account = next(
-                (
-                    value
-                    for value in item.values()
-                    if isinstance(value, str)
-                    and search_value.casefold() in value.casefold()
-                ),
-                None,
-            )
-        password = search_field("Password", "Pwd", "CustomerPassword")
+        password = search_field(
+            "Password",
+            "Pwd",
+            "CustomerPassword",
+            "CustomerPwd",
+            "AccountPassword",
+        )
         parent_agent = search_field(
             "ParentAgent",
             "MasterAgent",
             "ParentAgentName",
+            "MasterAgentName",
+            "MasterAgentAccount",
             "AgentUserName",
+            "AgentUsername",
+            "AgentAccount",
             "CreatedBy",
             "Parent",
             "Agent",
         )
-        if not account:
+        complete_upstream_label = (
+            str(upstream_label)
+            if upstream_label
+            and "(PWD:" in str(upstream_label).upper()
+            and " - " in str(upstream_label)
+            else None
+        )
+        if not complete_upstream_label and not account:
             continue
-        display_name = str(account)
-        if password:
-            display_name += f" (PWD:{password})"
-        if parent_agent:
-            display_name += f" - {parent_agent}"
+        display_name = complete_upstream_label or str(account)
+        if not complete_upstream_label:
+            if password:
+                display_name += f" (PWD:{password})"
+            if parent_agent:
+                display_name += f" - {parent_agent}"
 
         results.append({
             "id": agent_id,
             "name": display_name,
             "account": account or display_name,
-            "password": password,
             "parentAgent": parent_agent,
             "parentId": search_field("ParentId"),
             "depth": 0,
@@ -1026,6 +1066,53 @@ def save_limit_change(request_data):
     }
 
 
+weekday_names = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+
+def next_recurring_run(recurrence_days, recurrence_time, after=None):
+    try:
+        days = sorted({int(day) for day in recurrence_days})
+        hour, minute = (int(part) for part in recurrence_time.split(":", 1))
+    except (TypeError, ValueError) as error:
+        raise ValueError("Select valid weekdays and an Eastern time") from error
+    if not days or any(day < 0 or day > 6 for day in days):
+        raise ValueError("Select at least one valid weekday")
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        raise ValueError("Select a valid Eastern time")
+
+    after = after or datetime.now(schedule_timezone)
+    if after.tzinfo is None:
+        after = after.replace(tzinfo=schedule_timezone)
+    else:
+        after = after.astimezone(schedule_timezone)
+    for offset in range(8):
+        candidate_date = (after + timedelta(days=offset)).date()
+        if candidate_date.weekday() not in days:
+            continue
+        candidate = datetime(
+            candidate_date.year,
+            candidate_date.month,
+            candidate_date.day,
+            hour,
+            minute,
+            tzinfo=schedule_timezone,
+        )
+        if candidate > after:
+            return candidate
+    raise RuntimeError("Could not calculate the next recurring run")
+
+
+def recurring_description(recurrence_days, recurrence_time):
+    days = [weekday_names[int(day)] for day in recurrence_days]
+    day_text = (
+        "Monday through Friday"
+        if recurrence_days == [0, 1, 2, 3, 4]
+        else ", ".join(days)
+    )
+    display_time = datetime.strptime(recurrence_time, "%H:%M").strftime("%I:%M %p")
+    return f"Every {day_text} at {display_time} ET"
+
+
 def create_schedule(request_data):
     auth = auth_context()
     try:
@@ -1035,9 +1122,10 @@ def create_schedule(request_data):
         sport_type_id = int(request_data["idSportType"])
         period_number = int(request_data.get("periodNumber", 0) or 0)
         value = int(request_data["value"])
-        scheduled_for = datetime.fromisoformat(str(request_data["scheduledFor"]))
+        recurrence_days = sorted({int(day) for day in request_data["recurrenceDays"]})
+        recurrence_time = str(request_data["recurrenceTime"])
     except (KeyError, TypeError, ValueError) as error:
-        raise ValueError("Enter a valid limit and Pakistan date/time") from error
+        raise ValueError("Enter a valid limit, weekdays, and Eastern time") from error
 
     matching_row = find_limit_row(
         account_id, organization_id, league_id, sport_type_id, period_number
@@ -1059,16 +1147,7 @@ def create_schedule(request_data):
     if value < 0 or value > 1_000_000_000:
         raise ValueError("Limit must be between 0 and 1,000,000,000")
 
-    if scheduled_for.tzinfo is None:
-        scheduled_for = scheduled_for.replace(tzinfo=pakistan_timezone)
-    else:
-        scheduled_for = scheduled_for.astimezone(pakistan_timezone)
-
-    now = datetime.now(pakistan_timezone)
-    if scheduled_for <= now:
-        raise ValueError("Schedule time must be in the future")
-    if scheduled_for > now + timedelta(days=365):
-        raise ValueError("Schedule time cannot be more than one year ahead")
+    scheduled_for = next_recurring_run(recurrence_days, recurrence_time)
 
     job_id = uuid.uuid4().hex
     scheduled_utc = scheduled_for.astimezone(timezone.utc).replace(tzinfo=None)
@@ -1086,6 +1165,8 @@ def create_schedule(request_data):
                 field=request_data["field"],
                 value=value,
                 scheduled_for=scheduled_utc,
+                recurrence_days=",".join(str(day) for day in recurrence_days),
+                recurrence_time=recurrence_time,
                 status="pending",
             )
         )
@@ -1094,7 +1175,8 @@ def create_schedule(request_data):
     return {
         "id": job_id,
         "message": "Limit change scheduled",
-        "scheduledFor": scheduled_for.strftime("%Y-%m-%d %I:%M %p PKT"),
+        "scheduledFor": scheduled_for.strftime("%Y-%m-%d %I:%M %p %Z"),
+        "recurrence": recurring_description(recurrence_days, recurrence_time),
     }
 
 
@@ -1118,17 +1200,10 @@ def run_schedule_worker():
             try:
                 with database_session() as db:
                     job = db.get(ScheduledLimit, job_id)
-                    login_session = db.get(LoginSession, job.login_session_id)
                     user = db.get(User, job.user_id)
-                now = utc_now_naive()
-                if (
-                    login_session is None
-                    or user is None
-                    or login_session.expires_at <= now
-                    or now - login_session.last_seen > session_idle_timeout
-                ):
-                    raise RuntimeError("Login session expired before the scheduled change")
-                auth = build_auth_from_database(user, login_session)
+                if user is None:
+                    raise RuntimeError("Schedule owner no longer exists")
+                auth = build_worker_auth(user)
                 current_auth.set(auth)
                 save_limit_change({
                     "accountId": job.account_id,
@@ -1141,16 +1216,51 @@ def run_schedule_worker():
                 })
                 with database_session() as db:
                     stored_job = db.get(ScheduledLimit, job_id)
-                    stored_job.status = "completed"
-                    stored_job.completed_at = utc_now_naive()
+                    completed_at = utc_now_naive()
+                    stored_job.completed_at = completed_at
+                    stored_job.last_run_at = completed_at
+                    stored_job.last_run_status = "completed"
+                    stored_job.error = None
+                    if stored_job.recurrence_days and stored_job.recurrence_time:
+                        days = [
+                            int(day) for day in stored_job.recurrence_days.split(",")
+                        ]
+                        next_run = next_recurring_run(
+                            days,
+                            stored_job.recurrence_time,
+                            datetime.now(schedule_timezone),
+                        )
+                        stored_job.scheduled_for = next_run.astimezone(
+                            timezone.utc
+                        ).replace(tzinfo=None)
+                        stored_job.status = "pending"
+                    else:
+                        stored_job.status = "completed"
                     db.commit()
                 print(f"Scheduled limit completed: {job_id}")
             except Exception as error:
                 with database_session() as db:
                     stored_job = db.get(ScheduledLimit, job_id)
                     if stored_job:
-                        stored_job.status = "failed"
+                        failed_at = utc_now_naive()
+                        stored_job.last_run_at = failed_at
+                        stored_job.last_run_status = "failed"
                         stored_job.error = str(error)
+                        if stored_job.recurrence_days and stored_job.recurrence_time:
+                            days = [
+                                int(day) for day in stored_job.recurrence_days.split(",")
+                            ]
+                            next_run = next_recurring_run(
+                                days,
+                                stored_job.recurrence_time,
+                                datetime.now(schedule_timezone),
+                            )
+                            stored_job.scheduled_for = next_run.astimezone(
+                                timezone.utc
+                            ).replace(tzinfo=None)
+                            stored_job.status = "pending"
+                        else:
+                            stored_job.status = "failed"
                         db.commit()
                 print(f"Scheduled limit failed: {job_id} - {error}")
 
@@ -1175,7 +1285,7 @@ def schedule_status_rows(account_id):
             "status": job.status,
             "scheduledFor": job.scheduled_for.replace(
                 tzinfo=timezone.utc
-            ).astimezone(pakistan_timezone).strftime("%Y-%m-%d %I:%M %p PKT"),
+            ).astimezone(schedule_timezone).strftime("%Y-%m-%d %I:%M %p %Z"),
             "accountId": job.account_id,
             "idOrganization": job.organization_id,
             "idLeague": job.league_id,
@@ -1183,6 +1293,23 @@ def schedule_status_rows(account_id):
             "periodNumber": job.period_number,
             "field": job.field,
             "value": job.value,
+            "recurring": bool(job.recurrence_days and job.recurrence_time),
+            "recurrence": (
+                recurring_description(
+                    [int(day) for day in job.recurrence_days.split(",")],
+                    job.recurrence_time,
+                )
+                if job.recurrence_days and job.recurrence_time
+                else None
+            ),
+            "lastRunStatus": job.last_run_status,
+            "lastRunAt": (
+                job.last_run_at.replace(tzinfo=timezone.utc)
+                .astimezone(schedule_timezone)
+                .strftime("%Y-%m-%d %I:%M %p %Z")
+                if job.last_run_at
+                else None
+            ),
         } for job in jobs]
 
 
@@ -1489,9 +1616,6 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                                 ScheduledLimit.login_session_id == login_session.id,
                             )
                         ):
-                            if job.status == "pending":
-                                job.status = "failed"
-                                job.error = "Login session ended before the scheduled change"
                             job.login_session_id = None
                         db.delete(login_session)
                         db.commit()
@@ -1527,8 +1651,53 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.send_json(502, {"error": str(error)})
 
 
+def migrate_schedule_columns():
+    existing = {
+        column["name"] for column in inspect(engine).get_columns("scheduled_limits")
+    }
+    additions = {
+        "recurrence_days": "VARCHAR(20) NULL",
+        "recurrence_time": "VARCHAR(5) NULL",
+        "last_run_status": "VARCHAR(20) NULL",
+        "last_run_at": "DATETIME NULL",
+    }
+    with engine.begin() as connection:
+        for column_name, column_type in additions.items():
+            if column_name not in existing:
+                connection.execute(
+                    text(
+                        f"ALTER TABLE scheduled_limits "
+                        f"ADD COLUMN {column_name} {column_type}"
+                    )
+                )
+
+
+def realign_recurring_schedules_to_et():
+    with database_session() as db:
+        schedules = list(
+            db.scalars(
+                select(ScheduledLimit).where(
+                    ScheduledLimit.recurrence_days.is_not(None),
+                    ScheduledLimit.recurrence_time.is_not(None),
+                    ScheduledLimit.status.in_(("pending", "running")),
+                )
+            )
+        )
+        now_et = datetime.now(schedule_timezone)
+        for schedule in schedules:
+            days = [int(day) for day in schedule.recurrence_days.split(",")]
+            next_run = next_recurring_run(days, schedule.recurrence_time, now_et)
+            schedule.scheduled_for = next_run.astimezone(timezone.utc).replace(
+                tzinfo=None
+            )
+            schedule.status = "pending"
+        db.commit()
+
+
 encryption_cipher()
 Base.metadata.create_all(bind=engine)
+migrate_schedule_columns()
+realign_recurring_schedules_to_et()
 print("Dashboard: http://127.0.0.1:8000")
 
 schedule_worker = threading.Thread(target=run_schedule_worker, daemon=True)
