@@ -408,6 +408,146 @@ def load_agents(force=False):
     return agents
 
 
+def search_agents(search_value):
+    search_value = str(search_value).strip()
+    if not search_value:
+        return load_agents()
+    if len(search_value) > 100:
+        raise ValueError("Agent search is too long")
+
+    auth = auth_context()
+    response = api_request(
+        "GET",
+        "https://aceshigh.ag/partner-api/partner/agent/search",
+        params={
+            "IdAgent": auth["id"],
+            "searchValue": search_value,
+            "AgentOnly": "true",
+            "MasterAgentOnly": "true",
+            "CustomersOnly": "true",
+            "SearchByAccountOnly": "false",
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    data = response.json()
+    if data.get("Errors"):
+        raise RuntimeError(", ".join(data["Errors"]))
+
+    payload = data.get("Payload") or []
+    if isinstance(payload, dict):
+        for key in ("Items", "Results", "Agents", "Data"):
+            if isinstance(payload.get(key), list):
+                payload = payload[key]
+                break
+        else:
+            payload = [payload]
+
+    results = []
+    seen = set()
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+
+        # The search response has used different property casing across Aces
+        # High versions, so read its display fields case-insensitively.
+        item_fields = {str(key).casefold(): value for key, value in item.items()}
+
+        def search_field(*keys):
+            return next(
+                (
+                    item_fields[key.casefold()]
+                    for key in keys
+                    if item_fields.get(key.casefold()) not in (None, "")
+                ),
+                None,
+            )
+
+        raw_id = next(
+            (
+                search_field(key)
+                for key in ("Id", "IdAgent", "AgentId", "IdAccount", "IdCustomer")
+                if search_field(key) is not None
+            ),
+            None,
+        )
+        try:
+            agent_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if agent_id in seen:
+            continue
+        seen.add(agent_id)
+        account = search_field(
+            "Account",
+            "AccountName",
+            "AccountCode",
+            "CustomerAccount",
+            "Login",
+            "Username",
+            "UserName",
+            "Customer",
+            "CustomerName",
+            "AgentName",
+            "Name",
+        )
+        if not account:
+            account = next(
+                (
+                    value
+                    for value in item.values()
+                    if isinstance(value, str)
+                    and search_value.casefold() in value.casefold()
+                ),
+                None,
+            )
+        password = search_field("Password", "Pwd", "CustomerPassword")
+        parent_agent = search_field(
+            "ParentAgent",
+            "MasterAgent",
+            "ParentAgentName",
+            "AgentUserName",
+            "CreatedBy",
+            "Parent",
+            "Agent",
+        )
+        if not account:
+            continue
+        display_name = str(account)
+        if password:
+            display_name += f" (PWD:{password})"
+        if parent_agent:
+            display_name += f" - {parent_agent}"
+
+        results.append({
+            "id": agent_id,
+            "name": display_name,
+            "account": account or display_name,
+            "password": password,
+            "parentAgent": parent_agent,
+            "parentId": search_field("ParentId"),
+            "depth": 0,
+            "count": next(
+                (
+                    search_field(key)
+                    for key in ("PlayerCount", "PlayersCount", "TotalPlayers", "Count")
+                    if search_field(key) is not None
+                ),
+                0,
+            ),
+            "hasChildren": bool(search_field("HasChildren") or False),
+        })
+
+    # Search results come from Aces High's authorized hierarchy. Add them to the
+    # per-session cache so the normal account validation remains the gatekeeper.
+    cached_agents = load_agents()
+    cached_ids = {agent["id"] for agent in cached_agents}
+    cached_agents.extend(
+        result for result in results if result["id"] not in cached_ids
+    )
+    return results
+
+
 def validate_account_id(account_id):
     if account_id not in {agent["id"] for agent in load_agents()}:
         raise ValueError("Selected agent is not available under this login")
@@ -1207,6 +1347,18 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     "preferences": user_preferences(auth),
                 },
             )
+            return
+
+        if path == "/api/agent-search":
+            try:
+                search_value = query.get("q", [""])[0]
+                self.send_json(200, {"agents": search_agents(search_value)})
+            except (TypeError, ValueError) as error:
+                self.send_json(400, {"error": str(error)})
+            except PermissionError as error:
+                self.send_json(401, {"error": str(error)})
+            except Exception as error:
+                self.send_json(502, {"error": str(error)})
             return
 
         if path == "/api/leagues":

@@ -75,7 +75,8 @@ h2 {
   gap: 10px;
 }
 
-.agent-selector span {
+.agent-selector span,
+.agent-search span {
   display: block;
   margin-bottom: 4px;
   color: #98a2b3;
@@ -83,6 +84,68 @@ h2 {
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.agent-search input {
+  width: 190px;
+  height: 42px;
+  padding: 0 12px;
+  border-color: rgba(255, 255, 255, 0.18);
+  font-weight: 700;
+}
+
+.agent-search {
+  position: relative;
+}
+
+.agent-search-results {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 290px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.agent-search-result,
+.agent-search-empty {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  font: inherit;
+}
+
+.agent-search-result {
+  cursor: pointer;
+}
+
+.agent-search-result:hover,
+.agent-search-result:focus {
+  background: var(--blue-soft);
+  outline: none;
+}
+
+.agent-search-result strong,
+.agent-search-result small {
+  display: block;
+}
+
+.agent-search-result small,
+.agent-search-empty {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .agent-selector select {

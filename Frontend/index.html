@@ -32,6 +32,11 @@
       <h1>League limit control</h1>
     </div>
     <div class="topbar-actions">
+      <label class="agent-search">
+        <span>Find agent</span>
+        <input id="agentSearch" type="search" placeholder="Search agents...." autocomplete="off">
+        <div id="agentSearchResults" class="agent-search-results" role="listbox" hidden></div>
+      </label>
       <label class="agent-selector">
         <span>Select agent</span>
         <select id="agentSelect" disabled>
@@ -148,6 +153,6 @@
     </div>
   </dialog>
 
-  <script src="/script.js?v=20260727-agent-selector" defer></script>
+  <script src="/script.js?v=20260730-agent-search" defer></script>
 </body>
 </html>

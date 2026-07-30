@@ -12,6 +12,8 @@ const state = {
 
 const pendingStorageKey = "aceshighPendingLimitEdits";
 let preferenceSaveTimer = null;
+let agentSearchTimer = null;
+let agentSearchRequest = 0;
 
 const elements = {
   loginView: document.querySelector("#loginView"),
@@ -24,6 +26,8 @@ const elements = {
   dashboardView: document.querySelector("#dashboardView"),
   logoutButton: document.querySelector("#logoutButton"),
   agentSelect: document.querySelector("#agentSelect"),
+  agentSearch: document.querySelector("#agentSearch"),
+  agentSearchResults: document.querySelector("#agentSearchResults"),
   accountName: document.querySelector("#accountName"),
   accountId: document.querySelector("#accountId"),
   rowCount: document.querySelector("#rowCount"),
@@ -431,6 +435,81 @@ async function loadAgents() {
   await loadLeagues();
 }
 
+function renderAgentSearchResults(agents) {
+  elements.agentSearchResults.replaceChildren();
+  if (!agents.length) {
+    const empty = document.createElement("div");
+    empty.className = "agent-search-empty";
+    empty.textContent = "No matching agents";
+    elements.agentSearchResults.append(empty);
+    elements.agentSearchResults.hidden = false;
+    return;
+  }
+
+  for (const agent of agents) {
+    const result = document.createElement("button");
+    result.type = "button";
+    result.className = "agent-search-result";
+    result.setAttribute("role", "option");
+    const name = document.createElement("strong");
+    name.textContent = agent.name;
+    result.append(name);
+    result.addEventListener("click", () => selectAgent(agent));
+    elements.agentSearchResults.append(result);
+  }
+  elements.agentSearchResults.hidden = false;
+}
+
+async function searchAgents() {
+  const searchValue = elements.agentSearch.value.trim();
+  const requestId = ++agentSearchRequest;
+  if (!searchValue) {
+    elements.agentSearchResults.hidden = true;
+    elements.agentSearchResults.replaceChildren();
+    return;
+  }
+
+  const response = await fetch(
+    `/api/agent-search?${new URLSearchParams({ q: searchValue })}`,
+    { cache: "no-store" }
+  );
+  const data = await response.json();
+  if (requestId !== agentSearchRequest) {
+    return;
+  }
+  if (!response.ok) {
+    throw new Error(data.error || "Could not search agents");
+  }
+  renderAgentSearchResults(data.agents || []);
+}
+
+async function selectAgent(agent) {
+  state.selectedAgentId = Number(agent.id);
+  if (!state.agents.some((item) => Number(item.id) === state.selectedAgentId)) {
+    state.agents.push(agent);
+    const option = document.createElement("option");
+    option.value = agent.id;
+    option.textContent = `${agent.name} (${agent.count ?? 0})`;
+    elements.agentSelect.append(option);
+  }
+  elements.agentSelect.value = String(state.selectedAgentId);
+  elements.agentSearch.value = agent.name;
+  elements.agentSearchResults.hidden = true;
+  savePreferences({ selectedAgentId: state.selectedAgentId }).catch(
+    (error) => showMessage(error.message, "error")
+  );
+  state.periodRows.clear();
+  state.expandedRows.clear();
+  state.activeChange = null;
+  elements.leagueRows.innerHTML =
+    '<tr><td colspan="7" class="empty-state">Loading leagues...</td></tr>';
+  try {
+    await loadLeagues();
+  } catch (error) {
+    showMessage(error.message, "error");
+  }
+}
+
 async function savePreferences(preferences) {
   const response = await fetch("/api/preferences", {
     method: "POST",
@@ -645,24 +724,24 @@ elements.searchInput.addEventListener("input", () => {
   applyFilters();
   queueFilterPreferences();
 });
+elements.agentSearch.addEventListener("input", () => {
+  clearTimeout(agentSearchTimer);
+  agentSearchTimer = setTimeout(() => {
+    searchAgents().catch((error) => {
+      showMessage(error.message, "error");
+    });
+  }, 300);
+});
 elements.rowTypeFilter.addEventListener("change", () => {
   applyFilters();
   queueFilterPreferences();
 });
 elements.agentSelect.addEventListener("change", async () => {
-  state.selectedAgentId = Number(elements.agentSelect.value);
-  savePreferences({ selectedAgentId: state.selectedAgentId }).catch(
-    (error) => showMessage(error.message, "error")
+  const agent = state.agents.find(
+    (item) => Number(item.id) === Number(elements.agentSelect.value)
   );
-  state.periodRows.clear();
-  state.expandedRows.clear();
-  state.activeChange = null;
-  elements.leagueRows.innerHTML =
-    '<tr><td colspan="7" class="empty-state">Loading leagues...</td></tr>';
-  try {
-    await loadLeagues();
-  } catch (error) {
-    showMessage(error.message, "error");
+  if (agent) {
+    await selectAgent(agent);
   }
 });
 elements.confirmSchedule.addEventListener("click", (event) => {
