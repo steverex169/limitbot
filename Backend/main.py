@@ -2,13 +2,16 @@ import csv
 from datetime import datetime, timedelta, timezone
 import base64
 import hashlib
+import ipaddress
 import json
+import logging
 import os
 from pathlib import Path
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import uuid
 import secrets
+import signal
 from zoneinfo import ZoneInfo
 from collections import defaultdict, deque
 from contextvars import ContextVar
@@ -27,6 +30,23 @@ app_directory = backend_directory.parent / "Frontend"
 login_lock = threading.Lock()
 data_lock = threading.Lock()
 schedule_timezone = ZoneInfo("America/New_York")
+app_environment = os.getenv("APP_ENV", "development").lower()
+server_host = os.getenv("HOST", "127.0.0.1")
+try:
+    server_port = int(os.getenv("PORT", "8000"))
+except ValueError as error:
+    raise RuntimeError("PORT must be a valid number") from error
+if server_port < 1 or server_port > 65535:
+    raise RuntimeError("PORT must be between 1 and 65535")
+trust_proxy_headers = os.getenv("TRUST_PROXY_HEADERS", "").lower() in {
+    "1", "true", "yes"
+}
+shutdown_event = threading.Event()
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+logger = logging.getLogger("aceshigh-dashboard")
 
 login_url = (
     "https://aceshigh.ag/"
@@ -81,6 +101,10 @@ def utc_now_naive():
 def encryption_cipher():
     key = os.getenv("LIMITBOT_ENCRYPTION_KEY", "").encode("ascii")
     if not key:
+        if os.getenv("APP_ENV", "").lower() == "production":
+            raise RuntimeError(
+                "LIMITBOT_ENCRYPTION_KEY is required in production"
+            )
         key_file = backend_directory / ".limitbot.key"
         try:
             key = key_file.read_bytes().strip()
@@ -1180,8 +1204,32 @@ def create_schedule(request_data):
     }
 
 
+def cancel_schedule(request_data):
+    auth = auth_context()
+    schedule_id = str(request_data.get("id", "")).strip()
+    if len(schedule_id) != 32:
+        raise ValueError("Invalid schedule")
+    with database_session() as db:
+        schedule = db.scalar(
+            select(ScheduledLimit).where(
+                ScheduledLimit.id == schedule_id,
+                ScheduledLimit.user_id == auth["userId"],
+            )
+        )
+        if schedule is None:
+            raise ValueError("Schedule not found")
+        if schedule.status == "running":
+            raise ValueError("This schedule is currently running")
+        if schedule.status not in {"pending", "failed"}:
+            raise ValueError("This schedule is no longer active")
+        schedule.status = "cancelled"
+        schedule.error = None
+        db.commit()
+    return {"message": "Recurring schedule cancelled", "id": schedule_id}
+
+
 def run_schedule_worker():
-    while True:
+    while not shutdown_event.is_set():
         with database_session() as db:
             due_jobs = list(
                 db.scalars(
@@ -1264,7 +1312,7 @@ def run_schedule_worker():
                         db.commit()
                 print(f"Scheduled limit failed: {job_id} - {error}")
 
-        threading.Event().wait(1)
+        shutdown_event.wait(1)
 
 
 def schedule_status_rows(account_id):
@@ -1314,6 +1362,9 @@ def schedule_status_rows(account_id):
 
 
 class DashboardHandler(SimpleHTTPRequestHandler):
+    server_version = "AcesHighDashboard"
+    sys_version = ""
+
     def __init__(self, *args, **kwargs):
         super().__init__(
             *args,
@@ -1375,11 +1426,32 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         host = self.headers.get("Host")
         return origin in {f"http://{host}", f"https://{host}"}
 
+    def client_ip(self):
+        if trust_proxy_headers:
+            forwarded_for = self.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip()
+            try:
+                return str(ipaddress.ip_address(forwarded_for))
+            except ValueError:
+                pass
+        return self.client_address[0]
+
     def is_https(self):
         return (
-            self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+            app_environment == "production"
+            or
+            (
+                trust_proxy_headers
+                and self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+            )
             or getattr(self.connection, "cipher", None) is not None
         )
+
+    def log_message(self, format_string, *args):
+        logger.info("%s %s", self.client_ip(), format_string % args)
+
+    def server_error(self, context, error, message):
+        logger.error("%s: %s", context, type(error).__name__, exc_info=True)
+        self.send_json(502, {"error": message})
 
     def session_cookie(self, session_id, delete=False):
         secure = "; Secure" if self.is_https() else ""
@@ -1390,7 +1462,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         )
 
     def login_rate_key(self, username):
-        return (self.client_address[0], username.casefold())
+        return (self.client_ip(), username.casefold())
 
     def login_rate_limited(self, key):
         cutoff = datetime.now(timezone.utc) - login_attempt_window
@@ -1450,6 +1522,16 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         path = self.request_path()
         query = parse_qs(urlsplit(self.path).query)
 
+        if path == "/api/health":
+            try:
+                with engine.connect() as connection:
+                    connection.execute(text("SELECT 1"))
+                self.send_json(200, {"status": "ok"})
+            except Exception as error:
+                logger.error("Health check failed: %s", type(error).__name__)
+                self.send_json(503, {"status": "unavailable"})
+            return
+
         if path == "/api/session":
             auth = self.require_auth()
             if auth:
@@ -1485,7 +1567,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             except PermissionError as error:
                 self.send_json(401, {"error": str(error)})
             except Exception as error:
-                self.send_json(502, {"error": str(error)})
+                self.server_error("Agent search failed", error, "Agent search is unavailable")
             return
 
         if path == "/api/leagues":
@@ -1502,7 +1584,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             except (KeyError, TypeError, ValueError) as error:
                 self.send_json(400, {"error": str(error)})
             except Exception as error:
-                self.send_json(502, {"error": str(error)})
+                self.server_error("League load failed", error, "League data is unavailable")
             return
 
         if path == "/api/schedules":
@@ -1531,7 +1613,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             except (KeyError, TypeError, ValueError) as error:
                 self.send_json(400, {"error": str(error)})
             except Exception as error:
-                self.send_json(502, {"error": str(error)})
+                self.server_error("Period load failed", error, "Period data is unavailable")
             return
 
         if path == "/":
@@ -1627,7 +1709,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             return
 
-        if path not in {"/api/limits", "/api/schedules", "/api/preferences"}:
+        if path not in {
+            "/api/limits",
+            "/api/schedules",
+            "/api/schedules/cancel",
+            "/api/preferences",
+        }:
             self.send_json(404, {"error": "Not found"})
             return
 
@@ -1636,7 +1723,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         try:
             request_data = self.read_json()
             result = (
-                create_schedule(request_data)
+                cancel_schedule(request_data)
+                if path == "/api/schedules/cancel"
+                else create_schedule(request_data)
                 if path == "/api/schedules"
                 else save_user_preferences(auth_context(), request_data)
                 if path == "/api/preferences"
@@ -1648,7 +1737,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         except PermissionError as error:
             self.send_json(401, {"error": str(error)})
         except Exception as error:
-            self.send_json(502, {"error": str(error)})
+            self.server_error("Authenticated operation failed", error, "Operation failed")
 
 
 def migrate_schedule_columns():
@@ -1698,15 +1787,23 @@ encryption_cipher()
 Base.metadata.create_all(bind=engine)
 migrate_schedule_columns()
 realign_recurring_schedules_to_et()
-print("Dashboard: http://127.0.0.1:8000")
+logger.info("Dashboard listening on http://%s:%s", server_host, server_port)
 
 schedule_worker = threading.Thread(target=run_schedule_worker, daemon=True)
 schedule_worker.start()
-server = ThreadingHTTPServer(("127.0.0.1", 8000), DashboardHandler)
+server = ThreadingHTTPServer((server_host, server_port), DashboardHandler)
+
+def stop_server(_signum, _frame):
+    raise KeyboardInterrupt
+
+
+signal.signal(signal.SIGTERM, stop_server)
 
 try:
     server.serve_forever()
 except KeyboardInterrupt:
     print("\nDashboard stopped")
 finally:
+    shutdown_event.set()
     server.server_close()
+    schedule_worker.join(timeout=5)

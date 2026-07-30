@@ -1,5 +1,5 @@
-cryptography
-PyMySQL
-requests
-SQLAlchemy
-tzdata
+cryptography==49.0.0
+PyMySQL==1.2.0
+requests==2.34.2
+SQLAlchemy==2.0.51
+tzdata==2026.3

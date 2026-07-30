@@ -117,6 +117,33 @@
         </table>
       </div>
     </section>
+
+    <section class="panel schedules-panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">AUTOMATION</p>
+          <h2>Recurring schedules</h2>
+          <p>Review upcoming ET limit changes or cancel an active schedule.</p>
+        </div>
+      </div>
+      <div class="table-wrap schedules-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>League</th>
+              <th>Limit</th>
+              <th>Repeats</th>
+              <th>Next run</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="scheduleRows">
+            <tr><td colspan="6" class="empty-state">No recurring schedules.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
   </main>
 
   <dialog id="confirmDialog">
@@ -163,6 +190,6 @@
     </div>
   </dialog>
 
-  <script src="/script.js?v=20260730-recurring-schedules" defer></script>
+  <script src="/script.js?v=20260730-production-ready" defer></script>
 </body>
 </html>

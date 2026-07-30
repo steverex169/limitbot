@@ -238,6 +238,30 @@ main {
   box-shadow: var(--shadow);
 }
 
+.schedules-panel {
+  margin-top: 20px;
+}
+
+.schedules-table-wrap {
+  max-height: 360px;
+}
+
+.schedule-cancel {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #fda29b;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--red);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.schedule-cancel:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
 .panel-head {
   display: flex;
   align-items: end;

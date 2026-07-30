@@ -1,0 +1,13 @@
+.git
+.gitignore
+.env
+**/.env
+**/.limitbot.key
+**/__pycache__
+**/*.pyc
+**/data
+**/editable_leagues*.csv
+**/*.log
+**/package-lock.json
+credentials.json
+scheduled_limits.json

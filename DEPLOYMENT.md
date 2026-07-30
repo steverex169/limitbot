@@ -1,0 +1,52 @@
+# Production deployment
+
+Deploy this application as one long-running container with a managed MySQL
+database. Do not run multiple application replicas: each replica starts a
+schedule worker, which could apply the same due limit more than once.
+
+## Required secrets
+
+Configure these in the hosting provider's secret manager, never in Git:
+
+- `LIMITBOT_ENCRYPTION_KEY`: a persistent Fernet key
+- `MYSQL_HOST`
+- `MYSQL_PORT`
+- `MYSQL_DATABASE`
+- `MYSQL_USER`
+- `MYSQL_PASSWORD`
+
+Generate the encryption key once and retain it for the lifetime of the
+database:
+
+```sh
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Losing or changing this key invalidates encrypted Aces High sessions already
+stored in the database.
+
+## Runtime settings
+
+- `APP_ENV=production`
+- `HOST=0.0.0.0`
+- `PORT`: supplied by the hosting provider
+- `TRUST_PROXY_HEADERS=true` only when traffic reaches the container through
+  the hosting provider's trusted HTTPS proxy
+- `LOG_LEVEL=INFO`
+
+The container health check uses `/api/health`. A healthy response confirms the
+application can connect to MySQL.
+
+## Release checklist
+
+1. Provision MySQL and enable automated backups.
+2. Add the required secrets through the provider's secret manager.
+3. Deploy exactly one application replica from the repository `Dockerfile`.
+4. Require HTTPS and verify the login cookie has the `Secure`, `HttpOnly`, and
+   `SameSite=Strict` attributes.
+5. Test login, agent search, limit loading, a manual change, recurring schedule
+   creation, cancellation, and restart recovery on a staging deployment.
+6. Promote the same tested image to production.
+
+Never upload local `.env`, `.limitbot.key`, CSV exports, logs, or database
+files. The repository and Docker ignore rules exclude them.

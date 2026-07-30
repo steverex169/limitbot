@@ -36,6 +36,7 @@ const elements = {
   searchInput: document.querySelector("#searchInput"),
   rowTypeFilter: document.querySelector("#rowTypeFilter"),
   leagueRows: document.querySelector("#leagueRows"),
+  scheduleRows: document.querySelector("#scheduleRows"),
   message: document.querySelector("#message"),
   dialog: document.querySelector("#confirmDialog"),
   confirmTitle: document.querySelector("#confirmTitle"),
@@ -379,6 +380,73 @@ function applyFilters() {
   renderRows();
 }
 
+function renderSchedules() {
+  elements.scheduleRows.replaceChildren();
+  const schedules = state.schedules.filter(
+    (schedule) => schedule.recurring && schedule.status !== "cancelled"
+  );
+  if (!schedules.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 6;
+    cell.className = "empty-state";
+    cell.textContent = "No recurring schedules.";
+    row.append(cell);
+    elements.scheduleRows.append(row);
+    return;
+  }
+
+  for (const schedule of schedules) {
+    const row = document.createElement("tr");
+    const league = state.rows.find(
+      (item) =>
+        Number(item.idLeague) === Number(schedule.idLeague) &&
+        Number(item.idOrganization) === Number(schedule.idOrganization)
+    );
+    row.append(
+      createTextCell(league?.leagueName || `League ${schedule.idLeague}`),
+      createTextCell(
+        `${fieldLabels[schedule.field] || schedule.field}: ${Number(schedule.value).toLocaleString()}`
+      ),
+      createTextCell(schedule.recurrence),
+      createTextCell(schedule.scheduledFor),
+      createTextCell(schedule.status)
+    );
+    const action = document.createElement("td");
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "schedule-cancel";
+    cancel.textContent = "Cancel";
+    cancel.disabled = schedule.status === "running";
+    cancel.addEventListener("click", async () => {
+      cancel.disabled = true;
+      try {
+        const response = await fetch("/api/schedules/cancel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: schedule.id }),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || "Could not cancel schedule");
+        }
+        state.schedules = state.schedules.filter(
+          (item) => item.id !== schedule.id
+        );
+        renderSchedules();
+        renderRows();
+        showMessage(data.message, "success");
+      } catch (error) {
+        cancel.disabled = false;
+        showMessage(error.message, "error");
+      }
+    });
+    action.append(cancel);
+    row.append(action);
+    elements.scheduleRows.append(row);
+  }
+}
+
 async function loadLeagues() {
   const accountId = state.selectedAgentId;
   if (!accountId) {
@@ -404,6 +472,7 @@ async function loadLeagues() {
   state.filteredRows = data.rows;
   restorePendingFromLocalStorage();
   applyFilters();
+  renderSchedules();
 }
 
 async function loadAgents() {
@@ -581,6 +650,7 @@ async function refreshScheduleStatuses() {
   state.schedules = data.schedules;
   restorePendingFromLocalStorage();
   applyFilters();
+  renderSchedules();
   if (finishedSchedule) {
     const allRows = [
       ...state.rows,

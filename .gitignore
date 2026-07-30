@@ -6,4 +6,11 @@ dashboard.stderr.log
 __pycache__/
 *.py[cod]
 .env
+.env.*
+!.env.example
 .limitbot.key
+*.pem
+*.key
+*.sqlite
+*.sqlite3
+package-lock.json
