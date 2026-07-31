@@ -577,11 +577,7 @@ def load_agents(force=False):
             "name": agent["name"],
             "parentId": agent["parentId"],
             "depth": depth,
-            "count": (
-                0
-                if agent_id == logged_in_agent_id
-                else player_count(agent_id)
-            ),
+            "count": player_count(agent_id),
             "hasChildren": bool(child_ids),
         })
         for child_id in child_ids:
