@@ -7,6 +7,7 @@ const state = {
   schedules: [],
   periodRows: new Map(),
   expandedRows: new Set(),
+  expandedAgentIds: new Set(),
   activeChange: null,
 };
 
@@ -25,7 +26,8 @@ const elements = {
   dashboardHeader: document.querySelector("#dashboardHeader"),
   dashboardView: document.querySelector("#dashboardView"),
   logoutButton: document.querySelector("#logoutButton"),
-  agentSelect: document.querySelector("#agentSelect"),
+  agentSelectButton: document.querySelector("#agentSelectButton"),
+  agentTree: document.querySelector("#agentTree"),
   agentSearch: document.querySelector("#agentSearch"),
   agentSearchResults: document.querySelector("#agentSearchResults"),
   accountName: document.querySelector("#accountName"),
@@ -486,8 +488,13 @@ async function loadAgents() {
   const preferences = data.preferences || {};
   elements.accountName.textContent = data.parentName;
   elements.accountId.textContent = `Account ${data.parentId}`;
-  elements.agentSelect.replaceChildren();
-  for (const agent of state.agents) {
+  state.expandedAgentIds = new Set(
+    state.agents
+      .filter((agent) => Number(agent.depth || 0) === 0)
+      .map((agent) => Number(agent.id))
+  );
+  if (elements.agentSelect) elements.agentSelect.replaceChildren();
+  for (const agent of []) {
     const option = document.createElement("option");
     option.value = agent.id;
     const hierarchyIndent = "\u00a0\u00a0\u00a0".repeat(agent.depth || 0);
@@ -508,9 +515,83 @@ async function loadAgents() {
     state.agents.find((agent) => Number(agent.id) === Number(data.parentId)) ||
     state.agents[0];
   state.selectedAgentId = Number(defaultAgent.id);
-  elements.agentSelect.value = String(defaultAgent.id);
-  elements.agentSelect.disabled = false;
+  updateAgentSelectorLabel(defaultAgent);
+  renderAgentTree();
+  elements.agentSelectButton.disabled = false;
   await loadLeagues();
+}
+
+function updateAgentSelectorLabel(agent) {
+  elements.agentSelectButton.textContent = `${agent.name} (${agent.count ?? 0})`;
+}
+
+function visibleAgentRows() {
+  const visible = [];
+  const ancestors = [];
+  for (const agent of state.agents) {
+    const depth = Number(agent.depth || 0);
+    ancestors.length = depth;
+    const isVisible =
+      depth === 0 ||
+      ancestors.every((ancestor) =>
+        state.expandedAgentIds.has(Number(ancestor.id))
+      );
+    if (isVisible) {
+      visible.push(agent);
+    }
+    ancestors[depth] = agent;
+  }
+  return visible;
+}
+
+function renderAgentTree() {
+  elements.agentTree.replaceChildren();
+  for (const agent of visibleAgentRows()) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "agent-tree-row";
+    row.setAttribute("role", "treeitem");
+    row.setAttribute(
+      "aria-selected",
+      String(Number(agent.id) === state.selectedAgentId)
+    );
+    row.style.setProperty("--agent-depth", Number(agent.depth || 0));
+
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "agent-tree-toggle";
+    toggle.textContent = agent.hasChildren
+      ? state.expandedAgentIds.has(Number(agent.id))
+        ? "▾"
+        : "▸"
+      : "";
+    toggle.disabled = !agent.hasChildren;
+    toggle.setAttribute(
+      "aria-label",
+      `${state.expandedAgentIds.has(Number(agent.id)) ? "Collapse" : "Expand"} ${agent.name}`
+    );
+
+    const name = document.createElement("span");
+    name.className = "agent-tree-name";
+    name.textContent = `${agent.name} (${agent.count ?? 0})`;
+
+    row.append(toggle, name);
+    toggle.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const agentId = Number(agent.id);
+      if (state.expandedAgentIds.has(agentId)) {
+        state.expandedAgentIds.delete(agentId);
+      } else {
+        state.expandedAgentIds.add(agentId);
+      }
+      renderAgentTree();
+    });
+    row.addEventListener("click", async () => {
+      await selectAgent(agent);
+    });
+    elements.agentTree.append(row);
+  }
 }
 
 function renderAgentSearchResults(agents) {
@@ -565,12 +646,10 @@ async function selectAgent(agent) {
   state.selectedAgentId = Number(agent.id);
   if (!state.agents.some((item) => Number(item.id) === state.selectedAgentId)) {
     state.agents.push(agent);
-    const option = document.createElement("option");
-    option.value = agent.id;
-    option.textContent = `${agent.name} (${agent.count ?? 0})`;
-    elements.agentSelect.append(option);
   }
-  elements.agentSelect.value = String(state.selectedAgentId);
+  updateAgentSelectorLabel(agent);
+  renderAgentTree();
+  elements.agentTree.hidden = true;
   elements.agentSearch.value = agent.name;
   elements.agentSearchResults.hidden = true;
   savePreferences({ selectedAgentId: state.selectedAgentId }).catch(
@@ -838,12 +917,21 @@ elements.rowTypeFilter.addEventListener("change", () => {
   applyFilters();
   queueFilterPreferences();
 });
-elements.agentSelect.addEventListener("change", async () => {
-  const agent = state.agents.find(
-    (item) => Number(item.id) === Number(elements.agentSelect.value)
-  );
-  if (agent) {
-    await selectAgent(agent);
+elements.agentSelectButton.addEventListener("click", () => {
+  elements.agentTree.hidden = !elements.agentTree.hidden;
+});
+document.addEventListener("click", (event) => {
+  if (
+    !elements.agentTree.hidden &&
+    !event.target.closest(".agent-selector")
+  ) {
+    elements.agentTree.hidden = true;
+  }
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    elements.agentTree.hidden = true;
+    elements.agentSearchResults.hidden = true;
   }
 });
 elements.confirmSchedule.addEventListener("click", (event) => {
@@ -913,6 +1001,7 @@ elements.logoutButton.addEventListener("click", async () => {
   await fetch("/api/logout", { method: "POST" });
   state.agents = [];
   state.selectedAgentId = null;
+  state.expandedAgentIds.clear();
   state.rows = [];
   clearPendingChanges();
   showLogin();

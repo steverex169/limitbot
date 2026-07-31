@@ -346,12 +346,104 @@ def load_agents(force=False):
         "name": auth["username"],
         "parentId": logged_in_agent_id,
         "directPlayers": 0,
+        "countHint": 0,
     }
     agents_by_id = {logged_in_agent_id: root}
     player_counts = {logged_in_agent_id: 0}
     discovery_order = [logged_in_agent_id]
     visited = {logged_in_agent_id}
     pending = [logged_in_agent_id]
+
+    def hierarchy_value(item, *keys):
+        fields = {str(key).casefold(): value for key, value in item.items()}
+        return next(
+            (
+                fields[key.casefold()]
+                for key in keys
+                if fields.get(key.casefold()) not in (None, "")
+            ),
+            None,
+        )
+
+    def hierarchy_count(item):
+        value = hierarchy_value(
+            item,
+            "PlayerCount",
+            "PlayersCount",
+            "TotalPlayers",
+            "CustomerCount",
+            "CustomersCount",
+            "TotalCustomers",
+            "AccountCount",
+            "AccountsCount",
+            "TotalAccounts",
+            "CountPlayers",
+            "CountCustomers",
+            "PlayerQty",
+            "CustomerQty",
+            "QtyPlayers",
+            "QtyCustomers",
+            "Count",
+        )
+        try:
+            return int(str(value).replace(",", ""))
+        except (TypeError, ValueError):
+            return None
+
+    def hierarchy_bool(item, *keys):
+        value = hierarchy_value(item, *keys)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        return str(value).strip().lower() in {"1", "true", "yes", "y"}
+
+    def hierarchy_parent_id(item, fallback_parent_id):
+        try:
+            return int(hierarchy_value(item, "ParentId", "IdParent") or fallback_parent_id)
+        except (TypeError, ValueError):
+            return fallback_parent_id
+
+    def hierarchy_agent_id(item):
+        value = hierarchy_value(item, "IdAgent", "AgentId", "Id")
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def hierarchy_is_customer(item):
+        if hierarchy_bool(item, "IsPlayer", "isPlayer", "IsCustomer", "isCustomer"):
+            return True
+        return hierarchy_value(
+            item,
+            "IdPlayer",
+            "PlayerId",
+            "IdCustomer",
+            "CustomerId",
+            "PlayerName",
+            "CustomerName",
+        ) is not None and hierarchy_value(item, "AgentName", "Agent") is None
+
+    def hierarchy_items(payload):
+        if isinstance(payload, list):
+            return payload
+        if not isinstance(payload, dict):
+            return []
+
+        items = []
+        for key in (
+            "Items",
+            "Children",
+            "Agents",
+            "SubAgents",
+            "Players",
+            "Customers",
+            "Accounts",
+        ):
+            value = hierarchy_value(payload, key)
+            if isinstance(value, list):
+                items.extend(value)
+        return items or [payload]
 
     # AccessHigh returns one expanded hierarchy node at a time. Walk every agent
     # node so accounts nested under intermediary agents are also available.
@@ -368,51 +460,44 @@ def load_agents(force=False):
         if data.get("Errors"):
             raise RuntimeError(", ".join(data["Errors"]))
 
-        payload = data.get("Payload") or []
-        if isinstance(payload, dict):
-            payload = payload.get("Items") or payload.get("Children") or [payload]
+        payload = hierarchy_items(data.get("Payload") or [])
         contains_full_tree = (
             any(
-                item.get("ParentId") not in (None, parent_id)
+                hierarchy_value(item, "ParentId", "IdParent") not in (None, parent_id)
                 for item in payload
                 if isinstance(item, dict)
             )
         )
 
         for item in payload:
-            if item.get("Id") is None:
+            if not isinstance(item, dict):
                 continue
             # A single-node expansion belongs directly beneath the node that
             # was expanded. ParentId is only authoritative when AccessHigh
             # returns an already-flattened complete tree.
             item_parent_id = (
-                int(item.get("ParentId") or parent_id)
+                hierarchy_parent_id(item, parent_id)
                 if contains_full_tree
                 else parent_id
             )
-            if item.get("IsPlayer", False):
+            if hierarchy_is_customer(item):
                 player_counts[item_parent_id] = player_counts.get(item_parent_id, 0) + 1
                 continue
-            agent_id = int(item["Id"])
+            agent_id = hierarchy_agent_id(item)
+            if agent_id is None:
+                continue
             if agent_id in visited:
                 continue
             visited.add(agent_id)
-            count_hint = None
-            for key in ("PlayerCount", "PlayersCount", "TotalPlayers", "Count"):
-                try:
-                    count_hint = int(item[key])
-                    break
-                except (KeyError, TypeError, ValueError):
-                    pass
             agents_by_id[agent_id] = {
                 "id": agent_id,
                 "name": item.get("AgentName") or f"Agent {agent_id}",
                 "parentId": item_parent_id,
                 "directPlayers": 0,
-                "countHint": count_hint,
+                "countHint": hierarchy_count(item),
             }
             discovery_order.append(agent_id)
-            if not contains_full_tree and len(visited) < 500:
+            if len(visited) < 500:
                 pending.append(agent_id)
 
     for agent_id, count in player_counts.items():
@@ -426,7 +511,57 @@ def load_agents(force=False):
     for child_ids in children.values():
         child_ids.sort(key=lambda agent_id: agents_by_id[agent_id]["name"].casefold())
 
+    player_report_counts = {}
+    try:
+        response = api_request(
+            "GET",
+            "https://aceshigh.ag/partner-api/partner/agent/reports/"
+            f"management/playercount?IdAgent={logged_in_agent_id}",
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
+        payload = (
+            data.get("Payload")
+            if isinstance(data, dict) and "Payload" in data
+            else data.get("Result")
+            if isinstance(data, dict) and "Result" in data
+            else data.get("result")
+            if isinstance(data, dict) and "result" in data
+            else data
+        )
+        if isinstance(payload, dict) and isinstance(payload.get("Content"), list):
+            report_rows = payload["Content"]
+        elif isinstance(payload, list):
+            report_rows = payload
+        else:
+            report_rows = []
+
+        for row in report_rows:
+            if not isinstance(row, dict):
+                continue
+            row_id = hierarchy_value(row, "AccountId", "IdAgent", "IdCustomer", "Id")
+            row_count = hierarchy_value(
+                row,
+                "LastWeekTotal",
+                "TotalPlayers",
+                "PlayersThisWeek",
+                "This_Week",
+                "CustomerCount",
+                "Count",
+            )
+            try:
+                row_id = int(row_id)
+                row_count = int(str(row_count).replace(",", ""))
+            except (TypeError, ValueError):
+                continue
+            player_report_counts[row_id] = row_count
+    except Exception:
+        player_report_counts = {}
+
     def player_count(agent_id):
+        if agent_id in player_report_counts:
+            return player_report_counts[agent_id]
         agent = agents_by_id[agent_id]
         child_total = sum(player_count(child_id) for child_id in children[agent_id])
         calculated = agent["directPlayers"] + child_total
@@ -442,7 +577,11 @@ def load_agents(force=False):
             "name": agent["name"],
             "parentId": agent["parentId"],
             "depth": depth,
-            "count": player_count(agent_id),
+            "count": (
+                0
+                if agent_id == logged_in_agent_id
+                else player_count(agent_id)
+            ),
             "hasChildren": bool(child_ids),
         })
         for child_id in child_ids:
@@ -1361,6 +1500,7 @@ def schedule_status_rows(account_id):
         } for job in jobs]
 
 
+
 class DashboardHandler(SimpleHTTPRequestHandler):
     server_version = "AcesHighDashboard"
     sys_version = ""
@@ -1503,7 +1643,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+            "default-src 'self'; img-src 'self' data:; base-uri 'none'; "
+            "form-action 'self'; frame-ancestors 'none'",
         )
         if self.is_https():
             self.send_header(
