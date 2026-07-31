@@ -644,13 +644,17 @@ async function searchAgents() {
 
 async function selectAgent(agent) {
   state.selectedAgentId = Number(agent.id);
-  if (!state.agents.some((item) => Number(item.id) === state.selectedAgentId)) {
+  const knownAgent = state.agents.find(
+    (item) => Number(item.id) === state.selectedAgentId
+  );
+  const selectedAgent = knownAgent || agent;
+  if (!knownAgent) {
     state.agents.push(agent);
   }
-  updateAgentSelectorLabel(agent);
+  updateAgentSelectorLabel(selectedAgent);
   renderAgentTree();
   elements.agentTree.hidden = true;
-  elements.agentSearch.value = agent.name;
+  elements.agentSearch.value = selectedAgent.name;
   elements.agentSearchResults.hidden = true;
   savePreferences({ selectedAgentId: state.selectedAgentId }).catch(
     (error) => showMessage(error.message, "error")
