@@ -47,6 +47,9 @@ const elements = {
   newValue: document.querySelector("#newValue"),
   scheduleTime: document.querySelector("#scheduleTime"),
   scheduleDays: [...document.querySelectorAll('input[name="scheduleDay"]')],
+  earlyLimit: document.querySelector("#earlyLimit"),
+  earlyRepeatWeekly: document.querySelector("#earlyRepeatWeekly"),
+  earlyRepeatWrap: document.querySelector("#earlyRepeatWrap"),
   confirmSchedule: document.querySelector("#confirmSchedule"),
   confirmSave: document.querySelector("#confirmSave"),
   scheduleStatusDialog: document.querySelector("#scheduleStatusDialog"),
@@ -254,6 +257,9 @@ function openConfirmation(row) {
   elements.scheduleDays.forEach((input) => {
     input.checked = false;
   });
+  elements.earlyLimit.checked = false;
+  elements.earlyRepeatWeekly.checked = false;
+  elements.earlyRepeatWrap.hidden = true;
   elements.dialog.showModal();
 }
 
@@ -408,7 +414,7 @@ function renderSchedules() {
     row.append(
       createTextCell(league?.leagueName || `League ${schedule.idLeague}`),
       createTextCell(
-        `${fieldLabels[schedule.field] || schedule.field}: ${Number(schedule.value).toLocaleString()}`
+        `${schedule.earlyLimit ? "Early limit · " : ""}${fieldLabels[schedule.field] || schedule.field}: ${Number(schedule.value).toLocaleString()}`
       ),
       createTextCell(schedule.recurrence),
       createTextCell(schedule.scheduledFor),
@@ -847,16 +853,27 @@ async function scheduleActiveChange() {
   if (!change) {
     return;
   }
+  const recurrenceDays = elements.scheduleDays
+    .filter((input) => input.checked)
+    .map((input) => Number(input.value));
   if (!elements.scheduleTime.value) {
     showMessage("Select an Eastern time first.", "error");
     return;
   }
-  const recurrenceDays = elements.scheduleDays
-    .filter((input) => input.checked)
-    .map((input) => Number(input.value));
   if (!recurrenceDays.length) {
     showMessage("Select at least one weekday.", "error");
     return;
+  }
+  const earlyLimit = elements.earlyLimit.checked;
+  const repeatWeekly = !earlyLimit || elements.earlyRepeatWeekly.checked;
+  if (earlyLimit) {
+    const [hour = 0, minute = 0] = elements.scheduleTime.value
+      .split(":")
+      .map((part) => Number(part));
+    if (hour < 8 || hour > 11 || (hour === 11 && minute > 0)) {
+      showMessage("Early limit time must be between 8:00 AM and 11:00 AM ET.", "error");
+      return;
+    }
   }
 
   elements.confirmSchedule.disabled = true;
@@ -876,6 +893,8 @@ async function scheduleActiveChange() {
         value: change.newValue,
         recurrenceDays,
         recurrenceTime: elements.scheduleTime.value,
+        earlyLimit,
+        repeatWeekly,
       }),
     });
     const data = await response.json();
@@ -941,6 +960,12 @@ document.addEventListener("keydown", (event) => {
 elements.confirmSchedule.addEventListener("click", (event) => {
   event.preventDefault();
   scheduleActiveChange();
+});
+elements.earlyLimit.addEventListener("change", () => {
+  elements.earlyRepeatWrap.hidden = !elements.earlyLimit.checked;
+  if (!elements.earlyLimit.checked) {
+    elements.earlyRepeatWeekly.checked = false;
+  }
 });
 elements.confirmSave.addEventListener("click", (event) => {
   event.preventDefault();

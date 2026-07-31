@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -65,6 +65,7 @@ class ScheduledLimit(Base):
     scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     recurrence_days: Mapped[str | None] = mapped_column(String(20), nullable=True)
     recurrence_time: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    is_early_limit: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_run_status: Mapped[str | None] = mapped_column(String(20), nullable=True)

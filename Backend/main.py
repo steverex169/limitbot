@@ -1272,6 +1272,14 @@ def recurring_description(recurrence_days, recurrence_time):
     return f"Every {day_text} at {display_time} ET"
 
 
+def early_limit_time_valid(recurrence_time):
+    try:
+        hour, minute = (int(part) for part in recurrence_time.split(":", 1))
+    except (TypeError, ValueError):
+        return False
+    return (hour, minute) >= (8, 0) and (hour, minute) <= (11, 0)
+
+
 def create_schedule(request_data):
     auth = auth_context()
     try:
@@ -1281,8 +1289,10 @@ def create_schedule(request_data):
         sport_type_id = int(request_data["idSportType"])
         period_number = int(request_data.get("periodNumber", 0) or 0)
         value = int(request_data["value"])
-        recurrence_days = sorted({int(day) for day in request_data["recurrenceDays"]})
-        recurrence_time = str(request_data["recurrenceTime"])
+        is_early_limit = bool(request_data.get("earlyLimit"))
+        repeat_weekly = bool(request_data.get("repeatWeekly", True))
+        recurrence_days = sorted({int(day) for day in request_data.get("recurrenceDays", [])})
+        recurrence_time = str(request_data.get("recurrenceTime", ""))
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError("Enter a valid limit, weekdays, and Eastern time") from error
 
@@ -1305,8 +1315,19 @@ def create_schedule(request_data):
         raise ValueError("This league uses only the Spread limit")
     if value < 0 or value > 1_000_000_000:
         raise ValueError("Limit must be between 0 and 1,000,000,000")
-
+    if not recurrence_days:
+        raise ValueError("Select at least one weekday")
+    if not recurrence_time:
+        raise ValueError("Select an Eastern time")
+    if is_early_limit and not early_limit_time_valid(recurrence_time):
+        raise ValueError("Early limit time must be between 8:00 AM and 11:00 AM ET")
     scheduled_for = next_recurring_run(recurrence_days, recurrence_time)
+    stored_recurrence_days = (
+        ",".join(str(day) for day in recurrence_days)
+        if (not is_early_limit or repeat_weekly)
+        else None
+    )
+    stored_recurrence_time = recurrence_time if stored_recurrence_days else None
 
     job_id = uuid.uuid4().hex
     scheduled_utc = scheduled_for.astimezone(timezone.utc).replace(tzinfo=None)
@@ -1324,8 +1345,9 @@ def create_schedule(request_data):
                 field=request_data["field"],
                 value=value,
                 scheduled_for=scheduled_utc,
-                recurrence_days=",".join(str(day) for day in recurrence_days),
-                recurrence_time=recurrence_time,
+                recurrence_days=stored_recurrence_days,
+                recurrence_time=stored_recurrence_time,
+                is_early_limit=is_early_limit,
                 status="pending",
             )
         )
@@ -1333,9 +1355,14 @@ def create_schedule(request_data):
 
     return {
         "id": job_id,
-        "message": "Limit change scheduled",
+        "message": "Early limit scheduled" if is_early_limit else "Limit change scheduled",
         "scheduledFor": scheduled_for.strftime("%Y-%m-%d %I:%M %p %Z"),
-        "recurrence": recurring_description(recurrence_days, recurrence_time),
+        "recurrence": (
+            recurring_description(recurrence_days, recurrence_time)
+            if stored_recurrence_days
+            else "Runs once as an early limit"
+        ),
+        "earlyLimit": is_early_limit,
     }
 
 
@@ -1476,6 +1503,7 @@ def schedule_status_rows(account_id):
             "periodNumber": job.period_number,
             "field": job.field,
             "value": job.value,
+            "earlyLimit": bool(job.is_early_limit),
             "recurring": bool(job.recurrence_days and job.recurrence_time),
             "recurrence": (
                 recurring_description(
@@ -1884,6 +1912,7 @@ def migrate_schedule_columns():
     additions = {
         "recurrence_days": "VARCHAR(20) NULL",
         "recurrence_time": "VARCHAR(5) NULL",
+        "is_early_limit": "BOOLEAN NOT NULL DEFAULT FALSE",
         "last_run_status": "VARCHAR(20) NULL",
         "last_run_at": "DATETIME NULL",
     }

@@ -770,6 +770,27 @@ dialog h2 {
   padding: 0 12px;
 }
 
+.schedule-option {
+  align-items: center;
+  color: #344054;
+  display: flex;
+  font-size: 13px;
+  font-weight: 700;
+  gap: 8px;
+  margin: -6px 0 14px;
+}
+
+.schedule-option input {
+  accent-color: var(--blue);
+  height: 16px;
+  width: 16px;
+}
+
+.schedule-option-nested {
+  margin-left: 24px;
+  margin-top: -8px;
+}
+
 .schedule-days {
   display: flex;
   flex-wrap: wrap;

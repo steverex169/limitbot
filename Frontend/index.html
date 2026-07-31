@@ -171,6 +171,14 @@
         <span>Time (U.S. Eastern / ET)</span>
         <input id="scheduleTime" type="time">
       </label>
+      <label class="schedule-option">
+        <input id="earlyLimit" type="checkbox">
+        <span>Early limit (8:00 AM - 11:00 AM ET only)</span>
+      </label>
+      <label class="schedule-option schedule-option-nested" id="earlyRepeatWrap" hidden>
+        <input id="earlyRepeatWeekly" type="checkbox">
+        <span>Repeat early limit weekly on selected days</span>
+      </label>
       <div class="dialog-actions">
         <button value="cancel" class="button secondary">Cancel</button>
         <button id="confirmSchedule" value="default" class="button secondary">Schedule</button>
