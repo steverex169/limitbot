@@ -685,9 +685,6 @@ async function selectAgent(agent) {
     (item) => Number(item.id) === state.selectedAgentId
   );
   const selectedAgent = knownAgent || agent;
-  if (!knownAgent) {
-    state.agents.push(agent);
-  }
   updateAgentSelectorLabel(selectedAgent);
   renderAgentTree();
   elements.agentTree.hidden = true;
