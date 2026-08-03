@@ -12,6 +12,7 @@ const state = {
 };
 
 const pendingStorageKey = "aceshighPendingLimitEdits";
+const themeStorageKey = "aceshighTheme";
 let preferenceSaveTimer = null;
 let agentSearchTimer = null;
 let agentSearchRequest = 0;
@@ -26,6 +27,7 @@ const elements = {
   dashboardHeader: document.querySelector("#dashboardHeader"),
   dashboardView: document.querySelector("#dashboardView"),
   logoutButton: document.querySelector("#logoutButton"),
+  themeToggle: document.querySelector("#themeToggle"),
   agentSelectButton: document.querySelector("#agentSelectButton"),
   agentTree: document.querySelector("#agentTree"),
   agentSearch: document.querySelector("#agentSearch"),
@@ -128,6 +130,32 @@ function restorePendingFromLocalStorage() {
 function clearPendingChanges() {
   state.pending.clear();
   localStorage.removeItem(pendingStorageKey);
+}
+
+function getPreferredTheme() {
+  const storedTheme = localStorage.getItem(themeStorageKey);
+  if (storedTheme === "light" || storedTheme === "dark") {
+    return storedTheme;
+  }
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function applyTheme(theme) {
+  const nextTheme = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = nextTheme;
+  document.documentElement.style.colorScheme = nextTheme;
+  if (elements.themeToggle) {
+    elements.themeToggle.setAttribute("aria-pressed", String(nextTheme === "dark"));
+    elements.themeToggle.dataset.theme = nextTheme;
+    elements.themeToggle.title = nextTheme === "dark" ? "Switch to light theme" : "Switch to dark theme";
+  }
+}
+
+function toggleTheme() {
+  const currentTheme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+  const nextTheme = currentTheme === "dark" ? "light" : "dark";
+  localStorage.setItem(themeStorageKey, nextTheme);
+  applyTheme(nextTheme);
 }
 
 function showMessage(text, type = "") {
@@ -974,12 +1002,16 @@ elements.confirmSave.addEventListener("click", (event) => {
 elements.closeScheduleStatus.addEventListener("click", () => {
   elements.scheduleStatusDialog.close();
 });
+elements.themeToggle?.addEventListener("click", toggleTheme);
 elements.scheduleStatusDialog.addEventListener("click", (event) => {
   if (event.target === elements.scheduleStatusDialog) {
     elements.scheduleStatusDialog.close();
   }
 });
+
+applyTheme(getPreferredTheme());
 function showLogin() {
+  document.body.classList.remove("app-loading");
   elements.loginView.hidden = false;
   elements.dashboardHeader.hidden = true;
   elements.dashboardView.hidden = true;
@@ -987,6 +1019,7 @@ function showLogin() {
 }
 
 async function startDashboard() {
+  document.body.classList.remove("app-loading");
   elements.loginView.hidden = true;
   elements.dashboardHeader.hidden = false;
   elements.dashboardView.hidden = false;

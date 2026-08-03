@@ -1539,9 +1539,15 @@ class DashboardHandler(SimpleHTTPRequestHandler):
     def request_path(self):
         return urlsplit(self.path).path
 
+    def request_header(self, name, default=""):
+        headers = getattr(self, "headers", None)
+        if headers is None:
+            return default
+        return headers.get(name, default)
+
     def session_id(self):
         cookies = {}
-        for part in self.headers.get("Cookie", "").split(";"):
+        for part in self.request_header("Cookie").split(";"):
             if "=" in part:
                 key, value = part.strip().split("=", 1)
                 cookies[key] = value
@@ -1586,18 +1592,19 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         return auth
 
     def valid_origin(self):
-        origin = self.headers.get("Origin")
-        host = self.headers.get("Host")
+        origin = self.request_header("Origin")
+        host = self.request_header("Host")
         return origin in {f"http://{host}", f"https://{host}"}
 
     def client_ip(self):
+        client_address = getattr(self, "client_address", ("unknown",))
         if trust_proxy_headers:
-            forwarded_for = self.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip()
+            forwarded_for = self.request_header("X-Forwarded-For").split(",", 1)[0].strip()
             try:
                 return str(ipaddress.ip_address(forwarded_for))
             except ValueError:
                 pass
-        return self.client_address[0]
+        return client_address[0]
 
     def is_https(self):
         return (
@@ -1605,13 +1612,16 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             or
             (
                 trust_proxy_headers
-                and self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+                and self.request_header("X-Forwarded-Proto").lower() == "https"
             )
             or getattr(self.connection, "cipher", None) is not None
         )
 
     def log_message(self, format_string, *args):
-        logger.info("%s %s", self.client_ip(), format_string % args)
+        try:
+            logger.info("%s %s", self.client_ip(), format_string % args)
+        except Exception:
+            logger.info("unknown %s", format_string % args)
 
     def server_error(self, context, error, message):
         logger.error("%s: %s", context, type(error).__name__, exc_info=True)
@@ -1781,8 +1791,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self.server_error("Period load failed", error, "Period data is unavailable")
             return
 
-        if path == "/":
-            self.redirect("/index.html")
+        if path in {"/", "/index.html"}:
+            self.path = "/index.html"
+            super().do_GET()
             return
 
         super().do_GET()

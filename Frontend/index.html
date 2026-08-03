@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Aces High Limit Control</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/styles.css?v=20260731-scroll-hierarchy">
+  <link rel="stylesheet" href="/styles.css?v=20260803-theme-toggle">
 </head>
-<body>
+<body class="app-loading">
   <main id="loginView" class="login-view">
     <form id="loginForm" class="login-card">
       <p class="eyebrow">ACES HIGH LIMIT CONTROL</p>
@@ -27,9 +27,15 @@
   </main>
 
   <header id="dashboardHeader" class="topbar" hidden>
-    <div>
+    <div class="topbar-title">
       <p class="eyebrow">AUTHORIZED TESTING DASHBOARD</p>
-      <h1>League limit control</h1>
+      <div class="title-row">
+        <h1>League limit control</h1>
+        <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch theme" aria-pressed="false">
+          <span class="theme-toggle-icon theme-toggle-sun" aria-hidden="true">☀</span>
+          <span class="theme-toggle-icon theme-toggle-moon" aria-hidden="true">☾</span>
+        </button>
+      </div>
     </div>
     <div class="topbar-actions">
       <label class="agent-search">
@@ -199,6 +205,6 @@
     </div>
   </dialog>
 
-  <script src="/script.js?v=20260731-scroll-hierarchy" defer></script>
+  <script src="/script.js?v=20260803-theme-toggle" defer></script>
 </body>
 </html>
