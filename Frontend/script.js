@@ -630,13 +630,18 @@ function renderAgentTree() {
 
 function renderAgentSearchResults(agents) {
   elements.agentSearchResults.replaceChildren();
+  const knownAgentIds = new Set(state.agents.map((agent) => Number(agent.id)));
   const visibleAgents = agents.filter(
-    (agent) => Number(agent.id) !== state.selectedAgentId
+    (agent) =>
+      Number(agent.id) !== state.selectedAgentId &&
+      knownAgentIds.has(Number(agent.id))
   );
   if (!visibleAgents.length) {
     const empty = document.createElement("div");
     empty.className = "agent-search-empty";
-    empty.textContent = agents.length ? "Selected agent hidden" : "No matching agents";
+    empty.textContent = agents.length
+      ? "No editable agents match"
+      : "No matching agents";
     elements.agentSearchResults.append(empty);
     elements.agentSearchResults.hidden = false;
     return;
@@ -680,10 +685,15 @@ async function searchAgents() {
 }
 
 async function selectAgent(agent) {
-  state.selectedAgentId = Number(agent.id);
   const knownAgent = state.agents.find(
-    (item) => Number(item.id) === state.selectedAgentId
+    (item) => Number(item.id) === Number(agent.id)
   );
+  if (!knownAgent) {
+    showMessage("Selected agent is not available under this login.", "error");
+    elements.agentSearchResults.hidden = true;
+    return;
+  }
+  state.selectedAgentId = Number(knownAgent.id);
   const selectedAgent = knownAgent || agent;
   updateAgentSelectorLabel(selectedAgent);
   renderAgentTree();
