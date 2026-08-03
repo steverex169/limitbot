@@ -630,16 +630,19 @@ function renderAgentTree() {
 
 function renderAgentSearchResults(agents) {
   elements.agentSearchResults.replaceChildren();
-  if (!agents.length) {
+  const visibleAgents = agents.filter(
+    (agent) => Number(agent.id) !== state.selectedAgentId
+  );
+  if (!visibleAgents.length) {
     const empty = document.createElement("div");
     empty.className = "agent-search-empty";
-    empty.textContent = "No matching agents";
+    empty.textContent = agents.length ? "Selected agent hidden" : "No matching agents";
     elements.agentSearchResults.append(empty);
     elements.agentSearchResults.hidden = false;
     return;
   }
 
-  for (const agent of agents) {
+  for (const agent of visibleAgents) {
     const result = document.createElement("button");
     result.type = "button";
     result.className = "agent-search-result";
