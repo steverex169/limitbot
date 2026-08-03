@@ -737,13 +737,6 @@ def search_agents(search_value):
             "hasChildren": bool(search_field("HasChildren") or False),
         })
 
-    # Search results come from Aces High's authorized hierarchy. Add them to the
-    # per-session cache so the normal account validation remains the gatekeeper.
-    cached_agents = load_agents()
-    cached_ids = {agent["id"] for agent in cached_agents}
-    cached_agents.extend(
-        result for result in results if result["id"] not in cached_ids
-    )
     return results
 
 
