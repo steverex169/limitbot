@@ -630,18 +630,13 @@ function renderAgentTree() {
 
 function renderAgentSearchResults(agents) {
   elements.agentSearchResults.replaceChildren();
-  const knownAgentIds = new Set(state.agents.map((agent) => Number(agent.id)));
   const visibleAgents = agents.filter(
-    (agent) =>
-      Number(agent.id) !== state.selectedAgentId &&
-      knownAgentIds.has(Number(agent.id))
+    (agent) => Number(agent.id) !== state.selectedAgentId
   );
   if (!visibleAgents.length) {
     const empty = document.createElement("div");
     empty.className = "agent-search-empty";
-    empty.textContent = agents.length
-      ? "No editable agents match"
-      : "No matching agents";
+    empty.textContent = agents.length ? "Selected agent hidden" : "No matching agents";
     elements.agentSearchResults.append(empty);
     elements.agentSearchResults.hidden = false;
     return;
