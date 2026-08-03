@@ -1720,7 +1720,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 {
                     "parentId": auth["id"],
                     "parentName": auth["username"],
-                    "agents": load_agents(),
+                    "agents": load_agents(force=True),
                     "preferences": user_preferences(auth),
                 },
             )
