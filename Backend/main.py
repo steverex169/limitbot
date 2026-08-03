@@ -1792,7 +1792,11 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self.server_error("Period load failed", error, "Period data is unavailable")
             return
 
-        if path in {"/", "/index.html"}:
+        if path == "/index.html":
+            self.redirect("/")
+            return
+
+        if path == "/":
             self.path = "/index.html"
             super().do_GET()
             return
