@@ -737,11 +737,19 @@ def search_agents(search_value):
             "hasChildren": bool(search_field("HasChildren") or False),
         })
 
+    auth = auth_context()
+    auth["searchableAgentIds"] = {result["id"] for result in results}
+
     return results
 
 
 def validate_account_id(account_id):
-    if account_id not in {agent["id"] for agent in load_agents()}:
+    valid_ids = {agent["id"] for agent in load_agents()}
+    if account_id in valid_ids:
+        return account_id
+    if account_id in auth_context().get("searchableAgentIds", set()):
+        return account_id
+    if account_id not in valid_ids:
         raise ValueError("Selected agent is not available under this login")
     return account_id
 

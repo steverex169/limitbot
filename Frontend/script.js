@@ -683,12 +683,7 @@ async function selectAgent(agent) {
   const knownAgent = state.agents.find(
     (item) => Number(item.id) === Number(agent.id)
   );
-  if (!knownAgent) {
-    showMessage("Selected agent is not available under this login.", "error");
-    elements.agentSearchResults.hidden = true;
-    return;
-  }
-  state.selectedAgentId = Number(knownAgent.id);
+  state.selectedAgentId = Number(agent.id);
   const selectedAgent = knownAgent || agent;
   updateAgentSelectorLabel(selectedAgent);
   renderAgentTree();
