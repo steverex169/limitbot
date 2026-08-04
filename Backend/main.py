@@ -647,7 +647,7 @@ def search_agents(search_value):
         raw_id = next(
             (
                 search_field(key)
-                for key in ("Id", "IdAgent", "AgentId", "IdAccount", "IdCustomer")
+                for key in ("IdCustomer", "CustomerId", "IdPlayer", "PlayerId", "IdAccount", "AccountId", "IdAgent", "AgentId", "Id")
                 if search_field(key) is not None
             ),
             None,
@@ -812,7 +812,7 @@ def account_name(account_id):
 def organization_url(account_id):
     return (
         "https://aceshigh.ag/partner-api/partner/"
-        f"Backbone/GetOrganizationAll/{account_id}/false/S"
+        f"Backbone/GetOrganizationAll/{account_id}/true/S"
     )
 
 league_rows = []
@@ -938,37 +938,70 @@ def refresh_leagues(account_id):
     if data.get("Errors"):
         raise RuntimeError(", ".join(data["Errors"]))
 
-    league_rows.clear()
-    collect_leagues(data.get("Payload", {}))
+    # league_rows is shared globally, so protect the complete parsing process
+    # from simultaneous requests for different accounts.
+    with data_lock:
+        league_rows.clear()
+        collect_leagues(data.get("Payload", {}))
 
-    refreshed_rows = []
-    seen_leagues = set()
-    for row in league_rows:
-        key = (
-            row["JsonPath"],
-            row["IdLeague"],
-            row["IdOrganization"],
-            row["IdSportType"],
-        )
-        if key not in seen_leagues:
+        refreshed_rows = []
+        seen_leagues = set()
+        for row in league_rows:
+            key = (
+                row["JsonPath"],
+                row["IdLeague"],
+                row["IdOrganization"],
+                row["IdSportType"],
+            )
+            if key in seen_leagues:
+                continue
+
             seen_leagues.add(key)
             refreshed_rows.append(row)
 
-    unique_leagues = refreshed_rows
-    league_cache[account_id] = refreshed_rows
-    write_league_csv(unique_leagues, account_id)
-    return unique_leagues
+        # Store an independent copy for this account so another account refresh
+        # cannot overwrite or mutate the values returned for this account.
+        refreshed_rows = list(refreshed_rows)
+        league_cache[account_id] = refreshed_rows
+
+        # League refreshes can change the underlying period values. Remove only
+        # this account's cached periods so the next period request is fresh.
+        stale_period_keys = [
+            cache_key
+            for cache_key in period_cache
+            if cache_key[0] == account_id
+        ]
+        for cache_key in stale_period_keys:
+            period_cache.pop(cache_key, None)
+
+        unique_leagues = refreshed_rows
+        write_league_csv(refreshed_rows, account_id)
+
+        return list(refreshed_rows)
 
 
 def get_leagues(account_id, force=False):
-    if force or account_id not in league_cache:
+    # force=True always requests the current values directly from Aces High.
+    if force:
         return refresh_leagues(account_id)
-    return league_cache[account_id]
+
+    with data_lock:
+        cached_rows = league_cache.get(account_id)
+        if cached_rows is not None:
+            return list(cached_rows)
+
+    return refresh_leagues(account_id)
 
 
-def dashboard_rows(account_id):
+def display_limit_value(row, field):
+    amount_max = row.get(f"{field}.AmountMax")
+    if amount_max not in (None, ""):
+        return amount_max
+    return row.get(f"{field}.Amount")
+
+def dashboard_rows(account_id, force=False):
     rows = []
-    for row in get_leagues(account_id):
+    for row in get_leagues(account_id, force=force):
         is_exotic = ".Exotics[" in row.get("JsonPath", "")
         is_game_setup = row.get("PeriodTypes.GameSetup") is True
         editable_fields = (
@@ -1012,10 +1045,10 @@ def dashboard_rows(account_id):
                     if is_exotic
                     else ""
                 ),
-                "spread": row.get("Spread.Amount"),
-                "moneyLine": row.get("MoneyLine.Amount"),
-                "total": row.get("Total.Amount"),
-                "teamTotal": row.get("TeamTotal.Amount"),
+                "spread": display_limit_value(row, "Spread"),
+                "moneyLine": display_limit_value(row, "MoneyLine"),
+                "total": display_limit_value(row, "Total"),
+                "teamTotal": display_limit_value(row, "TeamTotal"),
                 "hasAgentOverrides": any(
                     row.get(f"{key}.HasAgentOverrides") is True
                     for key in ("Spread", "MoneyLine", "Total", "TeamTotal")
@@ -1027,8 +1060,12 @@ def dashboard_rows(account_id):
 
 def load_period_rows(account_id, organization_id, league_id, force=False):
     cache_key = (account_id, organization_id, league_id)
-    if not force and cache_key in period_cache:
-        return period_cache[cache_key]
+
+    if not force:
+        with data_lock:
+            cached_rows = period_cache.get(cache_key)
+            if cached_rows is not None:
+                return list(cached_rows)
 
     response = api_request(
         "GET",
@@ -1062,11 +1099,19 @@ def load_period_rows(account_id, organization_id, league_id, force=False):
                 **row,
             }
         )
-    period_cache[cache_key] = rows
+
+    with data_lock:
+        period_cache[cache_key] = list(rows)
+
     return rows
 
 
-def period_dashboard_rows(account_id, organization_id, league_id):
+def period_dashboard_rows(
+    account_id,
+    organization_id,
+    league_id,
+    force=False,
+):
     return [
         {
             "accountId": account_id,
@@ -1084,12 +1129,17 @@ def period_dashboard_rows(account_id, organization_id, league_id):
             "editable": True,
             "editableFields": ["spread", "moneyLine", "total", "teamTotal"],
             "disabledReason": "",
-            "spread": row.get("Spread.Amount"),
-            "moneyLine": row.get("MoneyLine.Amount"),
-            "total": row.get("Total.Amount"),
-            "teamTotal": row.get("TeamTotal.Amount"),
+            "spread": display_limit_value(row, "Spread"),
+            "moneyLine": display_limit_value(row, "MoneyLine"),
+            "total": display_limit_value(row, "Total"),
+            "teamTotal": display_limit_value(row, "TeamTotal"),
         }
-        for row in load_period_rows(account_id, organization_id, league_id)
+        for row in load_period_rows(
+            account_id,
+            organization_id,
+            league_id,
+            force=force,
+        )
     ]
 
 
@@ -1754,7 +1804,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     {
                         "accountId": account_id,
                         "accountName": account_name(account_id),
-                        "rows": dashboard_rows(account_id),
+                        "rows": dashboard_rows(account_id, force=True),
                     },
                 )
             except (KeyError, TypeError, ValueError) as error:
@@ -1782,7 +1832,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     200,
                     {
                         "rows": period_dashboard_rows(
-                            account_id, organization_id, league_id
+                            account_id,
+                            organization_id,
+                            league_id,
+                            force=True,
                         )
                     },
                 )
