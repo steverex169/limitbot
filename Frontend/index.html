@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,6 +8,7 @@
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/styles.css?v=20260803-theme-toggle">
 </head>
+
 <body class="app-loading">
   <main id="loginView" class="login-view">
     <form id="loginForm" class="login-card">
@@ -38,10 +40,12 @@
       </div>
     </div>
     <div class="topbar-actions">
-      <div class="limit-selector">
+      <label class="select-field limit-selector">
         <span>Select Limit</span>
-        <div id="searchlimit" class="limit-select-results" role="listbox" hidden></div>
-      </div>
+        <select id="limitFilter">
+          <option value="all">All limits</option>
+        </select>
+      </label>
       <label class="agent-search">
         <span>Find agent</span>
         <input id="agentSearch" type="search" placeholder="Search agents...." autocomplete="off">
@@ -150,7 +154,9 @@
             </tr>
           </thead>
           <tbody id="scheduleRows">
-            <tr><td colspan="6" class="empty-state">No recurring schedules.</td></tr>
+            <tr>
+              <td colspan="6" class="empty-state">No recurring schedules.</td>
+            </tr>
           </tbody>
         </table>
       </div>
@@ -211,4 +217,5 @@
 
   <script src="/script.js?v=20260803-theme-toggle" defer></script>
 </body>
+
 </html>
