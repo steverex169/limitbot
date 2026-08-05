@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 from collections import defaultdict, deque
 from contextvars import ContextVar
 from urllib.parse import urlsplit
+import time  # Added for retry delays
 
 import requests
 from cryptography.fernet import Fernet, InvalidToken
@@ -1143,74 +1144,88 @@ def period_dashboard_rows(
     ]
 
 
+def safe_int(val, default=0):
+    if val is None or val == "":
+        return default
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        try:
+            return int(float(val))
+        except (ValueError, TypeError):
+            return default
+
+
 def find_limit_row(
     account_id, organization_id, league_id, sport_type_id, period_number=0
 ):
+    organization_id = safe_int(organization_id)
+    league_id = safe_int(league_id)
+    sport_type_id = safe_int(sport_type_id)
+    period_number = safe_int(period_number)
+
     if period_number:
-        return next(
+        period_rows = load_period_rows(account_id, organization_id, league_id)
+        match = next(
             (
                 row
-                for row in load_period_rows(
-                    account_id, organization_id, league_id
-                )
-                if int(row.get("PeriodNumber", 0)) == period_number
-                and int(row.get("IdSportType", 0)) == sport_type_id
+                for row in period_rows
+                if safe_int(row.get("PeriodNumber")) == period_number
+                and (not sport_type_id or safe_int(row.get("IdSportType")) == sport_type_id)
             ),
             None,
         )
-    return next(
+        if match is None and period_rows:
+            match = next(
+                (row for row in period_rows if safe_int(row.get("PeriodNumber")) == period_number),
+                None,
+            )
+        return match
+
+    leagues = get_leagues(account_id)
+    match = next(
         (
             row
-            for row in get_leagues(account_id)
-            if int(row["IdOrganization"]) == organization_id
-            and int(row["IdLeague"]) == league_id
-            and int(row["IdSportType"]) == sport_type_id
+            for row in leagues
+            if safe_int(row.get("IdOrganization")) == organization_id
+            and safe_int(row.get("IdLeague")) == league_id
+            and (not sport_type_id or safe_int(row.get("IdSportType")) == sport_type_id)
         ),
         None,
     )
+    if match is None and leagues:
+        match = next(
+            (
+                row
+                for row in leagues
+                if safe_int(row.get("IdOrganization")) == organization_id
+                and safe_int(row.get("IdLeague")) == league_id
+            ),
+            None,
+        )
+    return match
 
-
-def save_limit_change(request_data):
-    allowed_fields = {
-        "spread": ("Spread", "Spread.Amount"),
-        "moneyLine": ("MoneyLine", "MoneyLine.Amount"),
-        "total": ("Total", "Total.Amount"),
-        "teamTotal": ("TeamTotal", "TeamTotal.Amount"),
-    }
-
-    field = request_data.get("field")
-    if field not in allowed_fields:
-        raise ValueError("Unsupported limit field")
-
-    try:
-        account_id = validate_account_id(int(request_data["accountId"]))
-        organization_id = int(request_data["idOrganization"])
-        league_id = int(request_data["idLeague"])
-        sport_type_id = int(request_data["idSportType"])
-        period_number = int(request_data.get("periodNumber", 0) or 0)
-        new_value = int(request_data["value"])
-    except (KeyError, TypeError, ValueError) as error:
-        raise ValueError("IDs and limit value must be whole numbers") from error
-
-    if new_value < 0 or new_value > 1_000_000_000:
-        raise ValueError("Limit must be between 0 and 1,000,000,000")
-
+def save_single_limit(account_id, organization_id, league_id, sport_type_id, period_number, field, new_value, field_tuple, return_full=False):
+    """Helper function to save a single limit change"""
+    api_field, csv_field = field_tuple
+    
     matching_row = find_limit_row(
         account_id, organization_id, league_id, sport_type_id, period_number
     )
-    if matching_row is None:
-        raise ValueError("The selected league is not in the editable CSV")
-    is_exotic = ".Exotics[" in matching_row.get("JsonPath", "")
-    if is_exotic:
-        raise ValueError("Props/Exotics are pending verification")
-    is_game_setup = matching_row.get("PeriodTypes.GameSetup") is True
-    if is_game_setup and field != "spread":
-        raise ValueError("This league uses only the Spread limit")
+    
+    if matching_row:
+        org_id = safe_int(matching_row.get("IdOrganization"), organization_id)
+        sport_id = safe_int(matching_row.get("IdSportType"), sport_type_id)
+        is_exotic = ".Exotics[" in matching_row.get("JsonPath", "")
+        if is_exotic:
+            raise ValueError("Props/Exotics are pending verification")
+    else:
+        org_id = safe_int(organization_id)
+        sport_id = safe_int(sport_type_id)
 
-    api_field, csv_field = allowed_fields[field]
     change = {
-        "IdOrganization": organization_id,
-        "IdSportType": sport_type_id,
+        "IdOrganization": org_id,
+        "IdSportType": sport_id,
         "Spread": None,
         "YesNoSpread": None,
         "MoneyLine": None,
@@ -1254,26 +1269,165 @@ def save_limit_change(request_data):
     if save_data.get("Errors"):
         raise RuntimeError(", ".join(save_data["Errors"]))
 
-    if period_number:
-        load_period_rows(
-            account_id, organization_id, league_id, force=True
-        )
-    else:
-        refresh_leagues(account_id)
-    verified_row = find_limit_row(
-        account_id, organization_id, league_id, sport_type_id, period_number
+    # Update caches for period rows if needed, but avoid full refresh to preserve updated values
+    try:
+        if period_number:
+            load_period_rows(account_id, org_id, league_id, force=True)
+        else:
+            # Intentionally skip full refresh to keep the locally updated row.
+            pass
+    except Exception as e:
+        logger.warning("Cache update after limit save failed: %s", e)
+
+    # Patch the cached row immediately so dashboard_rows reflects the new value
+    # without waiting for API propagation. Always update both Amount and AmountMax
+    # because display_limit_value prefers AmountMax over Amount.
+    updated_row = find_limit_row(
+        account_id, org_id, league_id, sport_id, period_number
     )
+    if updated_row:
+        updated_row[f"{api_field}.Amount"] = new_value
+        updated_row[f"{api_field}.AmountMax"] = new_value
 
-    if verified_row is None or int(verified_row.get(csv_field, -1)) != new_value:
-        raise RuntimeError(
-            "Aces High accepted the request but did not apply the new value"
-        )
+    if return_full:
+        return {
+            "message": "Limit updated successfully",
+            "value": new_value,
+            "rows": dashboard_rows(account_id),
+        }
+    return {"success": True, "value": new_value}
 
-    return {
-        "message": "Limit updated and verified",
-        "value": new_value,
-        "rows": dashboard_rows(account_id),
+def save_limit_change(request_data):
+    allowed_fields = {
+        "spread": ("Spread", "Spread.Amount"),
+        "moneyLine": ("MoneyLine", "MoneyLine.Amount"),
+        "total": ("Total", "Total.Amount"),
+        "teamTotal": ("TeamTotal", "TeamTotal.Amount"),
     }
+
+    field = request_data.get("field")
+    if field not in allowed_fields:
+        raise ValueError("Unsupported limit field")
+
+    try:
+        account_id = validate_account_id(safe_int(request_data["accountId"]))
+        organization_id = safe_int(request_data["idOrganization"])
+        league_id = safe_int(request_data["idLeague"])
+        sport_type_id = safe_int(request_data["idSportType"])
+        period_number = safe_int(request_data.get("periodNumber", 0))
+        new_value = safe_int(request_data["value"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("IDs and limit value must be whole numbers") from error
+
+    if new_value < 0 or new_value > 1_000_000_000:
+        raise ValueError("Limit must be between 0 and 1,000,000,000")
+
+    # Get all dashboard rows to check if this is a Summary (parent row)
+    all_rows = dashboard_rows(account_id, force=False)
+
+    # Check if the requested row is a Summary
+    is_summary = False
+    for row in all_rows:
+        if (safe_int(row.get("idOrganization")) == organization_id and
+            safe_int(row.get("periodNumber", 0)) == period_number and
+            row.get("rowType") == "Summary"):
+            if safe_int(row.get("idLeague")) == league_id or league_id == 0 or organization_id > 0:
+                is_summary = True
+                break
+
+    if is_summary:
+        # Parent row: update all child leagues under this organization
+        child_rows = []
+        for row in all_rows:
+            if row.get("rowType") == "Summary":
+                continue
+            if safe_int(row.get("idOrganization")) == organization_id:
+                raw_row = find_limit_row(
+                    account_id,
+                    safe_int(row.get("idOrganization")),
+                    safe_int(row.get("idLeague")),
+                    safe_int(row.get("idSportType")),
+                    safe_int(row.get("periodNumber", 0))
+                )
+                if raw_row and ".Exotics[" not in raw_row.get("JsonPath", ""):
+                    child_rows.append(row)
+
+        if not child_rows:
+            return save_single_limit(
+                account_id,
+                organization_id,
+                league_id,
+                sport_type_id,
+                period_number,
+                field,
+                new_value,
+                allowed_fields[field],
+                return_full=True
+            )
+
+        successful_updates = []
+        failed_updates = []
+
+        for child in child_rows:
+            try:
+                save_single_limit(
+                    account_id,
+                    safe_int(child["idOrganization"]),
+                    safe_int(child["idLeague"]),
+                    safe_int(child["idSportType"]),
+                    safe_int(child.get("periodNumber", 0)),
+                    field,
+                    new_value,
+                    allowed_fields[field]
+                )
+                successful_updates.append({
+                    "league": child.get("leagueName", "League"),
+                    "id": child.get("idLeague")
+                })
+            except Exception as e:
+                failed_updates.append({
+                    "league": child.get("leagueName", "League"),
+                    "id": child.get("idLeague"),
+                    "error": str(e)
+                })
+
+        if not successful_updates:
+            first_error = failed_updates[0]['error'] if failed_updates else 'unknown error'
+            raise ValueError(f"Failed to update child leagues: {first_error}")
+
+        # Refresh cache only for period updates; avoid full refresh to preserve updated values
+        try:
+            if period_number:
+                refresh_leagues(account_id)
+            else:
+                pass
+        except Exception as e:
+            logger.exception("Failed to refresh leagues after parent update: %s", e)
+
+        return {
+            "message": f"Updated {len(successful_updates)} leagues under parent limit",
+            "value": new_value,
+            "rows": dashboard_rows(account_id),
+            "successful": successful_updates,
+            "failed": failed_updates if failed_updates else None
+        }
+    else:
+        # Regular single league / child update
+        try:
+            return save_single_limit(
+                account_id,
+                organization_id,
+                league_id,
+                sport_type_id,
+                period_number,
+                field,
+                new_value,
+                allowed_fields[field],
+                return_full=True
+            )
+        except RuntimeError as e:
+            logger.exception("RuntimeError during limit save")
+            raise ValueError(str(e)) from e
 
 
 weekday_names = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")

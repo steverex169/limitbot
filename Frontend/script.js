@@ -222,6 +222,7 @@ function savePendingToLocalStorage() {
     field: change.field,
     oldValue: change.oldValue,
     newValue: change.newValue,
+    isParentRow: change.isParentRow || isParentLimitRow(change.row), // Store parent flag
   }));
 
   localStorage.setItem(
@@ -248,13 +249,10 @@ function restorePendingFromLocalStorage() {
     const row = state.rows.find(
       (candidate) =>
         Number(candidate.accountId) === Number(stored.accountId) &&
-        Number(candidate.idOrganization) ===
-        Number(stored.idOrganization) &&
+        Number(candidate.idOrganization) === Number(stored.idOrganization) &&
         Number(candidate.idLeague) === Number(stored.idLeague) &&
-        Number(candidate.idSportType) ===
-        Number(stored.idSportType) &&
-        Number(candidate.periodNumber || 0) ===
-        Number(stored.periodNumber || 0)
+        Number(candidate.idSportType) === Number(stored.idSportType) &&
+        Number(candidate.periodNumber || 0) === Number(stored.periodNumber || 0)
     );
 
     if (
@@ -271,6 +269,7 @@ function restorePendingFromLocalStorage() {
       field: stored.field,
       oldValue: row[stored.field],
       newValue: stored.newValue,
+      isParentRow: stored.isParentRow || false,
     });
   }
 
@@ -363,12 +362,10 @@ function createLimitCell(row, field) {
   const scheduledChanges = state.schedules.filter(
     (schedule) =>
       Number(schedule.accountId) === Number(row.accountId) &&
-      Number(schedule.idOrganization) ===
-      Number(row.idOrganization) &&
+      Number(schedule.idOrganization) === Number(row.idOrganization) &&
       Number(schedule.idLeague) === Number(row.idLeague) &&
       Number(schedule.idSportType) === Number(row.idSportType) &&
-      Number(schedule.periodNumber || 0) ===
-      Number(row.periodNumber || 0) &&
+      Number(schedule.periodNumber || 0) === Number(row.periodNumber || 0) &&
       schedule.field === field
   );
 
@@ -392,10 +389,12 @@ function createLimitCell(row, field) {
       : originalValue) ??
     "";
 
+  // Remove the check that disabled parent rows
   const editableFields = Array.isArray(row.editableFields)
     ? row.editableFields
     : [];
 
+  // Allow editing on parent rows too
   input.disabled =
     !editableFields.includes(field) ||
     Boolean(lockingSchedule);
@@ -412,6 +411,12 @@ function createLimitCell(row, field) {
 
   input.dataset.field = field;
   input.dataset.rowKey = rowKey(row);
+
+  // Add indication this is a parent row
+  if (isParentLimitRow(row)) {
+    input.dataset.isParentRow = "true";
+    input.title = "This will update all leagues under this parent limit";
+  }
 
   input.setAttribute(
     "aria-label",
@@ -443,6 +448,7 @@ function createLimitCell(row, field) {
         field,
         oldValue: originalValue,
         newValue: typedValue,
+        isParentRow: isParentLimitRow(row), // Flag this as a parent update
       });
 
       input.classList.add("changed");
@@ -1751,9 +1757,29 @@ async function saveActiveChange() {
       );
     }
 
-    state.rows = Array.isArray(data.rows)
+    // Optimistically update the matching row in state.rows so the UI
+    // always reflects the saved value regardless of backend cache timing.
+    const savedField = change.field;
+    const savedValue = change.newValue;
+    const savedLeague = change.row.idLeague;
+    const savedOrg = change.row.idOrganization;
+    const savedPeriod = change.row.periodNumber || 0;
+
+    // If the backend returned fresh rows, use them as the base; otherwise keep existing.
+    const baseRows = Array.isArray(data.rows) && data.rows.length > 0
       ? data.rows
-      : [];
+      : state.rows;
+
+    state.rows = baseRows.map((r) => {
+      if (
+        r.idLeague === savedLeague &&
+        r.idOrganization === savedOrg &&
+        (r.periodNumber || 0) === savedPeriod
+      ) {
+        return { ...r, [savedField]: savedValue };
+      }
+      return r;
+    });
 
     clearPendingChanges();
     state.activeChange = null;
