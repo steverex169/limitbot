@@ -1496,6 +1496,7 @@ def create_schedule(request_data):
         value = int(request_data["value"])
         is_early_limit = bool(request_data.get("earlyLimit"))
         repeat_weekly = bool(request_data.get("repeatWeekly", True))
+        one_time_schedule = bool(request_data.get("oneTimeSchedule"))
         recurrence_days = sorted({int(day) for day in request_data.get("recurrenceDays", [])})
         recurrence_time = str(request_data.get("recurrenceTime", ""))
     except (KeyError, TypeError, ValueError) as error:
@@ -1529,7 +1530,7 @@ def create_schedule(request_data):
     scheduled_for = next_recurring_run(recurrence_days, recurrence_time)
     stored_recurrence_days = (
         ",".join(str(day) for day in recurrence_days)
-        if (not is_early_limit or repeat_weekly)
+        if (not one_time_schedule and (not is_early_limit or repeat_weekly))
         else None
     )
     stored_recurrence_time = recurrence_time if stored_recurrence_days else None

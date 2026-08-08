@@ -1844,6 +1844,9 @@ async function scheduleActiveChange() {
     !earlyLimit ||
     elements.earlyRepeatWeekly.checked;
 
+  const oneTimeSchedule =
+    recurrenceDays.length === 1;
+
   if (earlyLimit) {
     const [
       hour = 0,
@@ -1861,6 +1864,29 @@ async function scheduleActiveChange() {
         "Early limit time must be between 8:00 AM and 11:00 AM ET.",
         "error"
       );
+      return;
+    }
+  }
+
+  if (oneTimeSchedule) {
+    const dayNames = [
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday",
+      "Sunday",
+    ];
+    const dayName =
+      dayNames[recurrenceDays[0]] ||
+      "selected day";
+
+    if (
+      !window.confirm(
+        `This limit will change one time on ${dayName} at ${elements.scheduleTime.value} ET. Continue?`
+      )
+    ) {
       return;
     }
   }
@@ -1899,6 +1925,7 @@ async function scheduleActiveChange() {
             elements.scheduleTime.value,
           earlyLimit,
           repeatWeekly,
+          oneTimeSchedule,
         }),
       }
     );
@@ -2043,6 +2070,16 @@ elements.confirmSave.addEventListener(
   "click",
   (event) => {
     event.preventDefault();
+    const selectedDays =
+      elements.scheduleDays.filter(
+        (input) => input.checked
+      );
+
+    if (selectedDays.length === 1) {
+      scheduleActiveChange();
+      return;
+    }
+
     saveActiveChange();
   }
 );
