@@ -41,7 +41,7 @@
     </div>
     <div class="topbar-actions">
       <label class="select-field limit-selector">
-        <span>Select Limit</span>
+        <span>Select League</span>
         <select id="limitFilter">
           <option value="all">All limits</option>
         </select>
@@ -188,6 +188,10 @@
         <input id="scheduleTime" type="time">
       </label>
       <label class="schedule-option">
+        <input id="oneTimeSchedule" type="checkbox">
+        <span>Run once on the selected day, then stop (no weekly repeat)</span>
+      </label>
+      <label class="schedule-option">
         <input id="earlyLimit" type="checkbox">
         <span>Early limit (8:00 AM - 11:00 AM ET only)</span>
       </label>
@@ -195,6 +199,7 @@
         <input id="earlyRepeatWeekly" type="checkbox">
         <span>Repeat early limit weekly on selected days</span>
       </label>
+      <div id="dialogMessage" class="message error" role="alert" hidden></div>
       <div class="dialog-actions">
         <button value="cancel" class="button secondary">Cancel</button>
         <button id="confirmSchedule" value="default" class="button secondary">Schedule</button>
@@ -215,7 +220,7 @@
     </div>
   </dialog>
 
-  <script src="/script.js?v=20260806-fix-limit-save" defer></script>
+  <script src="/script.js?v=20260809-audit-fixes" defer></script>
 </body>
 
 </html>

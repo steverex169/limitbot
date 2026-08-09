@@ -16,6 +16,12 @@ const themeStorageKey = "aceshighTheme";
 let preferenceSaveTimer = null;
 let agentSearchTimer = null;
 let agentSearchRequest = 0;
+/*
+ * Monotonic token for every write to state.rows. An async flow captures the
+ * token before fetching and discards its response if another write happened
+ * meanwhile, so a slow poll can never overwrite fresher data.
+ */
+let leagueDataVersion = 0;
 
 const elements = {
   loginView: document.querySelector("#loginView"),
@@ -52,6 +58,8 @@ const elements = {
   scheduleDays: [
     ...document.querySelectorAll('input[name="scheduleDay"]'),
   ],
+  oneTimeSchedule: document.querySelector("#oneTimeSchedule"),
+  dialogMessage: document.querySelector("#dialogMessage"),
   earlyLimit: document.querySelector("#earlyLimit"),
   earlyRepeatWeekly: document.querySelector("#earlyRepeatWeekly"),
   earlyRepeatWrap: document.querySelector("#earlyRepeatWrap"),
@@ -191,7 +199,7 @@ function populateLimitDropdown(rows, selectedValue = "") {
 
   const placeholder = document.createElement("option");
   placeholder.value = "";
-  placeholder.textContent = "Select Limit";
+  placeholder.textContent = "Select League";
   elements.limitFilter.append(placeholder);
 
   for (const [key, label] of parentLimitMap) {
@@ -212,8 +220,30 @@ function populateLimitDropdown(rows, selectedValue = "") {
     : "";
 }
 
+function readStoredPendingChanges() {
+  try {
+    const stored = JSON.parse(
+      localStorage.getItem(pendingStorageKey) || "[]"
+    );
+    return Array.isArray(stored) ? stored : [];
+  } catch {
+    localStorage.removeItem(pendingStorageKey);
+    return [];
+  }
+}
+
 function savePendingToLocalStorage() {
-  const storedChanges = [...state.pending.values()].map((change) => ({
+  /*
+   * Keep stored edits that belong to other agents: only this agent's rows
+   * are in memory, so overwriting storage with state.pending alone would
+   * silently delete every other agent's unsaved edits.
+   */
+  const otherAgentChanges = readStoredPendingChanges().filter(
+    (stored) =>
+      Number(stored.accountId) !== Number(state.selectedAgentId)
+  );
+
+  const currentChanges = [...state.pending.values()].map((change) => ({
     accountId: change.row.accountId,
     idOrganization: change.row.idOrganization,
     idLeague: change.row.idLeague,
@@ -227,25 +257,14 @@ function savePendingToLocalStorage() {
 
   localStorage.setItem(
     pendingStorageKey,
-    JSON.stringify(storedChanges)
+    JSON.stringify([...otherAgentChanges, ...currentChanges])
   );
 }
 
 function restorePendingFromLocalStorage() {
   state.pending.clear();
 
-  let storedChanges = [];
-
-  try {
-    storedChanges = JSON.parse(
-      localStorage.getItem(pendingStorageKey) || "[]"
-    );
-  } catch {
-    localStorage.removeItem(pendingStorageKey);
-    return;
-  }
-
-  for (const stored of storedChanges) {
+  for (const stored of readStoredPendingChanges()) {
     const row = state.rows.find(
       (candidate) =>
         Number(candidate.accountId) === Number(stored.accountId) &&
@@ -279,6 +298,12 @@ function restorePendingFromLocalStorage() {
 function clearPendingChanges() {
   state.pending.clear();
   localStorage.removeItem(pendingStorageKey);
+}
+
+function removePendingChange(change) {
+  state.pending.delete(inputKey(change.row, change.field));
+  savePendingToLocalStorage();
+  updateCounters();
 }
 
 function getPreferredTheme() {
@@ -333,6 +358,25 @@ function showMessage(text, type = "") {
   elements.message.textContent = text;
   elements.message.className = `message ${type}`.trim();
   elements.message.hidden = false;
+}
+
+/*
+ * Errors raised while the confirm dialog is open must render inside the
+ * dialog: the page behind the modal backdrop is dimmed and inert.
+ */
+function showDialogMessage(text) {
+  if (!elements.dialogMessage) {
+    showMessage(text, "error");
+    return;
+  }
+  elements.dialogMessage.textContent = text;
+  elements.dialogMessage.hidden = false;
+}
+
+function clearDialogMessage() {
+  if (elements.dialogMessage) {
+    elements.dialogMessage.hidden = true;
+  }
 }
 
 function clearMessage() {
@@ -429,14 +473,17 @@ function createLimitCell(row, field) {
         ? null
         : Number(input.value);
 
-    if (
+    /*
+     * A non-integer value is never saved, so it must not stay marked as a
+     * pending change either — otherwise the field displays one number
+     * while Save would write a different one.
+     */
+    const invalidValue =
       typedValue !== null &&
-      !Number.isInteger(typedValue)
-    ) {
-      return;
-    }
+      !Number.isInteger(typedValue);
 
     if (
+      invalidValue ||
       typedValue === originalValue ||
       (typedValue === null && originalValue == null)
     ) {
@@ -523,9 +570,15 @@ function openConfirmation(row) {
     input.checked = false;
   });
 
+  if (elements.oneTimeSchedule) {
+    elements.oneTimeSchedule.checked = false;
+  }
+
   elements.earlyLimit.checked = false;
   elements.earlyRepeatWeekly.checked = false;
   elements.earlyRepeatWrap.hidden = true;
+
+  clearDialogMessage();
 
   elements.dialog.showModal();
 }
@@ -607,7 +660,15 @@ function renderRows() {
 
       expandButton.addEventListener(
         "click",
-        () => togglePeriods(row)
+        () => {
+          togglePeriods(row).catch((error) => {
+            showMessage(
+              error.message ||
+              "Could not load league periods",
+              "error"
+            );
+          });
+        }
       );
 
       nameCell.append(expandButton);
@@ -699,7 +760,13 @@ async function togglePeriods(row) {
       }
     );
 
-    const data = await response.json();
+    // Error responses (e.g. a proxy's HTML error page) may not be JSON.
+    let data = {};
+    try {
+      data = await response.json();
+    } catch {
+      data = {};
+    }
 
     if (!response.ok) {
       showMessage(
@@ -963,6 +1030,8 @@ async function loadLeagues() {
   const selectedLimitBeforeLoad =
     elements.limitFilter.value;
 
+  const requestVersion = ++leagueDataVersion;
+
   clearMessage();
 
   const query = new URLSearchParams({
@@ -995,10 +1064,13 @@ async function loadLeagues() {
     await scheduleResponse.json();
 
   /*
-   * Ignore an old response if another agent
-   * was selected while this request was running.
+   * Ignore an old response if another agent was selected or a newer
+   * load/save wrote fresher rows while this request was running.
    */
-  if (accountId !== state.selectedAgentId) {
+  if (
+    accountId !== state.selectedAgentId ||
+    requestVersion !== leagueDataVersion
+  ) {
     return;
   }
 
@@ -1412,6 +1484,26 @@ async function selectAgent(agent) {
      */
     await loadLeagues();
   } catch (error) {
+    /*
+     * Drop the previous agent's rows: leaving them in state would render
+     * the old agent's limits under the newly selected agent's name.
+     */
+    state.rows = [];
+    state.filteredRows = [];
+    state.schedules = [];
+    renderSchedules();
+
+    const errorRow = document.createElement("tr");
+    const errorCell = document.createElement("td");
+    errorCell.colSpan = 7;
+    errorCell.className = "empty-state";
+    errorCell.textContent =
+      "Could not load leagues for this agent. Try selecting it again.";
+    errorRow.append(errorCell);
+    elements.leagueRows.replaceChildren(errorRow);
+
+    updateCounters();
+
     showMessage(
       error.message,
       "error"
@@ -1473,6 +1565,20 @@ async function refreshScheduleStatuses() {
   if (!accountId) {
     return;
   }
+
+  /*
+   * Skip this poll while the user is mid-interaction: re-rendering would
+   * steal focus from a limit input, and refreshing under an open confirm
+   * dialog could swap the rows the pending change points at.
+   */
+  if (
+    elements.dialog.open ||
+    document.activeElement?.classList?.contains("limit-input")
+  ) {
+    return;
+  }
+
+  const requestVersion = leagueDataVersion;
 
   const query =
     new URLSearchParams({
@@ -1543,9 +1649,14 @@ async function refreshScheduleStatuses() {
   const leagueData =
     await leagueResponse.json();
 
+  /*
+   * Discard this poll's data if another agent was selected or a save/load
+   * wrote fresher rows while these requests were in flight — otherwise
+   * stale league values would overwrite a just-saved limit in the UI.
+   */
   if (
-    accountId !==
-    state.selectedAgentId
+    accountId !== state.selectedAgentId ||
+    requestVersion !== leagueDataVersion
   ) {
     return;
   }
@@ -1761,27 +1872,34 @@ async function saveActiveChange() {
     // always reflects the saved value regardless of backend cache timing.
     const savedField = change.field;
     const savedValue = change.newValue;
-    const savedLeague = change.row.idLeague;
-    const savedOrg = change.row.idOrganization;
-    const savedPeriod = change.row.periodNumber || 0;
+    const savedRow = change.row;
 
     // If the backend returned fresh rows, use them as the base; otherwise keep existing.
     const baseRows = Array.isArray(data.rows) && data.rows.length > 0
       ? data.rows
       : state.rows;
 
+    // Match on the full row identity: rows can share league/org/period
+    // while differing in sport type or account.
     state.rows = baseRows.map((r) => {
       if (
-        r.idLeague === savedLeague &&
-        r.idOrganization === savedOrg &&
-        (r.periodNumber || 0) === savedPeriod
+        Number(r.accountId) === Number(savedRow.accountId) &&
+        Number(r.idLeague) === Number(savedRow.idLeague) &&
+        Number(r.idOrganization) === Number(savedRow.idOrganization) &&
+        Number(r.idSportType) === Number(savedRow.idSportType) &&
+        Number(r.periodNumber || 0) === Number(savedRow.periodNumber || 0)
       ) {
         return { ...r, [savedField]: savedValue };
       }
       return r;
     });
 
-    clearPendingChanges();
+    // Invalidate any in-flight poll so its pre-save data is discarded.
+    leagueDataVersion += 1;
+
+    // Remove only the change that was saved; edits pending on other rows
+    // must survive this save.
+    removePendingChange(change);
     state.activeChange = null;
     elements.dialog.close();
 
@@ -1822,17 +1940,15 @@ async function scheduleActiveChange() {
       );
 
   if (!elements.scheduleTime.value) {
-    showMessage(
-      "Select an Eastern time first.",
-      "error"
+    showDialogMessage(
+      "Select an Eastern time first."
     );
     return;
   }
 
   if (!recurrenceDays.length) {
-    showMessage(
-      "Select at least one weekday.",
-      "error"
+    showDialogMessage(
+      "Select at least one weekday."
     );
     return;
   }
@@ -1840,12 +1956,18 @@ async function scheduleActiveChange() {
   const earlyLimit =
     elements.earlyLimit.checked;
 
-  const repeatWeekly =
-    !earlyLimit ||
-    elements.earlyRepeatWeekly.checked;
+  /*
+   * One-time vs weekly is the user's explicit choice — a single checked
+   * day must still allow an every-week schedule.
+   */
+  const oneTimeSchedule = Boolean(
+    elements.oneTimeSchedule?.checked
+  );
 
-  const oneTimeSchedule =
-    recurrenceDays.length === 1;
+  const repeatWeekly =
+    !oneTimeSchedule &&
+    (!earlyLimit ||
+      elements.earlyRepeatWeekly.checked);
 
   if (earlyLimit) {
     const [
@@ -1860,9 +1982,8 @@ async function scheduleActiveChange() {
       hour > 11 ||
       (hour === 11 && minute > 0)
     ) {
-      showMessage(
-        "Early limit time must be between 8:00 AM and 11:00 AM ET.",
-        "error"
+      showDialogMessage(
+        "Early limit time must be between 8:00 AM and 11:00 AM ET."
       );
       return;
     }
@@ -1878,18 +1999,20 @@ async function scheduleActiveChange() {
       "Saturday",
       "Sunday",
     ];
-    const dayName =
-      dayNames[recurrenceDays[0]] ||
-      "selected day";
+    const dayText = recurrenceDays
+      .map((day) => dayNames[day] || "selected day")
+      .join(", ");
 
     if (
       !window.confirm(
-        `This limit will change one time on ${dayName} at ${elements.scheduleTime.value} ET. Continue?`
+        `This limit will change one time on ${dayText} at ${elements.scheduleTime.value} ET and will not repeat. Continue?`
       )
     ) {
       return;
     }
   }
+
+  clearDialogMessage();
 
   elements.confirmSchedule.disabled =
     true;
@@ -1939,12 +2062,14 @@ async function scheduleActiveChange() {
       );
     }
 
-    clearPendingChanges();
+    removePendingChange(change);
     state.activeChange = null;
     elements.dialog.close();
 
-    await loadLeagues();
-
+    /*
+     * The schedule was created successfully — report that before the
+     * follow-up refresh, whose failure must not read as a failed schedule.
+     */
     showScheduleStatus(
       "pending",
       change.row.leagueName,
@@ -1954,6 +2079,15 @@ async function scheduleActiveChange() {
       data.recurrence,
       data.scheduledFor
     );
+
+    try {
+      await loadLeagues();
+    } catch {
+      showMessage(
+        "The schedule was created, but the table could not be refreshed. Reload the page to see current values.",
+        "error"
+      );
+    }
   } catch (error) {
     elements.dialog.close();
 
@@ -2070,13 +2204,24 @@ elements.confirmSave.addEventListener(
   "click",
   (event) => {
     event.preventDefault();
+
+    /*
+     * "Save to Aces High" always saves immediately. Scheduling happens
+     * only through the Schedule button — rerouting based on how many
+     * weekdays were checked silently did the wrong operation.
+     */
     const selectedDays =
       elements.scheduleDays.filter(
         (input) => input.checked
       );
 
-    if (selectedDays.length === 1) {
-      scheduleActiveChange();
+    if (
+      selectedDays.length ||
+      elements.scheduleTime.value
+    ) {
+      showDialogMessage(
+        "Schedule options are set. Use the Schedule button to create the schedule, or clear the days and time to save immediately."
+      );
       return;
     }
 
@@ -2209,10 +2354,45 @@ elements.logoutButton.addEventListener(
     state.expandedAgentIds.clear();
     state.rows = [];
     state.filteredRows = [];
+    state.schedules = [];
     state.periodRows.clear();
     state.expandedRows.clear();
+    state.activeChange = null;
 
     clearPendingChanges();
+
+    /*
+     * Clear everything the previous account rendered so the next login
+     * on this browser never sees another user's data.
+     */
+    elements.leagueRows.replaceChildren();
+    elements.scheduleRows.replaceChildren();
+    elements.agentTree.replaceChildren();
+    elements.agentTree.hidden = true;
+    elements.agentSelectButton.textContent =
+      "Loading agents...";
+    elements.agentSelectButton.disabled =
+      true;
+    elements.accountName.textContent =
+      "Loading…";
+    elements.accountId.textContent =
+      "Account";
+    elements.agentSearch.value = "";
+    elements.agentSearchResults.replaceChildren();
+    elements.agentSearchResults.hidden =
+      true;
+    elements.searchInput.value = "";
+
+    if (elements.dialog.open) {
+      elements.dialog.close();
+    }
+
+    if (elements.scheduleStatusDialog.open) {
+      elements.scheduleStatusDialog.close();
+    }
+
+    clearMessage();
+    updateCounters();
 
     elements.limitFilter.replaceChildren();
 
@@ -2221,7 +2401,7 @@ elements.logoutButton.addEventListener(
 
     placeholder.value = "";
     placeholder.textContent =
-      "Select Limit";
+      "Select League";
 
     elements.limitFilter.append(
       placeholder

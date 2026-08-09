@@ -20,7 +20,7 @@ import time  # Added for retry delays
 
 import requests
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import inspect, select, text
+from sqlalchemy import delete, inspect, select, text, update
 from urllib.parse import urlparse, parse_qs
 
 from database import Base, database_session, engine
@@ -28,8 +28,24 @@ from model import LoginSession, ScheduledLimit, User
 
 backend_directory = Path(__file__).resolve().parent
 app_directory = backend_directory.parent / "Frontend"
-login_lock = threading.Lock()
+# Serialize logins per username only: a slow upstream response for one account
+# must not block every other user's login.
+login_locks_guard = threading.Lock()
+login_locks = {}
 data_lock = threading.Lock()
+
+
+def login_serialization_lock(username):
+    key = username.casefold()
+    with login_locks_guard:
+        if len(login_locks) > 1000:
+            for stale_key in [
+                existing
+                for existing, lock in login_locks.items()
+                if existing != key and not lock.locked()
+            ]:
+                del login_locks[stale_key]
+        return login_locks.setdefault(key, threading.Lock())
 schedule_timezone = ZoneInfo("America/New_York")
 app_environment = os.getenv("APP_ENV", "development").lower()
 server_host = os.getenv("HOST", "127.0.0.1")
@@ -262,7 +278,7 @@ def save_user_preferences(auth, request_data):
 
 
 def authenticate(username, password):
-    with login_lock:
+    with login_serialization_lock(username):
         upstream = requests.Session()
         login_response = upstream.post(
             login_url,
@@ -748,11 +764,18 @@ def validate_account_id(account_id):
     valid_ids = {agent["id"] for agent in load_agents()}
     if account_id in valid_ids:
         return account_id
-    if account_id in auth_context().get("searchableAgentIds", set()):
+    auth = auth_context()
+    if account_id in auth.get("searchableAgentIds", set()):
         return account_id
-    if account_id not in valid_ids:
-        raise ValueError("Selected agent is not available under this login")
-    return account_id
+    # Customer accounts found via search are not part of the agent hierarchy.
+    # After a restart the rebuilt auth has no search results yet, so also
+    # accept the account the user had validated and persisted previously.
+    if auth.get("userId") is not None:
+        with database_session() as db:
+            user = db.get(User, auth["userId"])
+            if user is not None and user.selected_agent_id == account_id:
+                return account_id
+    raise ValueError("Selected agent is not available under this login")
 
 
 def account_name(account_id):
@@ -1331,7 +1354,7 @@ def save_limit_change(request_data):
         if (safe_int(row.get("idOrganization")) == organization_id and
             safe_int(row.get("periodNumber", 0)) == period_number and
             row.get("rowType") == "Summary"):
-            if safe_int(row.get("idLeague")) == league_id or league_id == 0 or organization_id > 0:
+            if safe_int(row.get("idLeague")) == league_id or league_id == 0:
                 is_summary = True
                 break
 
@@ -1578,107 +1601,193 @@ def cancel_schedule(request_data):
     if len(schedule_id) != 32:
         raise ValueError("Invalid schedule")
     with database_session() as db:
-        schedule = db.scalar(
-            select(ScheduledLimit).where(
+        # Conditional update so a job the worker claims between our read and
+        # write cannot be marked cancelled while it is actually executing.
+        cancelled = db.execute(
+            update(ScheduledLimit)
+            .where(
                 ScheduledLimit.id == schedule_id,
                 ScheduledLimit.user_id == auth["userId"],
+                ScheduledLimit.status.in_(("pending", "failed")),
             )
-        )
-        if schedule is None:
-            raise ValueError("Schedule not found")
-        if schedule.status == "running":
-            raise ValueError("This schedule is currently running")
-        if schedule.status not in {"pending", "failed"}:
-            raise ValueError("This schedule is no longer active")
-        schedule.status = "cancelled"
-        schedule.error = None
+            .values(status="cancelled", error=None)
+        ).rowcount
         db.commit()
+        if not cancelled:
+            schedule = db.scalar(
+                select(ScheduledLimit).where(
+                    ScheduledLimit.id == schedule_id,
+                    ScheduledLimit.user_id == auth["userId"],
+                )
+            )
+            if schedule is None:
+                raise ValueError("Schedule not found")
+            if schedule.status == "running":
+                raise ValueError("This schedule is currently running")
+            raise ValueError("This schedule is no longer active")
     return {"message": "Recurring schedule cancelled", "id": schedule_id}
 
 
-def run_schedule_worker():
-    while not shutdown_event.is_set():
-        with database_session() as db:
-            due_jobs = list(
-                db.scalars(
-                    select(ScheduledLimit).where(
-                        ScheduledLimit.status == "pending",
-                        ScheduledLimit.scheduled_for <= utc_now_naive(),
-                    )
+def claim_due_jobs():
+    with database_session() as db:
+        due_job_ids = list(
+            db.scalars(
+                select(ScheduledLimit.id).where(
+                    ScheduledLimit.status == "pending",
+                    ScheduledLimit.scheduled_for <= utc_now_naive(),
                 )
             )
-            due_job_ids = [job.id for job in due_jobs]
-            for job in due_jobs:
-                job.status = "running"
-            db.commit()
-
+        )
+        claimed_ids = []
         for job_id in due_job_ids:
+            # Conditional claim: a job cancelled between the select and this
+            # update stays cancelled and is never executed.
+            claimed = db.execute(
+                update(ScheduledLimit)
+                .where(
+                    ScheduledLimit.id == job_id,
+                    ScheduledLimit.status == "pending",
+                )
+                .values(status="running")
+            ).rowcount
+            if claimed:
+                claimed_ids.append(job_id)
+        db.commit()
+        return claimed_ids
+
+
+def record_job_result(job_id, error):
+    try:
+        with database_session() as db:
+            stored_job = db.get(ScheduledLimit, job_id)
+            if stored_job is None:
+                return
+            run_at = utc_now_naive()
+            stored_job.last_run_at = run_at
+            stored_job.last_run_status = "failed" if error else "completed"
+            stored_job.error = str(error) if error else None
+            if not error:
+                stored_job.completed_at = run_at
+            if stored_job.recurrence_days and stored_job.recurrence_time:
+                try:
+                    days = [
+                        int(day) for day in stored_job.recurrence_days.split(",")
+                    ]
+                    next_run = next_recurring_run(
+                        days,
+                        stored_job.recurrence_time,
+                        datetime.now(schedule_timezone),
+                    )
+                    stored_job.scheduled_for = next_run.astimezone(
+                        timezone.utc
+                    ).replace(tzinfo=None)
+                    stored_job.status = "pending"
+                except Exception:
+                    logger.exception("Could not compute next run for %s", job_id)
+                    stored_job.status = "failed"
+                    stored_job.error = (
+                        f"{stored_job.error or 'Run failed'} "
+                        "(could not compute next recurrence)"
+                    )
+            else:
+                stored_job.status = "failed" if error else "completed"
+            db.commit()
+    except Exception:
+        logger.exception("Could not record result for job %s", job_id)
+
+
+def execute_scheduled_job(job_id):
+    auth = None
+    try:
+        with database_session() as db:
+            job = db.get(ScheduledLimit, job_id)
+            user = db.get(User, job.user_id)
+        if user is None:
+            raise RuntimeError("Schedule owner no longer exists")
+        auth = build_worker_auth(user)
+        # The account was validated against the user's hierarchy or search
+        # results when the schedule was created; searched customer accounts
+        # are not rediscoverable from a fresh worker auth, so trust the job.
+        auth["searchableAgentIds"] = {job.account_id}
+        current_auth.set(auth)
+        save_limit_change({
+            "accountId": job.account_id,
+            "idOrganization": job.organization_id,
+            "idLeague": job.league_id,
+            "idSportType": job.sport_type_id,
+            "periodNumber": job.period_number,
+            "field": job.field,
+            "value": job.value,
+        })
+        record_job_result(job_id, error=None)
+        logger.info("Scheduled limit completed: %s", job_id)
+    except Exception as error:
+        logger.exception("Scheduled limit failed: %s", job_id)
+        record_job_result(job_id, error=error)
+    finally:
+        current_auth.set(None)
+        if auth is not None:
             try:
-                with database_session() as db:
-                    job = db.get(ScheduledLimit, job_id)
-                    user = db.get(User, job.user_id)
-                if user is None:
-                    raise RuntimeError("Schedule owner no longer exists")
-                auth = build_worker_auth(user)
-                current_auth.set(auth)
-                save_limit_change({
-                    "accountId": job.account_id,
-                    "idOrganization": job.organization_id,
-                    "idLeague": job.league_id,
-                    "idSportType": job.sport_type_id,
-                    "periodNumber": job.period_number,
-                    "field": job.field,
-                    "value": job.value,
-                })
-                with database_session() as db:
-                    stored_job = db.get(ScheduledLimit, job_id)
-                    completed_at = utc_now_naive()
-                    stored_job.completed_at = completed_at
-                    stored_job.last_run_at = completed_at
-                    stored_job.last_run_status = "completed"
-                    stored_job.error = None
-                    if stored_job.recurrence_days and stored_job.recurrence_time:
-                        days = [
-                            int(day) for day in stored_job.recurrence_days.split(",")
-                        ]
-                        next_run = next_recurring_run(
-                            days,
-                            stored_job.recurrence_time,
-                            datetime.now(schedule_timezone),
-                        )
-                        stored_job.scheduled_for = next_run.astimezone(
-                            timezone.utc
-                        ).replace(tzinfo=None)
-                        stored_job.status = "pending"
-                    else:
-                        stored_job.status = "completed"
-                    db.commit()
-                print(f"Scheduled limit completed: {job_id}")
-            except Exception as error:
-                with database_session() as db:
-                    stored_job = db.get(ScheduledLimit, job_id)
-                    if stored_job:
-                        failed_at = utc_now_naive()
-                        stored_job.last_run_at = failed_at
-                        stored_job.last_run_status = "failed"
-                        stored_job.error = str(error)
-                        if stored_job.recurrence_days and stored_job.recurrence_time:
-                            days = [
-                                int(day) for day in stored_job.recurrence_days.split(",")
-                            ]
-                            next_run = next_recurring_run(
-                                days,
-                                stored_job.recurrence_time,
-                                datetime.now(schedule_timezone),
-                            )
-                            stored_job.scheduled_for = next_run.astimezone(
-                                timezone.utc
-                            ).replace(tzinfo=None)
-                            stored_job.status = "pending"
-                        else:
-                            stored_job.status = "failed"
-                        db.commit()
-                print(f"Scheduled limit failed: {job_id} - {error}")
+                auth["http"].close()
+            except Exception:
+                pass
+
+
+def prune_expired_sessions():
+    now = datetime.now(timezone.utc)
+    with auth_sessions_lock:
+        expired = [
+            (session_hash, auth)
+            for session_hash, auth in auth_sessions.items()
+            if now - auth["lastSeen"] > session_idle_timeout
+            or now - auth["createdAt"] > session_max_lifetime
+        ]
+        for session_hash, _ in expired:
+            del auth_sessions[session_hash]
+    for _, auth in expired:
+        try:
+            auth["http"].close()
+        except Exception:
+            pass
+    with database_session() as db:
+        db.execute(
+            delete(LoginSession).where(
+                LoginSession.expires_at <= utc_now_naive()
+            )
+        )
+        db.commit()
+    with login_attempts_lock:
+        cutoff = now - login_attempt_window
+        for key in [
+            key
+            for key, attempts in login_attempts.items()
+            if not attempts or attempts[-1] < cutoff
+        ]:
+            del login_attempts[key]
+
+
+def run_schedule_worker():
+    # Any exception escaping this loop silently stops all scheduled limits
+    # until a restart, so every iteration must survive failures.
+    prune_countdown = 0
+    while not shutdown_event.is_set():
+        try:
+            claimed_ids = claim_due_jobs()
+        except Exception:
+            logger.exception("Schedule worker could not poll for due jobs")
+            shutdown_event.wait(5)
+            continue
+
+        for job_id in claimed_ids:
+            execute_scheduled_job(job_id)
+
+        if prune_countdown <= 0:
+            prune_countdown = 300
+            try:
+                prune_expired_sessions()
+            except Exception:
+                logger.exception("Session cleanup failed")
+        prune_countdown -= 1
 
         shutdown_event.wait(1)
 
@@ -1805,7 +1914,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
     def client_ip(self):
         client_address = getattr(self, "client_address", ("unknown",))
         if trust_proxy_headers:
-            forwarded_for = self.request_header("X-Forwarded-For").split(",", 1)[0].strip()
+            # The trusted proxy appends the real client IP as the last entry;
+            # earlier entries are client-supplied and must not be trusted.
+            forwarded_for = self.request_header("X-Forwarded-For").rsplit(",", 1)[-1].strip()
             try:
                 return str(ipaddress.ip_address(forwarded_for))
             except ValueError:
@@ -1847,9 +1958,16 @@ class DashboardHandler(SimpleHTTPRequestHandler):
     def login_rate_limited(self, key):
         cutoff = datetime.now(timezone.utc) - login_attempt_window
         with login_attempts_lock:
-            attempts = login_attempts[key]
+            attempts = login_attempts.get(key)
+            if attempts is None:
+                return False
             while attempts and attempts[0] < cutoff:
                 attempts.popleft()
+            if not attempts:
+                # Drop empty entries so probing many usernames cannot grow
+                # this dict without bound.
+                del login_attempts[key]
+                return False
             return len(attempts) >= login_attempt_limit
 
     def record_login_failure(self, key):
@@ -1927,16 +2045,21 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return
 
         if path == "/api/agents":
-            auth = auth_context()
-            self.send_json(
-                200,
-                {
-                    "parentId": auth["id"],
-                    "parentName": auth["username"],
-                    "agents": load_agents(force=True),
-                    "preferences": user_preferences(auth),
-                },
-            )
+            try:
+                auth = auth_context()
+                self.send_json(
+                    200,
+                    {
+                        "parentId": auth["id"],
+                        "parentName": auth["username"],
+                        "agents": load_agents(force=True),
+                        "preferences": user_preferences(auth),
+                    },
+                )
+            except PermissionError as error:
+                self.send_json(401, {"error": str(error)})
+            except Exception as error:
+                self.server_error("Agent load failed", error, "Agent data is unavailable")
             return
 
         if path == "/api/agent-search":
@@ -1976,6 +2099,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 )
             except (KeyError, TypeError, ValueError) as error:
                 self.send_json(400, {"error": str(error)})
+            except PermissionError as error:
+                self.send_json(401, {"error": str(error)})
+            except Exception as error:
+                self.server_error("Schedule load failed", error, "Schedule data is unavailable")
             return
 
         if path == "/api/periods":
@@ -2151,32 +2278,42 @@ def migrate_schedule_columns():
                 )
 
 
-def realign_recurring_schedules_to_et():
+def recover_schedules_on_startup():
     with database_session() as db:
         schedules = list(
             db.scalars(
                 select(ScheduledLimit).where(
-                    ScheduledLimit.recurrence_days.is_not(None),
-                    ScheduledLimit.recurrence_time.is_not(None),
                     ScheduledLimit.status.in_(("pending", "running")),
                 )
             )
         )
+        now_utc = utc_now_naive()
         now_et = datetime.now(schedule_timezone)
         for schedule in schedules:
-            days = [int(day) for day in schedule.recurrence_days.split(",")]
-            next_run = next_recurring_run(days, schedule.recurrence_time, now_et)
-            schedule.scheduled_for = next_run.astimezone(timezone.utc).replace(
-                tzinfo=None
-            )
+            # Jobs stranded in "running" by a crash or redeploy must run
+            # again instead of staying stuck and uncancellable forever.
             schedule.status = "pending"
+            is_recurring = bool(
+                schedule.recurrence_days and schedule.recurrence_time
+            )
+            # A run that came due while the process was down stays due so the
+            # worker executes it late rather than silently skipping it. Only
+            # future recurring runs are realigned to Eastern time.
+            if is_recurring and schedule.scheduled_for > now_utc:
+                days = [int(day) for day in schedule.recurrence_days.split(",")]
+                next_run = next_recurring_run(
+                    days, schedule.recurrence_time, now_et
+                )
+                schedule.scheduled_for = next_run.astimezone(
+                    timezone.utc
+                ).replace(tzinfo=None)
         db.commit()
 
 
 encryption_cipher()
 Base.metadata.create_all(bind=engine)
 migrate_schedule_columns()
-realign_recurring_schedules_to_et()
+recover_schedules_on_startup()
 logger.info("Dashboard listening on http://%s:%s", server_host, server_port)
 
 schedule_worker = threading.Thread(target=run_schedule_worker, daemon=True)
