@@ -1638,6 +1638,7 @@ def create_schedule(request_data):
 
     job_id = uuid.uuid4().hex
     scheduled_utc = scheduled_for.astimezone(timezone.utc).replace(tzinfo=None)
+    scheduled_for_utc = scheduled_for.astimezone(timezone.utc)
     with database_session() as db:
         db.add(
             ScheduledLimit(
@@ -1664,6 +1665,7 @@ def create_schedule(request_data):
         "id": job_id,
         "message": "Early limit scheduled" if is_early_limit else "Limit change scheduled",
         "scheduledFor": scheduled_for.strftime("%Y-%m-%d %I:%M %p %Z"),
+        "scheduledForUtc": scheduled_for_utc.isoformat(),
         "recurrence": (
             recurring_description(recurrence_days, recurrence_time)
             if stored_recurrence_days
@@ -1888,6 +1890,9 @@ def schedule_status_rows(account_id):
             "scheduledFor": job.scheduled_for.replace(
                 tzinfo=timezone.utc
             ).astimezone(schedule_timezone).strftime("%Y-%m-%d %I:%M %p %Z"),
+            "scheduledForUtc": job.scheduled_for.replace(
+                tzinfo=timezone.utc
+            ).isoformat(),
             "accountId": job.account_id,
             "idOrganization": job.organization_id,
             "idLeague": job.league_id,
@@ -1910,6 +1915,11 @@ def schedule_status_rows(account_id):
                 job.last_run_at.replace(tzinfo=timezone.utc)
                 .astimezone(schedule_timezone)
                 .strftime("%Y-%m-%d %I:%M %p %Z")
+                if job.last_run_at
+                else None
+            ),
+            "lastRunAtUtc": (
+                job.last_run_at.replace(tzinfo=timezone.utc).isoformat()
                 if job.last_run_at
                 else None
             ),

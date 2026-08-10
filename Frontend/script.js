@@ -80,6 +80,43 @@ const fieldLabels = {
   teamTotal: "Team total",
 };
 
+const easternDateTimeFormatter = new Intl.DateTimeFormat(
+  "en-US",
+  {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+    timeZoneName: "short",
+  }
+);
+
+function formatEasternDateTime(value) {
+  if (!value) {
+    return "";
+  }
+
+  if (
+    typeof value === "string" &&
+    /(?:\bET\b|\bEST\b|\bEDT\b)/.test(value)
+  ) {
+    return value;
+  }
+
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value);
+  }
+
+  return easternDateTimeFormatter
+    .format(parsed)
+    .replace(", ", " ");
+}
+
 function rowKey(row) {
   return `${row.accountId}:${row.idOrganization}:${row.idLeague}:${row.idSportType}:${row.periodNumber || 0}`;
 }
@@ -941,7 +978,12 @@ function renderSchedules() {
         ).toLocaleString()}`
       ),
       createTextCell(schedule.recurrence),
-      createTextCell(schedule.scheduledFor),
+      createTextCell(
+        formatEasternDateTime(
+          schedule.scheduledForUtc ||
+          schedule.scheduledFor
+        )
+      ),
       createTextCell(schedule.status)
     );
 
@@ -1739,13 +1781,20 @@ async function refreshScheduleStatuses() {
       row?.leagueName ||
       "this league",
       finishedSchedule.value,
-      finishedSchedule.lastRunAt ||
-      finishedSchedule.scheduledFor,
+      formatEasternDateTime(
+        finishedSchedule.lastRunAtUtc ||
+        finishedSchedule.lastRunAt ||
+        finishedSchedule.scheduledForUtc ||
+        finishedSchedule.scheduledFor
+      ),
       fieldLabels[
       finishedSchedule.field
       ],
       finishedSchedule.recurrence,
-      finishedSchedule.scheduledFor
+      formatEasternDateTime(
+        finishedSchedule.scheduledForUtc ||
+        finishedSchedule.scheduledFor
+      )
     );
   }
 }
@@ -2074,10 +2123,16 @@ async function scheduleActiveChange() {
       "pending",
       change.row.leagueName,
       change.newValue,
-      data.scheduledFor,
+      formatEasternDateTime(
+        data.scheduledForUtc ||
+        data.scheduledFor
+      ),
       fieldLabels[change.field],
       data.recurrence,
-      data.scheduledFor
+      formatEasternDateTime(
+        data.scheduledForUtc ||
+        data.scheduledFor
+      )
     );
 
     try {
