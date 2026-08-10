@@ -4,6 +4,7 @@ const state = {
   rows: [],
   filteredRows: [],
   pending: new Map(),
+  pendingSaveBatch: [],
   schedules: [],
   periodRows: new Map(),
   expandedRows: new Set(),
@@ -106,6 +107,12 @@ function getModeFieldValue(row, field, mode = getSelectedLimitMode()) {
 
 function rowSupportsEarlyMode(row) {
   return row?.supportsEarlyLimit === true;
+}
+
+function getPendingChangesForMode(mode) {
+  return [...state.pending.values()].filter(
+    (change) => (change.mode || "normal") === mode
+  );
 }
 
 const easternDateTimeFormatter = new Intl.DateTimeFormat(
@@ -599,23 +606,20 @@ function createLimitCell(row, field) {
 
 function openConfirmation(row) {
   const limitMode = getSelectedLimitMode();
-  const changes = [
-    ...state.pending.values(),
-  ].filter(
-    (change) =>
-      rowKey(change.row) === rowKey(row) &&
-      (change.mode || "normal") === limitMode
-  );
+  const changes = getPendingChangesForMode(limitMode);
 
-  if (changes.length !== 1) {
+  if (!changes.length) {
     showMessage(
-      "Change exactly one limit at a time for this league.",
+      "Make at least one change before saving.",
       "error"
     );
     return;
   }
 
-  const change = changes[0];
+  const change =
+    changes.find(
+      (item) => rowKey(item.row) === rowKey(row)
+    ) || changes[0];
 
   if (
     change.newValue === null ||
@@ -629,6 +633,7 @@ function openConfirmation(row) {
   }
 
   state.activeChange = change;
+  state.pendingSaveBatch = changes;
 
   elements.confirmTitle.textContent =
     `Update ${fieldLabels[change.field]}?`;
@@ -1552,6 +1557,7 @@ async function selectAgent(agent) {
   state.periodRows.clear();
   state.expandedRows.clear();
   state.activeChange = null;
+  state.pendingSaveBatch = [];
 
   elements.leagueRows.innerHTML =
     '<tr><td colspan="7" class="empty-state">Loading leagues...</td></tr>';
@@ -1908,11 +1914,19 @@ function showScheduleStatus(
 }
 
 async function saveActiveChange() {
-  const change = state.activeChange;
+  const batch =
+    Array.isArray(state.pendingSaveBatch) &&
+    state.pendingSaveBatch.length
+      ? state.pendingSaveBatch
+      : state.activeChange
+        ? [state.activeChange]
+        : [];
 
-  if (!change) {
+  if (!batch.length) {
     return;
   }
+
+  const change = batch[0];
 
   elements.confirmSave.disabled = true;
   elements.confirmSave.textContent =
@@ -1992,6 +2006,7 @@ async function saveActiveChange() {
     // must survive this save.
     removePendingChange(change);
     state.activeChange = null;
+    state.pendingSaveBatch = [];
     elements.dialog.close();
 
     applyFilters();
@@ -2011,6 +2026,114 @@ async function saveActiveChange() {
     elements.confirmSave.disabled =
       false;
 
+    elements.confirmSave.textContent =
+      "Save to Aces High";
+  }
+}
+
+async function savePendingBatch() {
+  const batch = Array.isArray(state.pendingSaveBatch)
+    ? state.pendingSaveBatch.filter(Boolean)
+    : [];
+
+  if (!batch.length) {
+    return;
+  }
+
+  elements.confirmSave.disabled = true;
+  elements.confirmSave.textContent =
+    "Savingâ€¦";
+
+  try {
+    const savedSummaries = [];
+
+    for (const item of batch) {
+      const limitMode =
+        item.mode || getSelectedLimitMode();
+      const savedField = getModeFieldKey(
+        item.field,
+        limitMode
+      );
+      const response = await fetch(
+        "/api/limits",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            accountId:
+              item.row.accountId,
+            idOrganization:
+              item.row.idOrganization,
+            idLeague:
+              item.row.idLeague,
+            idSportType:
+              item.row.idSportType,
+            periodNumber:
+              item.row.periodNumber ||
+              0,
+            field: item.field,
+            value: item.newValue,
+            limitMode,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ||
+          "The limit could not be updated"
+        );
+      }
+
+      const savedValue = item.newValue;
+      const savedRow = item.row;
+      const baseRows = Array.isArray(data.rows) && data.rows.length > 0
+        ? data.rows
+        : state.rows;
+
+      state.rows = baseRows.map((r) => {
+        if (
+          Number(r.accountId) === Number(savedRow.accountId) &&
+          Number(r.idLeague) === Number(savedRow.idLeague) &&
+          Number(r.idOrganization) === Number(savedRow.idOrganization) &&
+          Number(r.idSportType) === Number(savedRow.idSportType) &&
+          Number(r.periodNumber || 0) === Number(savedRow.periodNumber || 0)
+        ) {
+          return { ...r, [savedField]: savedValue };
+        }
+        return r;
+      });
+
+      leagueDataVersion += 1;
+      removePendingChange(item);
+      savedSummaries.push(
+        `${item.row.leagueName}: ${item.newValue.toLocaleString()}`
+      );
+    }
+
+    state.activeChange = null;
+    state.pendingSaveBatch = [];
+    elements.dialog.close();
+    applyFilters();
+
+    showMessage(
+      `${savedSummaries.length} pending changes saved successfully.`,
+      "success"
+    );
+  } catch (error) {
+    elements.dialog.close();
+    showMessage(
+      error.message,
+      "error"
+    );
+  } finally {
+    elements.confirmSave.disabled =
+      false;
     elements.confirmSave.textContent =
       "Save to Aces High";
   }
@@ -2287,6 +2410,11 @@ elements.confirmSave.addEventListener(
       return;
     }
 
+    if ((state.pendingSaveBatch || []).length > 1) {
+      savePendingBatch();
+      return;
+    }
+
     saveActiveChange();
   }
 );
@@ -2420,6 +2548,7 @@ elements.logoutButton.addEventListener(
     state.periodRows.clear();
     state.expandedRows.clear();
     state.activeChange = null;
+    state.pendingSaveBatch = [];
 
     clearPendingChanges();
 
