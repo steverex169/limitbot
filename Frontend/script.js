@@ -55,6 +55,8 @@ const elements = {
   oldValue: document.querySelector("#oldValue"),
   newValue: document.querySelector("#newValue"),
   scheduleTime: document.querySelector("#scheduleTime"),
+  earlyLimitTimeWrap: document.querySelector("#earlyLimitTimeWrap"),
+  earlyLimitTime: document.querySelector("#earlyLimitTime"),
   scheduleDays: [
     ...document.querySelectorAll('input[name="scheduleDay"]'),
   ],
@@ -79,6 +81,53 @@ const fieldLabels = {
   total: "Total",
   teamTotal: "Team total",
 };
+
+function buildEarlyLimitTimeOptions() {
+  if (!elements.earlyLimitTime) {
+    return;
+  }
+
+  const options = [];
+  for (let hour = 8; hour <= 11; hour += 1) {
+    for (let minute = 0; minute < 60; minute += 1) {
+      if (hour === 11 && minute > 0) {
+        continue;
+      }
+      const value = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+      const labelHour = hour % 12 === 0 ? 12 : hour % 12;
+      const labelMinute = String(minute).padStart(2, "0");
+      const suffix = hour < 12 ? "AM" : "PM";
+      options.push(
+        `<option value="${value}">${labelHour}:${labelMinute} ${suffix} ET</option>`
+      );
+    }
+  }
+
+  elements.earlyLimitTime.innerHTML = options.join("");
+  elements.earlyLimitTime.value = "08:00";
+}
+
+function getSelectedScheduleTime() {
+  if (elements.earlyLimit?.checked) {
+    return elements.earlyLimitTime?.value || "";
+  }
+  return elements.scheduleTime.value;
+}
+
+function syncEarlyLimitTimeVisibility() {
+  const isEarlyLimit = Boolean(elements.earlyLimit?.checked);
+
+  if (elements.earlyLimitTimeWrap) {
+    elements.earlyLimitTimeWrap.hidden = !isEarlyLimit;
+  }
+
+  if (elements.scheduleTime) {
+    elements.scheduleTime.closest(".schedule-field").hidden = isEarlyLimit;
+  }
+}
+
+buildEarlyLimitTimeOptions();
+syncEarlyLimitTimeVisibility();
 
 const easternDateTimeFormatter = new Intl.DateTimeFormat(
   "en-US",
@@ -602,6 +651,9 @@ function openConfirmation(row) {
     change.newValue.toLocaleString();
 
   elements.scheduleTime.value = "";
+  if (elements.earlyLimitTime) {
+    elements.earlyLimitTime.value = "08:00";
+  }
 
   elements.scheduleDays.forEach((input) => {
     input.checked = false;
@@ -613,6 +665,7 @@ function openConfirmation(row) {
 
   elements.earlyLimit.checked = false;
   elements.earlyRepeatWeekly.checked = false;
+  syncEarlyLimitTimeVisibility();
   elements.earlyRepeatWrap.hidden = true;
 
   clearDialogMessage();
@@ -1988,7 +2041,10 @@ async function scheduleActiveChange() {
         Number(input.value)
       );
 
-  if (!elements.scheduleTime.value) {
+  const selectedTime =
+    getSelectedScheduleTime();
+
+  if (!selectedTime) {
     showDialogMessage(
       "Select an Eastern time first."
     );
@@ -2022,7 +2078,7 @@ async function scheduleActiveChange() {
     const [
       hour = 0,
       minute = 0,
-    ] = elements.scheduleTime.value
+    ] = selectedTime
       .split(":")
       .map((part) => Number(part));
 
@@ -2054,7 +2110,7 @@ async function scheduleActiveChange() {
 
     if (
       !window.confirm(
-        `This limit will change one time on ${dayText} at ${elements.scheduleTime.value} ET and will not repeat. Continue?`
+        `This limit will change one time on ${dayText} at ${selectedTime} ET and will not repeat. Continue?`
       )
     ) {
       return;
@@ -2093,8 +2149,7 @@ async function scheduleActiveChange() {
           field: change.field,
           value: change.newValue,
           recurrenceDays,
-          recurrenceTime:
-            elements.scheduleTime.value,
+          recurrenceTime: selectedTime,
           earlyLimit,
           repeatWeekly,
           oneTimeSchedule,
@@ -2247,6 +2302,7 @@ elements.earlyLimit.addEventListener(
   () => {
     elements.earlyRepeatWrap.hidden =
       !elements.earlyLimit.checked;
+    syncEarlyLimitTimeVisibility();
 
     if (!elements.earlyLimit.checked) {
       elements.earlyRepeatWeekly.checked =
@@ -2272,7 +2328,7 @@ elements.confirmSave.addEventListener(
 
     if (
       selectedDays.length ||
-      elements.scheduleTime.value
+      getSelectedScheduleTime()
     ) {
       showDialogMessage(
         "Schedule options are set. Use the Schedule button to create the schedule, or clear the days and time to save immediately."
