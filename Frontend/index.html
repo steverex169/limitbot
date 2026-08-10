@@ -192,7 +192,19 @@
       </fieldset>
       <label class="schedule-field">
         <span>Time (U.S. Eastern / ET)</span>
-        <input id="scheduleTime" type="time" step="60">
+        <div class="schedule-time-picker" aria-label="Schedule time in Eastern time">
+          <select id="scheduleHour" aria-label="Hour">
+            <option value="">HH</option>
+          </select>
+          <select id="scheduleMinute" aria-label="Minute">
+            <option value="">MM</option>
+          </select>
+          <select id="schedulePeriod" aria-label="AM or PM">
+            <option value="">AM/PM</option>
+            <option value="AM">AM</option>
+            <option value="PM">PM</option>
+          </select>
+        </div>
       </label>
       <label class="schedule-option">
         <input id="oneTimeSchedule" type="checkbox">
@@ -222,7 +234,7 @@
     </div>
   </dialog>
 
-  <script src="/script.js?v=20260811-clear-schedule" defer></script>
+  <script src="/script.js?v=20260811-et-dropdown-time" defer></script>
 </body>
 
 </html>

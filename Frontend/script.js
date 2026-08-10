@@ -56,7 +56,9 @@ const elements = {
   confirmText: document.querySelector("#confirmText"),
   oldValue: document.querySelector("#oldValue"),
   newValue: document.querySelector("#newValue"),
-  scheduleTime: document.querySelector("#scheduleTime"),
+  scheduleHour: document.querySelector("#scheduleHour"),
+  scheduleMinute: document.querySelector("#scheduleMinute"),
+  schedulePeriod: document.querySelector("#schedulePeriod"),
   clearScheduleOptions: document.querySelector("#clearScheduleOptions"),
   scheduleDays: [
     ...document.querySelectorAll('input[name="scheduleDay"]'),
@@ -171,13 +173,47 @@ function getEasternTimeValue(date = new Date()) {
   return `${String(Number(hourPart)).padStart(2, "0")}:${String(Number(minutePart)).padStart(2, "0")}`;
 }
 
-function syncScheduleTimeToEasternNow() {
-  if (!elements.scheduleTime) {
-    return;
+function populateScheduleTimePicker() {
+  if (elements.scheduleHour?.options.length === 1) {
+    for (let hour = 1; hour <= 12; hour += 1) {
+      const option = document.createElement("option");
+      option.value = String(hour).padStart(2, "0");
+      option.textContent = String(hour).padStart(2, "0");
+      elements.scheduleHour.append(option);
+    }
   }
 
-  elements.scheduleTime.value = getEasternTimeValue();
+  if (elements.scheduleMinute?.options.length === 1) {
+    for (let minute = 0; minute < 60; minute += 1) {
+      const option = document.createElement("option");
+      option.value = String(minute).padStart(2, "0");
+      option.textContent = String(minute).padStart(2, "0");
+      elements.scheduleMinute.append(option);
+    }
+  }
 }
+
+function getSelectedScheduleTime() {
+  const hour = elements.scheduleHour?.value || "";
+  const minute = elements.scheduleMinute?.value || "";
+  const period = elements.schedulePeriod?.value || "";
+
+  if (!hour || !minute || !period) {
+    return "";
+  }
+
+  let hourNumber = Number(hour);
+
+  if (period === "AM") {
+    hourNumber = hourNumber === 12 ? 0 : hourNumber;
+  } else {
+    hourNumber = hourNumber === 12 ? 12 : hourNumber + 12;
+  }
+
+  return `${String(hourNumber).padStart(2, "0")}:${minute}`;
+}
+
+populateScheduleTimePicker();
 
 function clearScheduleOptions() {
   elements.scheduleDays.forEach((input) => {
@@ -188,8 +224,16 @@ function clearScheduleOptions() {
     elements.oneTimeSchedule.checked = false;
   }
 
-  if (elements.scheduleTime) {
-    elements.scheduleTime.value = "";
+  if (elements.scheduleHour) {
+    elements.scheduleHour.value = "";
+  }
+
+  if (elements.scheduleMinute) {
+    elements.scheduleMinute.value = "";
+  }
+
+  if (elements.schedulePeriod) {
+    elements.schedulePeriod.value = "";
   }
 
   clearDialogMessage();
@@ -2188,7 +2232,7 @@ async function scheduleActiveChange() {
         Number(input.value)
       );
 
-  const selectedTime = elements.scheduleTime.value;
+  const selectedTime = getSelectedScheduleTime();
 
   if (!selectedTime) {
     showDialogMessage(

@@ -959,6 +959,7 @@ dialog h2 {
 :root[data-theme="dark"] .button.secondary,
 :root[data-theme="dark"] .schedule-days label,
 :root[data-theme="dark"] .schedule-progress,
+:root[data-theme="dark"] .schedule-time-picker select,
 :root[data-theme="dark"] .type-badge,
 :root[data-theme="dark"] .expand-button,
 :root[data-theme="dark"] .password-toggle,
@@ -976,6 +977,7 @@ dialog h2 {
 
 :root[data-theme="dark"] .button.secondary,
 :root[data-theme="dark"] .schedule-days label,
+:root[data-theme="dark"] .schedule-time-picker select,
 :root[data-theme="dark"] .type-badge,
 :root[data-theme="dark"] .expand-button,
 :root[data-theme="dark"] .password-toggle,
@@ -1118,6 +1120,18 @@ dialog h2 {
 }
 
 .schedule-field input {
+  min-height: 42px;
+  padding: 0 12px;
+}
+
+.schedule-time-picker {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1.15fr 1fr 1fr;
+}
+
+.schedule-time-picker select {
+  min-width: 0;
   min-height: 42px;
   padding: 0 12px;
 }
@@ -1535,6 +1549,7 @@ dialog h2 {
 
   .search-field input,
   .select-field select,
+  .schedule-time-picker select,
   .login-card input,
   .schedule-field input,
   .auth-form input {
