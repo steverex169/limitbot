@@ -78,20 +78,34 @@ const fieldLabels = {
   teamTotal: "Team total",
 };
 
-function isEarlyLimitEligibleRow(row) {
-  if (row?.supportsEarlyLimit === true) {
-    return true;
-  }
+const fieldApiNames = {
+  spread: "Spread",
+  moneyLine: "MoneyLine",
+  total: "Total",
+  teamTotal: "TeamTotal",
+};
 
-  const editableFields = Array.isArray(row?.editableFields)
-    ? row.editableFields
-    : [];
+function getSelectedLimitMode() {
+  return elements.limitModeFilter?.value === "early"
+    ? "early"
+    : "normal";
+}
 
-  return (
-    row?.rowType === "League" &&
-    editableFields.length === 1 &&
-    editableFields.includes("spread")
-  );
+function getModeFieldKey(field, mode = getSelectedLimitMode()) {
+  const apiName = fieldApiNames[field] || field;
+  return mode === "early" ? `early${apiName}` : field;
+}
+
+function getModeFieldValue(row, field, mode = getSelectedLimitMode()) {
+  const modeKey = getModeFieldKey(field, mode);
+  const normalValue = row?.[field];
+  const modeValue = row?.[modeKey];
+
+  return modeValue ?? normalValue ?? null;
+}
+
+function rowSupportsEarlyMode(row) {
+  return row?.supportsEarlyLimit === true;
 }
 
 const easternDateTimeFormatter = new Intl.DateTimeFormat(
@@ -136,7 +150,7 @@ function rowKey(row) {
 }
 
 function inputKey(row, field) {
-  return `${rowKey(row)}:${field}`;
+  return `${rowKey(row)}:${getSelectedLimitMode()}:${field}`;
 }
 
 function normalizeLimitKey(value) {
@@ -300,6 +314,7 @@ function savePendingToLocalStorage() {
     idLeague: change.row.idLeague,
     idSportType: change.row.idSportType,
     periodNumber: change.row.periodNumber || 0,
+    mode: change.mode || "normal",
     field: change.field,
     oldValue: change.oldValue,
     newValue: change.newValue,
@@ -320,24 +335,27 @@ function restorePendingFromLocalStorage() {
       (candidate) =>
         Number(candidate.accountId) === Number(stored.accountId) &&
         Number(candidate.idOrganization) === Number(stored.idOrganization) &&
-        Number(candidate.idLeague) === Number(stored.idLeague) &&
-        Number(candidate.idSportType) === Number(stored.idSportType) &&
-        Number(candidate.periodNumber || 0) === Number(stored.periodNumber || 0)
+      Number(candidate.idLeague) === Number(stored.idLeague) &&
+      Number(candidate.idSportType) === Number(stored.idSportType) &&
+      Number(candidate.periodNumber || 0) === Number(stored.periodNumber || 0)
     );
 
     if (
       !row ||
       !Array.isArray(row.editableFields) ||
       !row.editableFields.includes(stored.field) ||
-      row[stored.field] === stored.newValue
+      getModeFieldValue(row, stored.field, stored.mode || "normal") === stored.newValue
     ) {
       continue;
     }
 
-    state.pending.set(inputKey(row, stored.field), {
+    const mode = stored.mode || "normal";
+
+    state.pending.set(`${rowKey(row)}:${mode}:${stored.field}`, {
       row,
+      mode,
       field: stored.field,
-      oldValue: row[stored.field],
+      oldValue: getModeFieldValue(row, stored.field, mode),
       newValue: stored.newValue,
       isParentRow: stored.isParentRow || false,
     });
@@ -352,7 +370,9 @@ function clearPendingChanges() {
 }
 
 function removePendingChange(change) {
-  state.pending.delete(inputKey(change.row, change.field));
+  state.pending.delete(
+    `${rowKey(change.row)}:${change.mode || "normal"}:${change.field}`
+  );
   savePendingToLocalStorage();
   updateCounters();
 }
@@ -449,9 +469,10 @@ function createTextCell(text) {
 function createLimitCell(row, field) {
   const cell = document.createElement("td");
   const input = document.createElement("input");
+  const limitMode = getSelectedLimitMode();
 
-  const originalValue = row[field];
-  const key = inputKey(row, field);
+  const originalValue = getModeFieldValue(row, field, limitMode);
+  const key = `${rowKey(row)}:${limitMode}:${field}`;
   const pendingChange = state.pending.get(key);
 
   const scheduledChanges = state.schedules.filter(
@@ -489,10 +510,10 @@ function createLimitCell(row, field) {
     ? row.editableFields
     : [];
 
-  // Allow editing on parent rows too
   input.disabled =
     !editableFields.includes(field) ||
-    Boolean(lockingSchedule);
+    Boolean(lockingSchedule) ||
+    (limitMode === "early" && rowSupportsEarlyMode(row) === false);
 
   if (pendingChange) {
     input.classList.add("changed");
@@ -501,6 +522,8 @@ function createLimitCell(row, field) {
   if (input.disabled) {
     input.title = lockingSchedule
       ? "This limit is locked until its scheduled change finishes"
+      : limitMode === "early" && rowSupportsEarlyMode(row) === false
+        ? "Early values are not available for this league"
       : row.disabledReason || "This field is not editable";
   }
 
@@ -512,6 +535,7 @@ function createLimitCell(row, field) {
     input.dataset.isParentRow = "true";
     input.title = "This will update all leagues under this parent limit";
   }
+  input.dataset.limitMode = limitMode;
 
   input.setAttribute(
     "aria-label",
@@ -543,6 +567,7 @@ function createLimitCell(row, field) {
     } else {
       state.pending.set(key, {
         row,
+        mode: limitMode,
         field,
         oldValue: originalValue,
         newValue: typedValue,
@@ -563,7 +588,7 @@ function createLimitCell(row, field) {
       saveButton.disabled = ![
         ...state.pending.keys(),
       ].some((pendingKey) =>
-        pendingKey.startsWith(`${rowKey(row)}:`)
+        pendingKey.startsWith(`${rowKey(row)}:${limitMode}:`)
       );
     }
   });
@@ -573,11 +598,13 @@ function createLimitCell(row, field) {
 }
 
 function openConfirmation(row) {
+  const limitMode = getSelectedLimitMode();
   const changes = [
     ...state.pending.values(),
   ].filter(
     (change) =>
-      rowKey(change.row) === rowKey(row)
+      rowKey(change.row) === rowKey(row) &&
+      (change.mode || "normal") === limitMode
   );
 
   if (changes.length !== 1) {
@@ -645,15 +672,11 @@ function renderRows() {
   if (!state.filteredRows.length) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
-    const modeLabel =
-      elements.limitModeFilter?.value === "early"
-        ? "early-eligible"
-        : "editable";
 
     cell.colSpan = 7;
     cell.className = "empty-state";
     cell.textContent =
-      `No ${modeLabel} leagues match the current filters.`;
+      "No editable leagues match the current filters.";
 
     row.append(cell);
     elements.leagueRows.append(row);
@@ -855,7 +878,6 @@ function applyFilters() {
     .toLowerCase();
 
   const rowType = elements.rowTypeFilter.value;
-  const limitMode = elements.limitModeFilter?.value || "normal";
 
   const selectedLimitKey = normalizeLimitKey(
     elements.limitFilter.value
@@ -935,14 +957,9 @@ function applyFilters() {
       !query ||
       haystack.includes(query);
 
-    const matchesLimitMode =
-      limitMode !== "early" ||
-      isEarlyLimitEligibleRow(row);
-
     if (
       matchesType &&
-      matchesSearch &&
-      matchesLimitMode
+      matchesSearch
     ) {
       filteredRows.push(row);
     }
@@ -1902,6 +1919,11 @@ async function saveActiveChange() {
     "Saving…";
 
   try {
+    const limitMode = getSelectedLimitMode();
+    const savedField = getModeFieldKey(
+      change.field,
+      limitMode
+    );
     const response = await fetch(
       "/api/limits",
       {
@@ -1924,6 +1946,7 @@ async function saveActiveChange() {
             0,
           field: change.field,
           value: change.newValue,
+          limitMode,
         }),
       }
     );
@@ -1939,7 +1962,6 @@ async function saveActiveChange() {
 
     // Optimistically update the matching row in state.rows so the UI
     // always reflects the saved value regardless of backend cache timing.
-    const savedField = change.field;
     const savedValue = change.newValue;
     const savedRow = change.row;
 
@@ -2195,7 +2217,7 @@ elements.limitFilter.addEventListener(
 elements.limitModeFilter?.addEventListener(
   "change",
   () => {
-    applyFilters();
+    renderRows();
   }
 );
 

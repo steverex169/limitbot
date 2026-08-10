@@ -1134,11 +1134,15 @@ def dashboard_rows(account_id, force=False):
                     if is_exotic
                     else ""
                 ),
-                "supportsEarlyLimit": row["RowType"] == "League" and is_game_setup,
+                "supportsEarlyLimit": row["RowType"] in {"Summary", "League"} and not is_exotic,
                 "spread": display_limit_value(row, "Spread"),
                 "moneyLine": display_limit_value(row, "MoneyLine"),
                 "total": display_limit_value(row, "Total"),
                 "teamTotal": display_limit_value(row, "TeamTotal"),
+                "earlySpread": display_limit_value(row, "EarlySpread"),
+                "earlyMoneyLine": display_limit_value(row, "EarlyMoneyLine"),
+                "earlyTotal": display_limit_value(row, "EarlyTotal"),
+                "earlyTeamTotal": display_limit_value(row, "EarlyTeamTotal"),
                 "hasAgentOverrides": any(
                     row.get(f"{key}.HasAgentOverrides") is True
                     for key in ("Spread", "MoneyLine", "Total", "TeamTotal")
@@ -1223,6 +1227,10 @@ def period_dashboard_rows(
             "moneyLine": display_limit_value(row, "MoneyLine"),
             "total": display_limit_value(row, "Total"),
             "teamTotal": display_limit_value(row, "TeamTotal"),
+            "earlySpread": display_limit_value(row, "EarlySpread"),
+            "earlyMoneyLine": display_limit_value(row, "EarlyMoneyLine"),
+            "earlyTotal": display_limit_value(row, "EarlyTotal"),
+            "earlyTeamTotal": display_limit_value(row, "EarlyTeamTotal"),
         }
         for row in load_period_rows(
             account_id,
@@ -1294,10 +1302,19 @@ def find_limit_row(
         )
     return match
 
-def save_single_limit(account_id, organization_id, league_id, sport_type_id, period_number, field, new_value, field_tuple, return_full=False):
+def save_single_limit(
+    account_id,
+    organization_id,
+    league_id,
+    sport_type_id,
+    period_number,
+    field,
+    new_value,
+    api_field,
+    return_full=False,
+    change_type="Immediate limit",
+):
     """Helper function to save a single limit change"""
-    api_field, csv_field = field_tuple
-    
     matching_row = find_limit_row(
         account_id, organization_id, league_id, sport_type_id, period_number
     )
@@ -1387,7 +1404,7 @@ def save_single_limit(account_id, organization_id, league_id, sport_type_id, per
             period_number,
             field,
             new_value,
-            change_type="Immediate limit",
+            change_type=change_type,
         )
         send_telegram_success_message(telegram_message)
 
@@ -1401,15 +1418,22 @@ def save_single_limit(account_id, organization_id, league_id, sport_type_id, per
 
 def save_limit_change(request_data):
     allowed_fields = {
-        "spread": ("Spread", "Spread.Amount"),
-        "moneyLine": ("MoneyLine", "MoneyLine.Amount"),
-        "total": ("Total", "Total.Amount"),
-        "teamTotal": ("TeamTotal", "TeamTotal.Amount"),
+        "spread": "Spread",
+        "moneyLine": "MoneyLine",
+        "total": "Total",
+        "teamTotal": "TeamTotal",
+    }
+    mode_prefixes = {
+        "normal": "",
+        "early": "Early",
     }
 
     field = request_data.get("field")
     if field not in allowed_fields:
         raise ValueError("Unsupported limit field")
+    limit_mode = str(request_data.get("limitMode", "normal")).strip().lower()
+    if limit_mode not in mode_prefixes:
+        raise ValueError("Unsupported limit mode")
 
     try:
         account_id = validate_account_id(safe_int(request_data["accountId"]))
@@ -1455,6 +1479,7 @@ def save_limit_change(request_data):
                     child_rows.append(row)
 
         if not child_rows:
+            api_field = f"{mode_prefixes[limit_mode]}{allowed_fields[field]}"
             return save_single_limit(
                 account_id,
                 organization_id,
@@ -1463,7 +1488,8 @@ def save_limit_change(request_data):
                 period_number,
                 field,
                 new_value,
-                allowed_fields[field],
+                api_field,
+                change_type="Early limit" if limit_mode == "early" else "Immediate limit",
                 return_full=True
             )
 
@@ -1472,6 +1498,7 @@ def save_limit_change(request_data):
 
         for child in child_rows:
             try:
+                api_field = f"{mode_prefixes[limit_mode]}{allowed_fields[field]}"
                 save_single_limit(
                     account_id,
                     safe_int(child["idOrganization"]),
@@ -1480,7 +1507,8 @@ def save_limit_change(request_data):
                     safe_int(child.get("periodNumber", 0)),
                     field,
                     new_value,
-                    allowed_fields[field]
+                    api_field,
+                    change_type="Early limit" if limit_mode == "early" else "Immediate limit",
                 )
                 successful_updates.append({
                     "league": child.get("leagueName", "League"),
@@ -1516,6 +1544,7 @@ def save_limit_change(request_data):
     else:
         # Regular single league / child update
         try:
+            api_field = f"{mode_prefixes[limit_mode]}{allowed_fields[field]}"
             return save_single_limit(
                 account_id,
                 organization_id,
@@ -1524,7 +1553,8 @@ def save_limit_change(request_data):
                 period_number,
                 field,
                 new_value,
-                allowed_fields[field],
+                api_field,
+                change_type="Early limit" if limit_mode == "early" else "Immediate limit",
                 return_full=True
             )
         except RuntimeError as e:
