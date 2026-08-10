@@ -57,6 +57,7 @@ const elements = {
   oldValue: document.querySelector("#oldValue"),
   newValue: document.querySelector("#newValue"),
   scheduleTime: document.querySelector("#scheduleTime"),
+  clearScheduleOptions: document.querySelector("#clearScheduleOptions"),
   scheduleDays: [
     ...document.querySelectorAll('input[name="scheduleDay"]'),
   ],
@@ -176,6 +177,22 @@ function syncScheduleTimeToEasternNow() {
   }
 
   elements.scheduleTime.value = getEasternTimeValue();
+}
+
+function clearScheduleOptions() {
+  elements.scheduleDays.forEach((input) => {
+    input.checked = false;
+  });
+
+  if (elements.oneTimeSchedule) {
+    elements.oneTimeSchedule.checked = false;
+  }
+
+  if (elements.scheduleTime) {
+    elements.scheduleTime.value = "";
+  }
+
+  clearDialogMessage();
 }
 
 function rowKey(row) {
@@ -673,15 +690,7 @@ function openConfirmation(row) {
   elements.newValue.textContent =
     change.newValue.toLocaleString();
 
-  syncScheduleTimeToEasternNow();
-
-  elements.scheduleDays.forEach((input) => {
-    input.checked = false;
-  });
-
-  if (elements.oneTimeSchedule) {
-    elements.oneTimeSchedule.checked = false;
-  }
+  clearScheduleOptions();
 
   clearDialogMessage();
 
@@ -2411,6 +2420,14 @@ elements.confirmSchedule.addEventListener(
   }
 );
 
+elements.clearScheduleOptions?.addEventListener(
+  "click",
+  (event) => {
+    event.preventDefault();
+    clearScheduleOptions();
+  }
+);
+
 elements.confirmSave.addEventListener(
   "click",
   (event) => {
@@ -2425,13 +2442,15 @@ elements.confirmSave.addEventListener(
       elements.scheduleDays.filter(
         (input) => input.checked
       );
+    const oneTimeScheduleChecked =
+      Boolean(elements.oneTimeSchedule?.checked);
 
     if (
       selectedDays.length ||
-      elements.scheduleTime.value
+      oneTimeScheduleChecked
     ) {
       showDialogMessage(
-        "Schedule options are set. Use the Schedule button to create the schedule, or clear the days and time to save immediately."
+        "Schedule options are set. Use the Schedule button to create the schedule, or clear the schedule to save immediately."
       );
       return;
     }
