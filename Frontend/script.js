@@ -188,10 +188,6 @@ function clearScheduleOptions() {
     elements.oneTimeSchedule.checked = false;
   }
 
-  if (elements.scheduleTime) {
-    elements.scheduleTime.value = "";
-  }
-
   clearDialogMessage();
 }
 
@@ -691,6 +687,7 @@ function openConfirmation(row) {
     change.newValue.toLocaleString();
 
   clearScheduleOptions();
+  syncScheduleTimeToEasternNow();
 
   clearDialogMessage();
 
