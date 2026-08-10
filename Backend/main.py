@@ -1639,6 +1639,7 @@ def create_schedule(request_data):
         period_number = int(request_data.get("periodNumber", 0) or 0)
         value = int(request_data["value"])
         one_time_schedule = bool(request_data.get("oneTimeSchedule"))
+        limit_mode = str(request_data.get("limitMode", "normal")).strip().lower()
         recurrence_days = sorted({int(day) for day in request_data.get("recurrenceDays", [])})
         recurrence_time = str(request_data.get("recurrenceTime", ""))
     except (KeyError, TypeError, ValueError) as error:
@@ -1658,6 +1659,8 @@ def create_schedule(request_data):
         "teamTotal",
     }:
         raise ValueError("Unsupported limit field")
+    if limit_mode not in mode_prefixes:
+        raise ValueError("Unsupported limit mode")
     is_game_setup = matching_row.get("PeriodTypes.GameSetup") is True
     if is_game_setup and request_data["field"] != "spread":
         raise ValueError("This league uses only the Spread limit")
@@ -1694,7 +1697,7 @@ def create_schedule(request_data):
                 scheduled_for=scheduled_utc,
                 recurrence_days=stored_recurrence_days,
                 recurrence_time=stored_recurrence_time,
-                is_early_limit=False,
+                is_early_limit=limit_mode == "early",
                 status="pending",
             )
         )
@@ -1705,6 +1708,7 @@ def create_schedule(request_data):
         "message": "Limit change scheduled",
         "scheduledFor": scheduled_for.strftime("%Y-%m-%d %I:%M %p %Z"),
         "scheduledForUtc": scheduled_for_utc.isoformat(),
+        "limitMode": limit_mode,
         "recurrence": (
             recurring_description(recurrence_days, recurrence_time)
             if stored_recurrence_days
@@ -1836,6 +1840,7 @@ def execute_scheduled_job(job_id):
             "periodNumber": job.period_number,
             "field": job.field,
             "value": job.value,
+            "limitMode": "early" if job.is_early_limit else "normal",
         })
         record_job_result(job_id, error=None)
         logger.info("Scheduled limit completed: %s", job_id)
@@ -1938,6 +1943,7 @@ def schedule_status_rows(account_id):
             "periodNumber": job.period_number,
             "field": job.field,
             "value": job.value,
+            "limitMode": "early" if job.is_early_limit else "normal",
             "recurring": bool(job.recurrence_days and job.recurrence_time),
             "recurrence": (
                 recurring_description(

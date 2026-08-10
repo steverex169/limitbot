@@ -1057,9 +1057,7 @@ function renderSchedules() {
   elements.scheduleRows.replaceChildren();
 
   const schedules = state.schedules.filter(
-    (schedule) =>
-      schedule.recurring &&
-      schedule.status !== "cancelled"
+    (schedule) => schedule.status !== "cancelled"
   );
 
   if (!schedules.length) {
@@ -1094,7 +1092,7 @@ function renderSchedules() {
       createTextCell(
         `${fieldLabels[schedule.field] ||
         schedule.field
-        }: ${Number(
+        }${schedule.limitMode === "early" ? " (Early)" : ""}: ${Number(
           schedule.value
         ).toLocaleString()}`
       ),
@@ -1118,7 +1116,7 @@ function renderSchedules() {
     cancel.className = "schedule-cancel";
     cancel.textContent = "Cancel";
     cancel.disabled =
-      schedule.status === "running";
+      !["pending", "failed"].includes(schedule.status);
 
     cancel.addEventListener(
       "click",
@@ -1985,9 +1983,12 @@ function showScheduleStatus(
   elements.scheduleProgress.hidden =
     successful || failed;
 
-  if (
-    !elements.scheduleStatusDialog.open
-  ) {
+  if (successful || failed) {
+    if (elements.scheduleStatusDialog.open) {
+      elements.scheduleStatusDialog.close();
+    }
+    elements.scheduleStatusDialog.showModal();
+  } else if (!elements.scheduleStatusDialog.open) {
     elements.scheduleStatusDialog.showModal();
   }
 }
@@ -2310,6 +2311,7 @@ async function scheduleActiveChange() {
             0,
           field: change.field,
           value: change.newValue,
+          limitMode: getSelectedLimitMode(),
           recurrenceDays,
           recurrenceTime: selectedTime,
           oneTimeSchedule,
