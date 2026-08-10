@@ -46,6 +46,18 @@ def login_serialization_lock(username):
                 del login_locks[stale_key]
         return login_locks.setdefault(key, threading.Lock())
 schedule_timezone = ZoneInfo("America/New_York")
+
+allowed_limit_fields = {
+    "spread": "Spread",
+    "moneyLine": "MoneyLine",
+    "total": "Total",
+    "teamTotal": "TeamTotal",
+}
+
+limit_mode_prefixes = {
+    "normal": "",
+    "early": "Early",
+}
 app_environment = os.getenv("APP_ENV", "development").lower()
 server_host = os.getenv("HOST", "127.0.0.1")
 try:
@@ -1437,22 +1449,11 @@ def save_single_limit(
     return {"success": True, "value": new_value}
 
 def save_limit_change(request_data):
-    allowed_fields = {
-        "spread": "Spread",
-        "moneyLine": "MoneyLine",
-        "total": "Total",
-        "teamTotal": "TeamTotal",
-    }
-    mode_prefixes = {
-        "normal": "",
-        "early": "Early",
-    }
-
     field = request_data.get("field")
-    if field not in allowed_fields:
+    if field not in allowed_limit_fields:
         raise ValueError("Unsupported limit field")
     limit_mode = str(request_data.get("limitMode", "normal")).strip().lower()
-    if limit_mode not in mode_prefixes:
+    if limit_mode not in limit_mode_prefixes:
         raise ValueError("Unsupported limit mode")
 
     try:
@@ -1499,7 +1500,7 @@ def save_limit_change(request_data):
                     child_rows.append(row)
 
         if not child_rows:
-            api_field = f"{mode_prefixes[limit_mode]}{allowed_fields[field]}"
+            api_field = f"{limit_mode_prefixes[limit_mode]}{allowed_limit_fields[field]}"
             return save_single_limit(
                 account_id,
                 organization_id,
@@ -1518,7 +1519,7 @@ def save_limit_change(request_data):
 
         for child in child_rows:
             try:
-                api_field = f"{mode_prefixes[limit_mode]}{allowed_fields[field]}"
+                api_field = f"{limit_mode_prefixes[limit_mode]}{allowed_limit_fields[field]}"
                 save_single_limit(
                     account_id,
                     safe_int(child["idOrganization"]),
@@ -1564,7 +1565,7 @@ def save_limit_change(request_data):
     else:
         # Regular single league / child update
         try:
-            api_field = f"{mode_prefixes[limit_mode]}{allowed_fields[field]}"
+            api_field = f"{limit_mode_prefixes[limit_mode]}{allowed_limit_fields[field]}"
             return save_single_limit(
                 account_id,
                 organization_id,
@@ -1659,7 +1660,7 @@ def create_schedule(request_data):
         "teamTotal",
     }:
         raise ValueError("Unsupported limit field")
-    if limit_mode not in mode_prefixes:
+    if limit_mode not in limit_mode_prefixes:
         raise ValueError("Unsupported limit mode")
     is_game_setup = matching_row.get("PeriodTypes.GameSetup") is True
     if is_game_setup and request_data["field"] != "spread":
