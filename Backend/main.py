@@ -22,7 +22,6 @@ import requests
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import delete, inspect, select, text, update
 from urllib.parse import urlparse, parse_qs
-
 from database import Base, database_session, engine
 from model import LoginSession, ScheduledLimit, User
 
@@ -64,6 +63,9 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
 )
 logger = logging.getLogger("aceshigh-dashboard")
+
+telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
 login_url = (
     "https://aceshigh.ag/"
@@ -113,6 +115,69 @@ login_attempt_limit = 5
 
 def utc_now_naive():
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def send_telegram_success_message(message):
+    """
+    Send a Telegram notification after a successful limit save.
+    Failure here must never break the main limit-save flow.
+    """
+    if not telegram_bot_token or not telegram_chat_id:
+        return
+
+    try:
+        response = requests.post(
+            f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage",
+            json={
+                "chat_id": telegram_chat_id,
+                "text": message,
+                "disable_web_page_preview": True,
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if not data.get("ok", False):
+            raise RuntimeError(data.get("description", "Telegram send failed"))
+    except Exception as error:
+        logger.warning("Telegram success message failed: %s", error)
+
+
+def build_limit_success_message(
+    account_id,
+    organization_id,
+    league_id,
+    sport_type_id,
+    period_number,
+    field,
+    new_value,
+    change_type="Immediate limit",
+):
+    row = find_limit_row(
+        account_id,
+        organization_id,
+        league_id,
+        sport_type_id,
+        period_number,
+    )
+    league_name = (
+        row.get("leagueName")
+        or row.get("LeagueName")
+        or row.get("name")
+        or f"League {league_id}"
+    ) if row else f"League {league_id}"
+    field_label = {
+        "spread": "Spread",
+        "moneyLine": "Money line",
+        "total": "Total",
+        "teamTotal": "Team total",
+    }.get(field, field)
+    return (
+        f"Success: {change_type} saved on AcesHigh.ag\n"
+        f"{league_name}\n"
+        f"{field_label}: {new_value}\n"
+        f"Applied successfully"
+    )
 
 
 def encryption_cipher():
@@ -1313,6 +1378,19 @@ def save_single_limit(account_id, organization_id, league_id, sport_type_id, per
         updated_row[f"{api_field}.AmountMax"] = new_value
 
     if return_full:
+        telegram_message = build_limit_success_message(
+            account_id,
+            organization_id,
+            league_id,
+            sport_type_id,
+            period_number,
+            field,
+            new_value,
+            change_type="Immediate limit",
+        )
+        send_telegram_success_message(telegram_message)
+
+    if return_full:
         return {
             "message": "Limit updated successfully",
             "value": new_value,
@@ -1731,8 +1809,7 @@ def execute_scheduled_job(job_id):
                 auth["http"].close()
             except Exception:
                 pass
-
-
+        
 def prune_expired_sessions():
     now = datetime.now(timezone.utc)
     with auth_sessions_lock:
