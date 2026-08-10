@@ -152,6 +152,32 @@ function formatEasternDateTime(value) {
     .replace(", ", " ");
 }
 
+const easternTimeFormatter = new Intl.DateTimeFormat(
+  "en-US",
+  {
+    timeZone: "America/New_York",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }
+);
+
+function getEasternTimeValue(date = new Date()) {
+  const parts = easternTimeFormatter.formatToParts(date);
+  const hourPart = parts.find((part) => part.type === "hour")?.value || "00";
+  const minutePart = parts.find((part) => part.type === "minute")?.value || "00";
+
+  return `${String(Number(hourPart)).padStart(2, "0")}:${String(Number(minutePart)).padStart(2, "0")}`;
+}
+
+function syncScheduleTimeToEasternNow() {
+  if (!elements.scheduleTime) {
+    return;
+  }
+
+  elements.scheduleTime.value = getEasternTimeValue();
+}
+
 function rowKey(row) {
   return `${row.accountId}:${row.idOrganization}:${row.idLeague}:${row.idSportType}:${row.periodNumber || 0}`;
 }
@@ -647,7 +673,7 @@ function openConfirmation(row) {
   elements.newValue.textContent =
     change.newValue.toLocaleString();
 
-  elements.scheduleTime.value = "";
+  syncScheduleTimeToEasternNow();
 
   elements.scheduleDays.forEach((input) => {
     input.checked = false;
