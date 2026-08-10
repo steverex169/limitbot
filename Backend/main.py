@@ -1088,11 +1088,26 @@ def display_limit_value(row, field):
         return amount_max
     return row.get(f"{field}.Amount")
 
+
+def display_early_limit_value(row, field):
+    amount = row.get(f"{field}.Amount")
+    if amount not in (None, ""):
+        return amount
+    amount_max = row.get(f"{field}.AmountMax")
+    if amount_max not in (None, ""):
+        return amount_max
+    return row.get(field)
+
 def dashboard_rows(account_id, force=False):
     rows = []
     for row in get_leagues(account_id, force=force):
         is_exotic = ".Exotics[" in row.get("JsonPath", "")
         is_game_setup = row.get("PeriodTypes.GameSetup") is True
+        supports_early_limit = any(
+            row.get(f"{field}.EarlyLimit.Amount") not in (None, "")
+            or row.get(f"{field}.EarlyLimit.AmountMax") not in (None, "")
+            for field in ("Spread", "MoneyLine", "Total", "TeamTotal")
+        )
         editable_fields = (
             []
             if is_exotic
@@ -1134,15 +1149,15 @@ def dashboard_rows(account_id, force=False):
                     if is_exotic
                     else ""
                 ),
-                "supportsEarlyLimit": row["RowType"] in {"Summary", "League"} and not is_exotic,
+                "supportsEarlyLimit": supports_early_limit,
                 "spread": display_limit_value(row, "Spread"),
                 "moneyLine": display_limit_value(row, "MoneyLine"),
                 "total": display_limit_value(row, "Total"),
                 "teamTotal": display_limit_value(row, "TeamTotal"),
-                "earlySpread": display_limit_value(row, "EarlySpread"),
-                "earlyMoneyLine": display_limit_value(row, "EarlyMoneyLine"),
-                "earlyTotal": display_limit_value(row, "EarlyTotal"),
-                "earlyTeamTotal": display_limit_value(row, "EarlyTeamTotal"),
+                "earlySpread": display_early_limit_value(row, "Spread.EarlyLimit"),
+                "earlyMoneyLine": display_early_limit_value(row, "MoneyLine.EarlyLimit"),
+                "earlyTotal": display_early_limit_value(row, "Total.EarlyLimit"),
+                "earlyTeamTotal": display_early_limit_value(row, "TeamTotal.EarlyLimit"),
                 "hasAgentOverrides": any(
                     row.get(f"{key}.HasAgentOverrides") is True
                     for key in ("Spread", "MoneyLine", "Total", "TeamTotal")
@@ -1223,14 +1238,19 @@ def period_dashboard_rows(
             "editable": True,
             "editableFields": ["spread", "moneyLine", "total", "teamTotal"],
             "disabledReason": "",
+            "supportsEarlyLimit": any(
+                row.get(f"{field}.EarlyLimit.Amount") not in (None, "")
+                or row.get(f"{field}.EarlyLimit.AmountMax") not in (None, "")
+                for field in ("Spread", "MoneyLine", "Total", "TeamTotal")
+            ),
             "spread": display_limit_value(row, "Spread"),
             "moneyLine": display_limit_value(row, "MoneyLine"),
             "total": display_limit_value(row, "Total"),
             "teamTotal": display_limit_value(row, "TeamTotal"),
-            "earlySpread": display_limit_value(row, "EarlySpread"),
-            "earlyMoneyLine": display_limit_value(row, "EarlyMoneyLine"),
-            "earlyTotal": display_limit_value(row, "EarlyTotal"),
-            "earlyTeamTotal": display_limit_value(row, "EarlyTeamTotal"),
+            "earlySpread": display_early_limit_value(row, "Spread.EarlyLimit"),
+            "earlyMoneyLine": display_early_limit_value(row, "MoneyLine.EarlyLimit"),
+            "earlyTotal": display_early_limit_value(row, "Total.EarlyLimit"),
+            "earlyTeamTotal": display_early_limit_value(row, "TeamTotal.EarlyLimit"),
         }
         for row in load_period_rows(
             account_id,
