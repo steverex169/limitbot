@@ -2488,15 +2488,22 @@ elements.confirmSave.addEventListener(
       elements.scheduleDays.filter(
         (input) => input.checked
       );
+    const selectedTime = getSelectedScheduleTime();
     const oneTimeScheduleChecked =
       Boolean(elements.oneTimeSchedule?.checked);
 
-    if (
-      selectedDays.length ||
-      oneTimeScheduleChecked
-    ) {
+    const hasScheduleIntent =
+      (selectedDays.length > 0 && Boolean(selectedTime)) ||
+      oneTimeScheduleChecked;
+
+    if (hasScheduleIntent) {
+      scheduleActiveChange();
+      return;
+    }
+
+    if (selectedDays.length || selectedTime || oneTimeScheduleChecked) {
       showDialogMessage(
-        "Schedule options are set. Use the Schedule button to create the schedule, or clear the schedule to save immediately."
+        "Pick both weekdays and an Eastern time to create a schedule, or clear the schedule to save immediately."
       );
       return;
     }
