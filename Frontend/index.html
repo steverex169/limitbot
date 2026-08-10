@@ -94,6 +94,13 @@
         </div>
 
         <div class="filters">
+          <label class="select-field">
+            <span>Options</span>
+            <select id="limitModeFilter">
+              <option value="normal">Normal limits</option>
+              <option value="early">Early limits only</option>
+            </select>
+          </label>
           <label class="search-field">
             <span>Search</span>
             <input id="searchInput" type="search" placeholder="League or organization">
@@ -187,21 +194,9 @@
         <span>Time (U.S. Eastern / ET)</span>
         <input id="scheduleTime" type="time">
       </label>
-      <label class="schedule-field" id="earlyLimitTimeWrap" hidden>
-        <span>Early limit time (ET only)</span>
-        <select id="earlyLimitTime"></select>
-      </label>
       <label class="schedule-option">
         <input id="oneTimeSchedule" type="checkbox">
         <span>Run once on the selected day, then stop (no weekly repeat)</span>
-      </label>
-      <label class="schedule-option">
-        <input id="earlyLimit" type="checkbox">
-        <span>Early limit (8:00 AM - 11:00 AM ET only)</span>
-      </label>
-      <label class="schedule-option schedule-option-nested" id="earlyRepeatWrap" hidden>
-        <input id="earlyRepeatWeekly" type="checkbox">
-        <span>Repeat early limit weekly on selected days</span>
       </label>
       <div id="dialogMessage" class="message error" role="alert" hidden></div>
       <div class="dialog-actions">
@@ -224,7 +219,7 @@
     </div>
   </dialog>
 
-  <script src="/script.js?v=20260810-et-time-fix" defer></script>
+  <script src="/script.js?v=20260811-early-mode-filter" defer></script>
 </body>
 
 </html>

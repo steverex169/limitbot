@@ -1134,6 +1134,7 @@ def dashboard_rows(account_id, force=False):
                     if is_exotic
                     else ""
                 ),
+                "supportsEarlyLimit": row["RowType"] == "League" and is_game_setup,
                 "spread": display_limit_value(row, "Spread"),
                 "moneyLine": display_limit_value(row, "MoneyLine"),
                 "total": display_limit_value(row, "Total"),
@@ -1578,14 +1579,6 @@ def recurring_description(recurrence_days, recurrence_time):
     return f"Every {day_text} at {display_time} ET"
 
 
-def early_limit_time_valid(recurrence_time):
-    try:
-        hour, minute = (int(part) for part in recurrence_time.split(":", 1))
-    except (TypeError, ValueError):
-        return False
-    return (hour, minute) >= (8, 0) and (hour, minute) <= (11, 0)
-
-
 def create_schedule(request_data):
     auth = auth_context()
     try:
@@ -1595,8 +1588,6 @@ def create_schedule(request_data):
         sport_type_id = int(request_data["idSportType"])
         period_number = int(request_data.get("periodNumber", 0) or 0)
         value = int(request_data["value"])
-        is_early_limit = bool(request_data.get("earlyLimit"))
-        repeat_weekly = bool(request_data.get("repeatWeekly", True))
         one_time_schedule = bool(request_data.get("oneTimeSchedule"))
         recurrence_days = sorted({int(day) for day in request_data.get("recurrenceDays", [])})
         recurrence_time = str(request_data.get("recurrenceTime", ""))
@@ -1626,12 +1617,10 @@ def create_schedule(request_data):
         raise ValueError("Select at least one weekday")
     if not recurrence_time:
         raise ValueError("Select an Eastern time")
-    if is_early_limit and not early_limit_time_valid(recurrence_time):
-        raise ValueError("Early limit time must be between 8:00 AM and 11:00 AM ET")
     scheduled_for = next_recurring_run(recurrence_days, recurrence_time)
     stored_recurrence_days = (
         ",".join(str(day) for day in recurrence_days)
-        if (not one_time_schedule and (not is_early_limit or repeat_weekly))
+        if not one_time_schedule
         else None
     )
     stored_recurrence_time = recurrence_time if stored_recurrence_days else None
@@ -1655,7 +1644,7 @@ def create_schedule(request_data):
                 scheduled_for=scheduled_utc,
                 recurrence_days=stored_recurrence_days,
                 recurrence_time=stored_recurrence_time,
-                is_early_limit=is_early_limit,
+                is_early_limit=False,
                 status="pending",
             )
         )
@@ -1663,15 +1652,14 @@ def create_schedule(request_data):
 
     return {
         "id": job_id,
-        "message": "Early limit scheduled" if is_early_limit else "Limit change scheduled",
+        "message": "Limit change scheduled",
         "scheduledFor": scheduled_for.strftime("%Y-%m-%d %I:%M %p %Z"),
         "scheduledForUtc": scheduled_for_utc.isoformat(),
         "recurrence": (
             recurring_description(recurrence_days, recurrence_time)
             if stored_recurrence_days
-            else "Runs once as an early limit"
+            else "Runs once"
         ),
-        "earlyLimit": is_early_limit,
     }
 
 
@@ -1900,7 +1888,6 @@ def schedule_status_rows(account_id):
             "periodNumber": job.period_number,
             "field": job.field,
             "value": job.value,
-            "earlyLimit": bool(job.is_early_limit),
             "recurring": bool(job.recurrence_days and job.recurrence_time),
             "recurrence": (
                 recurring_description(

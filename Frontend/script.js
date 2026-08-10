@@ -35,6 +35,7 @@ const elements = {
   logoutButton: document.querySelector("#logoutButton"),
   themeToggle: document.querySelector("#themeToggle"),
   limitFilter: document.querySelector("#limitFilter"),
+  limitModeFilter: document.querySelector("#limitModeFilter"),
   agentSelectButton: document.querySelector("#agentSelectButton"),
   agentTree: document.querySelector("#agentTree"),
   agentSearch: document.querySelector("#agentSearch"),
@@ -55,16 +56,11 @@ const elements = {
   oldValue: document.querySelector("#oldValue"),
   newValue: document.querySelector("#newValue"),
   scheduleTime: document.querySelector("#scheduleTime"),
-  earlyLimitTimeWrap: document.querySelector("#earlyLimitTimeWrap"),
-  earlyLimitTime: document.querySelector("#earlyLimitTime"),
   scheduleDays: [
     ...document.querySelectorAll('input[name="scheduleDay"]'),
   ],
   oneTimeSchedule: document.querySelector("#oneTimeSchedule"),
   dialogMessage: document.querySelector("#dialogMessage"),
-  earlyLimit: document.querySelector("#earlyLimit"),
-  earlyRepeatWeekly: document.querySelector("#earlyRepeatWeekly"),
-  earlyRepeatWrap: document.querySelector("#earlyRepeatWrap"),
   confirmSchedule: document.querySelector("#confirmSchedule"),
   confirmSave: document.querySelector("#confirmSave"),
   scheduleStatusDialog: document.querySelector("#scheduleStatusDialog"),
@@ -82,52 +78,21 @@ const fieldLabels = {
   teamTotal: "Team total",
 };
 
-function buildEarlyLimitTimeOptions() {
-  if (!elements.earlyLimitTime) {
-    return;
+function isEarlyLimitEligibleRow(row) {
+  if (row?.supportsEarlyLimit === true) {
+    return true;
   }
 
-  const options = [];
-  for (let hour = 8; hour <= 11; hour += 1) {
-    for (let minute = 0; minute < 60; minute += 1) {
-      if (hour === 11 && minute > 0) {
-        continue;
-      }
-      const value = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-      const labelHour = hour % 12 === 0 ? 12 : hour % 12;
-      const labelMinute = String(minute).padStart(2, "0");
-      const suffix = hour < 12 ? "AM" : "PM";
-      options.push(
-        `<option value="${value}">${labelHour}:${labelMinute} ${suffix} ET</option>`
-      );
-    }
-  }
+  const editableFields = Array.isArray(row?.editableFields)
+    ? row.editableFields
+    : [];
 
-  elements.earlyLimitTime.innerHTML = options.join("");
-  elements.earlyLimitTime.value = "08:00";
+  return (
+    row?.rowType === "League" &&
+    editableFields.length === 1 &&
+    editableFields.includes("spread")
+  );
 }
-
-function getSelectedScheduleTime() {
-  if (elements.earlyLimit?.checked) {
-    return elements.earlyLimitTime?.value || "";
-  }
-  return elements.scheduleTime.value;
-}
-
-function syncEarlyLimitTimeVisibility() {
-  const isEarlyLimit = Boolean(elements.earlyLimit?.checked);
-
-  if (elements.earlyLimitTimeWrap) {
-    elements.earlyLimitTimeWrap.hidden = !isEarlyLimit;
-  }
-
-  if (elements.scheduleTime) {
-    elements.scheduleTime.closest(".schedule-field").hidden = isEarlyLimit;
-  }
-}
-
-buildEarlyLimitTimeOptions();
-syncEarlyLimitTimeVisibility();
 
 const easternDateTimeFormatter = new Intl.DateTimeFormat(
   "en-US",
@@ -651,9 +616,6 @@ function openConfirmation(row) {
     change.newValue.toLocaleString();
 
   elements.scheduleTime.value = "";
-  if (elements.earlyLimitTime) {
-    elements.earlyLimitTime.value = "08:00";
-  }
 
   elements.scheduleDays.forEach((input) => {
     input.checked = false;
@@ -662,11 +624,6 @@ function openConfirmation(row) {
   if (elements.oneTimeSchedule) {
     elements.oneTimeSchedule.checked = false;
   }
-
-  elements.earlyLimit.checked = false;
-  elements.earlyRepeatWeekly.checked = false;
-  syncEarlyLimitTimeVisibility();
-  elements.earlyRepeatWrap.hidden = true;
 
   clearDialogMessage();
 
@@ -688,11 +645,15 @@ function renderRows() {
   if (!state.filteredRows.length) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
+    const modeLabel =
+      elements.limitModeFilter?.value === "early"
+        ? "early-eligible"
+        : "editable";
 
     cell.colSpan = 7;
     cell.className = "empty-state";
     cell.textContent =
-      "No editable leagues match the current filters.";
+      `No ${modeLabel} leagues match the current filters.`;
 
     row.append(cell);
     elements.leagueRows.append(row);
@@ -894,6 +855,7 @@ function applyFilters() {
     .toLowerCase();
 
   const rowType = elements.rowTypeFilter.value;
+  const limitMode = elements.limitModeFilter?.value || "normal";
 
   const selectedLimitKey = normalizeLimitKey(
     elements.limitFilter.value
@@ -973,7 +935,15 @@ function applyFilters() {
       !query ||
       haystack.includes(query);
 
-    if (matchesType && matchesSearch) {
+    const matchesLimitMode =
+      limitMode !== "early" ||
+      isEarlyLimitEligibleRow(row);
+
+    if (
+      matchesType &&
+      matchesSearch &&
+      matchesLimitMode
+    ) {
       filteredRows.push(row);
     }
   }
@@ -1021,10 +991,7 @@ function renderSchedules() {
         `League ${schedule.idLeague}`
       ),
       createTextCell(
-        `${schedule.earlyLimit
-          ? "Early limit · "
-          : ""
-        }${fieldLabels[schedule.field] ||
+        `${fieldLabels[schedule.field] ||
         schedule.field
         }: ${Number(
           schedule.value
@@ -2041,8 +2008,7 @@ async function scheduleActiveChange() {
         Number(input.value)
       );
 
-  const selectedTime =
-    getSelectedScheduleTime();
+  const selectedTime = elements.scheduleTime.value;
 
   if (!selectedTime) {
     showDialogMessage(
@@ -2058,9 +2024,6 @@ async function scheduleActiveChange() {
     return;
   }
 
-  const earlyLimit =
-    elements.earlyLimit.checked;
-
   /*
    * One-time vs weekly is the user's explicit choice — a single checked
    * day must still allow an every-week schedule.
@@ -2068,31 +2031,6 @@ async function scheduleActiveChange() {
   const oneTimeSchedule = Boolean(
     elements.oneTimeSchedule?.checked
   );
-
-  const repeatWeekly =
-    !oneTimeSchedule &&
-    (!earlyLimit ||
-      elements.earlyRepeatWeekly.checked);
-
-  if (earlyLimit) {
-    const [
-      hour = 0,
-      minute = 0,
-    ] = selectedTime
-      .split(":")
-      .map((part) => Number(part));
-
-    if (
-      hour < 8 ||
-      hour > 11 ||
-      (hour === 11 && minute > 0)
-    ) {
-      showDialogMessage(
-        "Early limit time must be between 8:00 AM and 11:00 AM ET."
-      );
-      return;
-    }
-  }
 
   if (oneTimeSchedule) {
     const dayNames = [
@@ -2150,8 +2088,6 @@ async function scheduleActiveChange() {
           value: change.newValue,
           recurrenceDays,
           recurrenceTime: selectedTime,
-          earlyLimit,
-          repeatWeekly,
           oneTimeSchedule,
         }),
       }
@@ -2256,6 +2192,13 @@ elements.limitFilter.addEventListener(
   }
 );
 
+elements.limitModeFilter?.addEventListener(
+  "change",
+  () => {
+    applyFilters();
+  }
+);
+
 elements.agentSelectButton.addEventListener(
   "click",
   () => {
@@ -2297,20 +2240,6 @@ elements.confirmSchedule.addEventListener(
   }
 );
 
-elements.earlyLimit.addEventListener(
-  "change",
-  () => {
-    elements.earlyRepeatWrap.hidden =
-      !elements.earlyLimit.checked;
-    syncEarlyLimitTimeVisibility();
-
-    if (!elements.earlyLimit.checked) {
-      elements.earlyRepeatWeekly.checked =
-        false;
-    }
-  }
-);
-
 elements.confirmSave.addEventListener(
   "click",
   (event) => {
@@ -2328,7 +2257,7 @@ elements.confirmSave.addEventListener(
 
     if (
       selectedDays.length ||
-      getSelectedScheduleTime()
+      elements.scheduleTime.value
     ) {
       showDialogMessage(
         "Schedule options are set. Use the Schedule button to create the schedule, or clear the days and time to save immediately."
@@ -2517,6 +2446,9 @@ elements.logoutButton.addEventListener(
     elements.limitFilter.append(
       placeholder
     );
+    if (elements.limitModeFilter) {
+      elements.limitModeFilter.value = "normal";
+    }
 
     showLogin();
   }
