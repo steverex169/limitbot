@@ -548,6 +548,21 @@ function clearMessage() {
   elements.message.hidden = true;
 }
 
+function applySavedValueToRows(savedRow, savedField, savedValue) {
+  state.rows = state.rows.map((row) => {
+    if (
+      Number(row.accountId) === Number(savedRow.accountId) &&
+      Number(row.idLeague) === Number(savedRow.idLeague) &&
+      Number(row.idOrganization) === Number(savedRow.idOrganization) &&
+      Number(row.idSportType) === Number(savedRow.idSportType) &&
+      Number(row.periodNumber || 0) === Number(savedRow.periodNumber || 0)
+    ) {
+      return { ...row, [savedField]: savedValue };
+    }
+    return row;
+  });
+}
+
 function updateCounters() {
   elements.rowCount.textContent = state.rows.length;
   elements.visibleCount.textContent = state.filteredRows.length;
@@ -2059,25 +2074,7 @@ async function saveActiveChange() {
     const savedValue = change.newValue;
     const savedRow = change.row;
 
-    // If the backend returned fresh rows, use them as the base; otherwise keep existing.
-    const baseRows = Array.isArray(data.rows) && data.rows.length > 0
-      ? data.rows
-      : state.rows;
-
-    // Match on the full row identity: rows can share league/org/period
-    // while differing in sport type or account.
-    state.rows = baseRows.map((r) => {
-      if (
-        Number(r.accountId) === Number(savedRow.accountId) &&
-        Number(r.idLeague) === Number(savedRow.idLeague) &&
-        Number(r.idOrganization) === Number(savedRow.idOrganization) &&
-        Number(r.idSportType) === Number(savedRow.idSportType) &&
-        Number(r.periodNumber || 0) === Number(savedRow.periodNumber || 0)
-      ) {
-        return { ...r, [savedField]: savedValue };
-      }
-      return r;
-    });
+    applySavedValueToRows(savedRow, savedField, savedValue);
 
     // Invalidate any in-flight poll so its pre-save data is discarded.
     leagueDataVersion += 1;
@@ -2172,22 +2169,7 @@ async function savePendingBatch() {
 
       const savedValue = item.newValue;
       const savedRow = item.row;
-      const baseRows = Array.isArray(data.rows) && data.rows.length > 0
-        ? data.rows
-        : state.rows;
-
-      state.rows = baseRows.map((r) => {
-        if (
-          Number(r.accountId) === Number(savedRow.accountId) &&
-          Number(r.idLeague) === Number(savedRow.idLeague) &&
-          Number(r.idOrganization) === Number(savedRow.idOrganization) &&
-          Number(r.idSportType) === Number(savedRow.idSportType) &&
-          Number(r.periodNumber || 0) === Number(savedRow.periodNumber || 0)
-        ) {
-          return { ...r, [savedField]: savedValue };
-        }
-        return r;
-      });
+      applySavedValueToRows(savedRow, savedField, savedValue);
 
       leagueDataVersion += 1;
       removePendingChange(item);
