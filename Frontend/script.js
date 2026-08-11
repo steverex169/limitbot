@@ -2119,7 +2119,7 @@ async function savePendingBatch() {
 
   elements.confirmSave.disabled = true;
   elements.confirmSave.textContent =
-    "Savingâ€¦";
+    "Saving...";
 
   try {
     const savedSummaries = [];
