@@ -893,7 +893,7 @@ function renderRows() {
     saveButton.disabled = ![
       ...state.pending.keys(),
     ].some((pendingKey) =>
-      pendingKey.startsWith(`${rowKey(row)}:`)
+      pendingKey.startsWith(`${rowKey(row)}:${getSelectedLimitMode()}:`)
     );
 
     saveButton.addEventListener(
