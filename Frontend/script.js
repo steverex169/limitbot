@@ -63,7 +63,6 @@ const elements = {
   scheduleDays: [
     ...document.querySelectorAll('input[name="scheduleDay"]'),
   ],
-  oneTimeSchedule: document.querySelector("#oneTimeSchedule"),
   dialogMessage: document.querySelector("#dialogMessage"),
   confirmSchedule: document.querySelector("#confirmSchedule"),
   confirmSave: document.querySelector("#confirmSave"),
@@ -219,10 +218,6 @@ function clearScheduleOptions() {
   elements.scheduleDays.forEach((input) => {
     input.checked = false;
   });
-
-  if (elements.oneTimeSchedule) {
-    elements.oneTimeSchedule.checked = false;
-  }
 
   if (elements.scheduleHour) {
     elements.scheduleHour.value = "";
@@ -2224,38 +2219,12 @@ async function scheduleActiveChange() {
     return;
   }
 
-  if (!recurrenceDays.length) {
-    showDialogMessage(
-      "Select at least one weekday."
-    );
-    return;
-  }
-
-  /*
-   * One-time vs weekly is the user's explicit choice — a single checked
-   * day must still allow an every-week schedule.
-   */
-  const oneTimeSchedule = Boolean(
-    elements.oneTimeSchedule?.checked
-  );
+  const oneTimeSchedule = recurrenceDays.length === 0;
 
   if (oneTimeSchedule) {
-    const dayNames = [
-      "Monday",
-      "Tuesday",
-      "Wednesday",
-      "Thursday",
-      "Friday",
-      "Saturday",
-      "Sunday",
-    ];
-    const dayText = recurrenceDays
-      .map((day) => dayNames[day] || "selected day")
-      .join(", ");
-
     if (
       !window.confirm(
-        `This limit will change one time on ${dayText} at ${selectedTime} ET and will not repeat. Continue?`
+        `This limit will change one time at ${selectedTime} ET and will not repeat. Continue?`
       )
     ) {
       return;
@@ -2471,21 +2440,14 @@ elements.confirmSave.addEventListener(
         (input) => input.checked
       );
     const selectedTime = getSelectedScheduleTime();
-    const oneTimeScheduleChecked =
-      Boolean(elements.oneTimeSchedule?.checked);
-
-    const hasScheduleIntent =
-      (selectedDays.length > 0 && Boolean(selectedTime)) ||
-      oneTimeScheduleChecked;
-
-    if (hasScheduleIntent) {
+    if (selectedTime) {
       scheduleActiveChange();
       return;
     }
 
-    if (selectedDays.length || selectedTime || oneTimeScheduleChecked) {
+    if (selectedDays.length) {
       showDialogMessage(
-        "Pick both weekdays and an Eastern time to create a schedule, or clear the schedule to save immediately."
+        "Pick an Eastern time to create a schedule, or clear the schedule to save immediately."
       );
       return;
     }

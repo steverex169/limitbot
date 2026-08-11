@@ -1618,6 +1618,32 @@ def next_recurring_run(recurrence_days, recurrence_time, after=None):
             return candidate
     raise RuntimeError("Could not calculate the next recurring run")
 
+def next_one_time_run(recurrence_time, after=None):
+    try:
+        hour, minute = (int(part) for part in recurrence_time.split(":", 1))
+    except (TypeError, ValueError) as error:
+        raise ValueError("Select a valid Eastern time") from error
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        raise ValueError("Select a valid Eastern time")
+
+    after = after or datetime.now(schedule_timezone)
+    if after.tzinfo is None:
+        after = after.replace(tzinfo=schedule_timezone)
+    else:
+        after = after.astimezone(schedule_timezone)
+
+    candidate = datetime(
+        after.year,
+        after.month,
+        after.day,
+        hour,
+        minute,
+        tzinfo=schedule_timezone,
+    )
+    if candidate <= after:
+        candidate += timedelta(days=1)
+    return candidate
+
 
 def recurring_description(recurrence_days, recurrence_time):
     days = [weekday_names[int(day)] for day in recurrence_days]
@@ -1667,17 +1693,18 @@ def create_schedule(request_data):
         raise ValueError("This league uses only the Spread limit")
     if value < 0 or value > 1_000_000_000:
         raise ValueError("Limit must be between 0 and 1,000,000,000")
-    if not recurrence_days:
-        raise ValueError("Select at least one weekday")
     if not recurrence_time:
         raise ValueError("Select an Eastern time")
-    scheduled_for = next_recurring_run(recurrence_days, recurrence_time)
-    stored_recurrence_days = (
-        ",".join(str(day) for day in recurrence_days)
-        if not one_time_schedule
-        else None
-    )
-    stored_recurrence_time = recurrence_time if stored_recurrence_days else None
+
+    if not recurrence_days:
+        one_time_schedule = True
+        scheduled_for = next_one_time_run(recurrence_time)
+        stored_recurrence_days = None
+        stored_recurrence_time = None
+    else:
+        scheduled_for = next_recurring_run(recurrence_days, recurrence_time)
+        stored_recurrence_days = ",".join(str(day) for day in recurrence_days)
+        stored_recurrence_time = recurrence_time
 
     job_id = uuid.uuid4().hex
     scheduled_utc = scheduled_for.astimezone(timezone.utc).replace(tzinfo=None)
