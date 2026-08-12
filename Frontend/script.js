@@ -64,6 +64,7 @@ const elements = {
   scheduleHour: document.querySelector("#scheduleHour"),
   scheduleMinute: document.querySelector("#scheduleMinute"),
   schedulePeriod: document.querySelector("#schedulePeriod"),
+  customerSupportAgent: document.querySelector("#customerSupportAgent"),
   clearScheduleOptions: document.querySelector("#clearScheduleOptions"),
   scheduleDays: [
     ...document.querySelectorAll('input[name="scheduleDay"]'),
@@ -288,6 +289,10 @@ function clearScheduleOptions() {
 
   if (elements.schedulePeriod) {
     elements.schedulePeriod.value = "";
+  }
+
+  if (elements.customerSupportAgent) {
+    elements.customerSupportAgent.value = "";
   }
 
   clearDialogMessage();
@@ -1138,14 +1143,15 @@ function renderSchedules() {
   elements.scheduleRows.replaceChildren();
 
   const schedules = state.schedules.filter(
-    (schedule) => schedule.status !== "cancelled"
+    (schedule) =>
+      schedule.recurring
   );
 
   if (!schedules.length) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
 
-    cell.colSpan = 7;
+    cell.colSpan = 8;
     cell.className = "empty-state";
     cell.textContent = "No recurring schedules.";
 
@@ -1167,6 +1173,7 @@ function renderSchedules() {
         )?.name ||
         `Agent ${schedule.accountId}`
       ),
+      createTextCell(schedule.customerSupportAgent),
       createTextCell(
         schedule.leagueName ||
         `League ${schedule.idLeague}`
@@ -2297,6 +2304,15 @@ async function scheduleActiveChange() {
       );
 
   const selectedTime = getSelectedScheduleTime();
+  const customerSupportAgent =
+    elements.customerSupportAgent?.value.trim() || "";
+
+  if (customerSupportAgent.length > 100) {
+    showDialogMessage(
+      "Customer Support Agent name must be 100 characters or fewer."
+    );
+    return;
+  }
 
   if (!selectedTime) {
     showDialogMessage(
@@ -2306,6 +2322,14 @@ async function scheduleActiveChange() {
   }
 
   const oneTimeSchedule = recurrenceDays.length === 0;
+
+  if (!oneTimeSchedule && !customerSupportAgent) {
+    showDialogMessage(
+      "Enter the Customer Support Agent name."
+    );
+    return;
+  }
+
   // Keep the schedule permanently tied to the mode in which the edit was
   // created. Changing UI state later must never retarget the schedule.
   const limitMode = change.mode === "early" ? "early" : "normal";
@@ -2354,6 +2378,7 @@ async function scheduleActiveChange() {
           limitMode,
           recurrenceDays,
           recurrenceTime: selectedTime,
+          customerSupportAgent,
           oneTimeSchedule,
         }),
       }

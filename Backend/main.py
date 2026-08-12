@@ -1669,6 +1669,9 @@ def create_schedule(request_data):
         limit_mode = str(request_data.get("limitMode", "normal")).strip().lower()
         recurrence_days = sorted({int(day) for day in request_data.get("recurrenceDays", [])})
         recurrence_time = str(request_data.get("recurrenceTime", ""))
+        customer_support_agent = str(
+            request_data.get("customerSupportAgent", "")
+        ).strip()
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError("Enter a valid limit, weekdays, and Eastern time") from error
 
@@ -1695,6 +1698,10 @@ def create_schedule(request_data):
         raise ValueError("Limit must be between 0 and 1,000,000,000")
     if not recurrence_time:
         raise ValueError("Select an Eastern time")
+    if recurrence_days and not customer_support_agent:
+        raise ValueError("Enter the Customer Support Agent name")
+    if len(customer_support_agent) > 100:
+        raise ValueError("Customer Support Agent name must be 100 characters or fewer")
 
     if not recurrence_days:
         one_time_schedule = True
@@ -1729,6 +1736,18 @@ def create_schedule(request_data):
                 status="pending",
             )
         )
+        db.flush()
+        db.execute(
+            text(
+                "UPDATE scheduled_limits "
+                "SET customer_support_agent = :customer_support_agent "
+                "WHERE id = :job_id"
+            ),
+            {
+                "customer_support_agent": customer_support_agent or None,
+                "job_id": job_id,
+            },
+        )
         db.commit()
 
     return {
@@ -1737,6 +1756,7 @@ def create_schedule(request_data):
         "scheduledFor": scheduled_for.strftime("%Y-%m-%d %I:%M %p %Z"),
         "scheduledForUtc": scheduled_for_utc.isoformat(),
         "limitMode": limit_mode,
+        "customerSupportAgent": customer_support_agent,
         "recurrence": (
             recurring_description(recurrence_days, recurrence_time)
             if stored_recurrence_days
@@ -1950,25 +1970,44 @@ def schedule_status_rows(account_id):
         for agent in agents
     }
 
-    # Only the logged-in root/main agent gets the combined schedule history.
-    # Any selected sub-agent keeps the existing behavior and sees only its own
-    # schedules.
-    if int(account_id) == int(auth["id"]):
-        visible_account_ids = set(agent_names)
-    else:
-        visible_account_ids = {int(account_id)}
+    # The logged-in root/main agent owns the combined schedule history for
+    # every account it scheduled under. A selected child/sub-agent must still
+    # see only schedules for that specific account.
+    schedule_query = select(ScheduledLimit).where(
+        ScheduledLimit.user_id == auth["userId"]
+    )
+    if int(account_id) != int(auth["id"]):
+        schedule_query = schedule_query.where(
+            ScheduledLimit.account_id == int(account_id)
+        )
 
     with database_session() as db:
         jobs = list(
             db.scalars(
-                select(ScheduledLimit)
-                .where(
-                    ScheduledLimit.user_id == auth["userId"],
-                    ScheduledLimit.account_id.in_(visible_account_ids),
-                )
-                .order_by(ScheduledLimit.created_at)
+                schedule_query.order_by(ScheduledLimit.created_at)
             )
         )
+
+        # Customer Support Agent is an additive display field. Existing
+        # recurring history must remain available even before this new column
+        # has been migrated on an older database.
+        existing_schedule_columns = {
+            column["name"]
+            for column in inspect(engine).get_columns("scheduled_limits")
+        }
+        if "customer_support_agent" in existing_schedule_columns:
+            support_agent_rows = db.execute(
+                text(
+                    "SELECT id, customer_support_agent "
+                    "FROM scheduled_limits WHERE user_id = :user_id"
+                ),
+                {"user_id": auth["userId"]},
+            )
+            customer_support_agents = {
+                str(row[0]): row[1] for row in support_agent_rows
+            }
+        else:
+            customer_support_agents = {}
 
     # A root history can contain schedules from many different agents. Resolve
     # league names once per scheduled account so the Activity Logs table does
@@ -2029,6 +2068,7 @@ def schedule_status_rows(account_id):
         "agentName": agent_names.get(
             int(job.account_id), f"Agent {job.account_id}"
         ),
+        "customerSupportAgent": customer_support_agents.get(str(job.id)),
         "idOrganization": job.organization_id,
         "idLeague": job.league_id,
         "leagueName": (
@@ -2504,6 +2544,7 @@ def migrate_schedule_columns():
         "is_early_limit": "BOOLEAN NOT NULL DEFAULT FALSE",
         "last_run_status": "VARCHAR(20) NULL",
         "last_run_at": "DATETIME NULL",
+        "customer_support_agent": "VARCHAR(100) NULL",
     }
     with engine.begin() as connection:
         for column_name, column_type in additions.items():

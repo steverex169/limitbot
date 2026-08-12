@@ -167,6 +167,7 @@
           <thead>
             <tr>
               <th>Agent</th>
+              <th>Customer Support Agent</th>
               <th>League</th>
               <th>Limit</th>
               <th>Repeats</th>
@@ -177,7 +178,7 @@
           </thead>
           <tbody id="scheduleRows">
             <tr>
-            <td colspan="7" class="empty-state">No scheduled limits.</td>
+            <td colspan="8" class="empty-state">No scheduled limits.</td>
           </tr>
         </tbody>
       </table>
@@ -221,6 +222,10 @@
           </select>
         </div>
       </label>
+      <label class="schedule-field">
+        <span>Customer Support Agent</span>
+        <input id="customerSupportAgent" type="text" maxlength="100" autocomplete="off" placeholder="Enter your name">
+      </label>
       <button id="clearScheduleOptions" type="button" class="button secondary">
         Clear schedule
       </button>
@@ -245,7 +250,7 @@
     </div>
   </dialog>
 
-  <script src="/script.js?v=20260812-ui-v6-topbar-left" defer></script>
+  <script src="/script.js?v=20260812-customer-support-agent" defer></script>
 </body>
 
 </html>
