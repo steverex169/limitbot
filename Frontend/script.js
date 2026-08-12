@@ -35,6 +35,7 @@ const elements = {
   dashboardView: document.querySelector("#dashboardView"),
   logoutButton: document.querySelector("#logoutButton"),
   themeToggle: document.querySelector("#themeToggle"),
+  dashboardSidebar: document.querySelector("#dashboardSidebar"),
   limitFilter: document.querySelector("#limitFilter"),
   limitModeFilter: document.querySelector("#limitModeFilter"),
   agentSelectButton: document.querySelector("#agentSelectButton"),
@@ -514,6 +515,7 @@ function toggleTheme() {
   applyTheme(nextTheme);
 }
 
+
 function showMessage(text, type = "") {
   elements.message.textContent = text;
   elements.message.className = `message ${type}`.trim();
@@ -759,6 +761,16 @@ function renderRows() {
    * parent limit is selected.
    */
   if (!elements.limitFilter.value) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+
+    cell.colSpan = 7;
+    cell.className = "empty-state";
+    cell.textContent = "No league is selected.";
+
+    row.append(cell);
+    elements.leagueRows.append(row);
+
     updateCounters();
     return;
   }
@@ -2405,6 +2417,7 @@ document.addEventListener(
       elements.agentTree.hidden = true;
       elements.agentSearchResults.hidden =
         true;
+
     }
   }
 );
@@ -2494,6 +2507,7 @@ function showLogin() {
 
   elements.loginView.hidden = false;
   elements.dashboardHeader.hidden = true;
+  elements.dashboardSidebar.hidden = true;
   elements.dashboardView.hidden = true;
   elements.password.value = "";
 }
@@ -2505,6 +2519,7 @@ async function startDashboard() {
 
   elements.loginView.hidden = true;
   elements.dashboardHeader.hidden = false;
+  elements.dashboardSidebar.hidden = false;
   elements.dashboardView.hidden = false;
 
   try {

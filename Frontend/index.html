@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Aces High Limit Control</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/styles.css?v=20260803-theme-toggle">
+  <link rel="stylesheet" href="/styles.css?v=20260812-ui-v6-topbar-left">
 </head>
 
 <body class="app-loading">
@@ -29,35 +29,15 @@
   </main>
 
   <header id="dashboardHeader" class="topbar" hidden>
-    <div class="topbar-title">
-      <p class="eyebrow">AUTHORIZED TESTING DASHBOARD</p>
-      <div class="title-row">
-        <h1>League limit control</h1>
-        <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch theme" aria-pressed="false">
-          <span class="theme-toggle-icon theme-toggle-sun" aria-hidden="true">☀</span>
-          <span class="theme-toggle-icon theme-toggle-moon" aria-hidden="true">☾</span>
-        </button>
-      </div>
-    </div>
     <div class="topbar-actions">
-      <label class="select-field limit-selector">
-        <span>Select League</span>
-        <select id="limitFilter">
-          <option value="all">All limits</option>
-        </select>
-      </label>
-      <label class="agent-search">
-        <span>Find agent</span>
-        <input id="agentSearch" type="search" placeholder="Search agents...." autocomplete="off">
-        <div id="agentSearchResults" class="agent-search-results" role="listbox" hidden></div>
-      </label>
-      <label class="agent-selector">
-        <span>Select agent</span>
-        <button id="agentSelectButton" class="agent-select-button" type="button" disabled>
-          Loading agents...
-        </button>
-        <div id="agentTree" class="agent-tree" role="tree" hidden></div>
-      </label>
+      <div class="topbar-title">
+        <p class="eyebrow">AUTHORIZED TESTING DASHBOARD</p>
+        <h1>League limit control</h1>
+      </div>
+      <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch theme" aria-pressed="false">
+        <span class="theme-toggle-icon theme-toggle-sun" aria-hidden="true">☀</span>
+        <span class="theme-toggle-icon theme-toggle-moon" aria-hidden="true">☾</span>
+      </button>
       <div class="account-chip">
         <span class="status-dot"></span>
         <div>
@@ -65,10 +45,41 @@
           <small id="accountId">Account</small>
         </div>
       </div>
-      <button id="logoutButton" class="button secondary" type="button">Log out</button>
+      <button id="logoutButton" class="button secondary logout-button" type="button">Log out</button>
     </div>
   </header>
 
+  <aside id="dashboardSidebar" class="dashboard-sidebar" aria-label="Dashboard filters" hidden>
+    <div class="sidebar-heading">
+      <div>
+        <p class="eyebrow">FILTERS</p>
+        <strong>League &amp; agent</strong>
+      </div>
+    </div>
+
+    <div class="sidebar-controls">
+      <label class="select-field limit-selector sidebar-control">
+        <span>Select League</span>
+        <select id="limitFilter">
+          <option value="">Select League</option>
+        </select>
+      </label>
+
+      <label class="agent-search sidebar-control">
+        <span>Find agent</span>
+        <input id="agentSearch" type="search" placeholder="Search agents...." autocomplete="off">
+        <div id="agentSearchResults" class="agent-search-results" role="listbox" hidden></div>
+      </label>
+
+      <label class="agent-selector sidebar-control">
+        <span>Select agent</span>
+        <button id="agentSelectButton" class="agent-select-button" type="button" disabled>
+          Loading agents...
+        </button>
+        <div id="agentTree" class="agent-tree" role="tree" hidden></div>
+      </label>
+    </div>
+  </aside>
   <main id="dashboardView" hidden>
     <section class="summary-grid" aria-label="Dashboard summary">
       <article class="summary-card">
@@ -133,14 +144,14 @@
           </thead>
           <tbody id="leagueRows">
             <tr>
-              <td colspan="7" class="empty-state">Loading leagues…</td>
+              <td colspan="7" class="empty-state">No league is selected.</td>
             </tr>
           </tbody>
         </table>
       </div>
     </section>
 
-    <section class="panel schedules-panel">
+    <section class="panel schedules-panel" hidden aria-hidden="true" style="display: none !important;">
       <div class="panel-head">
         <div>
           <p class="eyebrow">AUTOMATION</p>
@@ -230,7 +241,7 @@
     </div>
   </dialog>
 
-  <script src="/script.js?v=20260810-schedule-mode-fix" defer></script>
+  <script src="/script.js?v=20260812-ui-v6-topbar-left" defer></script>
 </body>
 
 </html>

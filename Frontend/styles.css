@@ -96,8 +96,8 @@ body:not(.app-loading) #dashboardView {
   align-items: center;
   justify-content: space-between;
   padding: 24px 36px;
-  background: var(--navy);
   color: #fff;
+  background: var(--navy);
 }
 
 :root[data-theme="dark"] .topbar {
@@ -1564,5 +1564,329 @@ dialog h2 {
     gap: 10px;
     padding: 14px;
     font-size: 18px;
+  }
+}
+
+/* =========================================================
+   Dashboard shell: normal-flow topbar + permanent sidebar
+   ========================================================= */
+:root {
+  --dashboard-topbar-height: 82px;
+  --dashboard-sidebar-width: 292px;
+  --dashboard-shell-gap: 20px;
+}
+
+/* Normal document flow: this header scrolls with the page. */
+#dashboardHeader.topbar {
+  position: fixed;
+  z-index: 100;
+  top: 0;
+  right: 0;
+  bottom: auto;
+  left: 0;
+  width: 100%;
+  display: flex;
+  min-height: var(--dashboard-topbar-height);
+  padding: 14px 28px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 18px;
+  box-shadow: 0 1px 0 var(--topbar-border);
+}
+
+#dashboardHeader .topbar-actions {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+/* Authorized Testing Dashboard + League limit control are top-left. */
+#dashboardHeader .topbar-title {
+  display: flex;
+  min-width: 0;
+  margin: 0 4px 0 0;
+  flex: 0 1 auto;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  text-align: left;
+}
+
+#dashboardHeader .topbar-title h1 {
+  margin: 0;
+  font-size: clamp(18px, 2vw, 24px);
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+#dashboardHeader .topbar-title .eyebrow {
+  white-space: nowrap;
+}
+
+/* Theme toggle stays directly beside the title on the left. */
+#dashboardHeader .theme-toggle {
+  flex: 0 0 auto;
+}
+
+/* Account and logout stay on the right. */
+#dashboardHeader .account-chip {
+  min-width: 176px;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+#dashboardHeader .logout-button {
+  flex: 0 0 auto;
+}
+
+/* Sidebar remains permanently visible. */
+.dashboard-sidebar {
+  position: fixed;
+  z-index: 80;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--dashboard-sidebar-width);
+  padding: calc(var(--dashboard-topbar-height) + 20px) 18px 20px;
+  border-right: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: 10px 0 30px rgba(16, 24, 40, 0.05);
+  overflow-x: visible;
+  overflow-y: auto;
+  transform: none;
+  visibility: visible;
+  transition: none;
+}
+
+.sidebar-heading {
+  display: flex;
+  padding: 2px 4px 18px;
+  border-bottom: 1px solid var(--line);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sidebar-heading strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 15px;
+}
+
+.sidebar-controls {
+  display: grid;
+  gap: 18px;
+  padding-top: 18px;
+}
+
+.dashboard-sidebar .sidebar-control,
+.dashboard-sidebar .select-field,
+.dashboard-sidebar .agent-search,
+.dashboard-sidebar .agent-selector,
+.dashboard-sidebar .limit-selector {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.dashboard-sidebar .limit-selector span,
+.dashboard-sidebar .agent-selector span,
+.dashboard-sidebar .agent-search span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.dashboard-sidebar .limit-selector select,
+.dashboard-sidebar .agent-search input,
+.dashboard-sidebar .agent-select-button {
+  width: 100%;
+  min-width: 0;
+  height: 42px;
+  border: 1px solid #d0d5dd;
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.dashboard-sidebar .limit-selector select,
+.dashboard-sidebar .agent-search input {
+  padding: 0 12px;
+  font-weight: 650;
+}
+
+.dashboard-sidebar .agent-select-button {
+  padding-right: 34px;
+  box-shadow: none;
+}
+
+.dashboard-sidebar .agent-search-results,
+.dashboard-sidebar .agent-tree {
+  right: 0;
+  left: 0;
+  width: auto;
+  max-width: none;
+}
+
+.dashboard-sidebar .agent-tree {
+  max-height: min(430px, calc(100vh - var(--dashboard-topbar-height) - 250px));
+}
+
+:root[data-theme="dark"] .dashboard-sidebar {
+  border-color: var(--line);
+  background: var(--surface);
+  box-shadow: 10px 0 34px rgba(0, 0, 0, 0.2);
+}
+
+:root[data-theme="dark"] .dashboard-sidebar .limit-selector select,
+:root[data-theme="dark"] .dashboard-sidebar .agent-search input,
+:root[data-theme="dark"] .dashboard-sidebar .agent-select-button {
+  border-color: var(--line);
+  background: rgba(15, 23, 42, 0.94);
+  color: var(--ink);
+}
+
+/* No fixed-header offset is needed anymore. */
+#dashboardView {
+  min-width: 0;
+  height: calc(100vh - var(--dashboard-topbar-height));
+  margin-top: var(--dashboard-topbar-height);
+  margin-left: var(--dashboard-sidebar-width);
+  padding: var(--dashboard-shell-gap) 36px 36px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  transition: none;
+}
+
+@media (max-width: 1180px) {
+  #dashboardHeader.topbar {
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+
+  #dashboardView {
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+}
+
+@media (max-width: 1024px) {
+  :root {
+    --dashboard-topbar-height: 74px;
+    --dashboard-sidebar-width: 260px;
+  }
+
+  #dashboardHeader.topbar {
+    padding: 10px 16px;
+  }
+
+  #dashboardHeader .topbar-actions {
+    width: 100%;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+  }
+
+  #dashboardHeader .topbar-title {
+    flex: 0 1 auto;
+  }
+
+  #dashboardHeader .account-chip {
+    min-width: 0;
+    padding: 9px 11px;
+  }
+
+  #dashboardHeader .account-chip small {
+    display: none;
+  }
+
+  #dashboardView {
+    padding-right: 14px;
+    padding-left: 14px;
+    padding-bottom: 24px;
+  }
+}
+
+@media (max-width: 760px) {
+  /* No collapse button: sidebar stacks normally on small screens. */
+  .dashboard-sidebar {
+    position: static;
+    width: 100%;
+    height: auto;
+    margin-top: var(--dashboard-topbar-height);
+    max-height: none;
+    padding: 16px 14px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    overflow: visible;
+    box-shadow: none;
+  }
+
+  #dashboardView {
+    height: auto;
+    margin-top: 0;
+    margin-left: 0;
+    padding: 14px 10px 24px;
+    overflow-y: visible;
+  }
+
+  #dashboardHeader .topbar-title h1 {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 18px;
+  }
+
+  #dashboardHeader .account-chip {
+    display: none;
+  }
+
+  #dashboardHeader .logout-button {
+    height: 38px;
+    padding: 0 11px;
+    font-size: 12px;
+  }
+
+  #dashboardHeader .theme-toggle {
+    height: 30px;
+    padding: 0 5px;
+  }
+
+  #dashboardHeader .theme-toggle-icon {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+@media (max-width: 520px) {
+  #dashboardHeader.topbar {
+    padding-right: 10px;
+    padding-left: 10px;
+    gap: 8px;
+  }
+
+  #dashboardHeader .topbar-actions {
+    gap: 7px;
+  }
+
+  #dashboardHeader .topbar-title .eyebrow {
+    font-size: 9px;
+    letter-spacing: 0.08em;
+  }
+
+  #dashboardHeader .topbar-title h1 {
+    max-width: 145px;
+    font-size: 16px;
+  }
+
+  #dashboardHeader .logout-button {
+    padding: 0 9px;
   }
 }
