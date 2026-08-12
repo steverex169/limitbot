@@ -79,9 +79,12 @@
         <div id="agentTree" class="agent-tree" role="tree" hidden></div>
       </label>
     </div>
+    <div class="sidebar-footer">
+      <a id="activityLogsLink" class="sidebar-nav-link" href="/activity_logs">Activity Logs</a>
+    </div>
   </aside>
   <main id="dashboardView" hidden>
-    <section class="summary-grid" aria-label="Dashboard summary">
+    <section id="dashboardSummary" class="summary-grid" aria-label="Dashboard summary">
       <article class="summary-card">
         <span>Editable rows</span>
         <strong id="rowCount">—</strong>
@@ -96,7 +99,7 @@
       </article>
     </section>
 
-    <section class="panel">
+    <section id="limitsPanel" class="panel">
       <div class="panel-head">
         <div>
           <p class="eyebrow">STRAIGHT WAGER LIMITS</p>
@@ -151,7 +154,7 @@
       </div>
     </section>
 
-    <section class="panel schedules-panel" hidden aria-hidden="true" style="display: none !important;">
+    <section id="activityLogsView" class="panel schedules-panel activity-logs-panel" hidden aria-hidden="true">
       <div class="panel-head">
         <div>
           <p class="eyebrow">AUTOMATION</p>
@@ -163,6 +166,7 @@
         <table>
           <thead>
             <tr>
+              <th>Agent</th>
               <th>League</th>
               <th>Limit</th>
               <th>Repeats</th>
@@ -173,7 +177,7 @@
           </thead>
           <tbody id="scheduleRows">
             <tr>
-            <td colspan="6" class="empty-state">No scheduled limits.</td>
+            <td colspan="7" class="empty-state">No scheduled limits.</td>
           </tr>
         </tbody>
       </table>

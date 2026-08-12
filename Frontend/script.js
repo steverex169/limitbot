@@ -36,6 +36,10 @@ const elements = {
   logoutButton: document.querySelector("#logoutButton"),
   themeToggle: document.querySelector("#themeToggle"),
   dashboardSidebar: document.querySelector("#dashboardSidebar"),
+  activityLogsLink: document.querySelector("#activityLogsLink"),
+  dashboardSummary: document.querySelector("#dashboardSummary"),
+  limitsPanel: document.querySelector("#limitsPanel"),
+  activityLogsView: document.querySelector("#activityLogsView"),
   limitFilter: document.querySelector("#limitFilter"),
   limitModeFilter: document.querySelector("#limitModeFilter"),
   agentSelectButton: document.querySelector("#agentSelectButton"),
@@ -75,6 +79,55 @@ const elements = {
   closeScheduleStatus: document.querySelector("#closeScheduleStatus"),
 };
 
+function isActivityLogsRoute() {
+  const normalizedPath =
+    window.location.pathname.replace(/\/+$/, "") || "/";
+
+  return normalizedPath === "/activity_logs";
+}
+
+function applyDashboardRoute() {
+  const activityLogsActive = isActivityLogsRoute();
+
+  if (elements.dashboardSummary) {
+    elements.dashboardSummary.hidden = activityLogsActive;
+  }
+
+  if (elements.limitsPanel) {
+    elements.limitsPanel.hidden = activityLogsActive;
+  }
+
+  if (elements.activityLogsView) {
+    elements.activityLogsView.hidden = !activityLogsActive;
+    elements.activityLogsView.setAttribute(
+      "aria-hidden",
+      String(!activityLogsActive)
+    );
+  }
+
+  if (elements.activityLogsLink) {
+    elements.activityLogsLink.classList.toggle(
+      "active",
+      activityLogsActive
+    );
+
+    if (activityLogsActive) {
+      elements.activityLogsLink.setAttribute(
+        "aria-current",
+        "page"
+      );
+    } else {
+      elements.activityLogsLink.removeAttribute(
+        "aria-current"
+      );
+    }
+  }
+
+  if (activityLogsActive) {
+    renderSchedules();
+  }
+}
+
 const fieldLabels = {
   spread: "Spread",
   moneyLine: "Money line",
@@ -102,10 +155,15 @@ function getModeFieldKey(field, mode = getSelectedLimitMode()) {
 
 function getModeFieldValue(row, field, mode = getSelectedLimitMode()) {
   const modeKey = getModeFieldKey(field, mode);
-  const normalValue = row?.[field];
-  const modeValue = row?.[modeKey];
 
-  return modeValue ?? normalValue ?? null;
+  // Normal and Early limits are independent values. Never fall back from an
+  // Early field to the Normal field, otherwise a Normal change can appear in
+  // the Early-limits view even though the Early value was never changed.
+  if (mode === "early") {
+    return row?.[modeKey] ?? null;
+  }
+
+  return row?.[field] ?? null;
 }
 
 function rowSupportsEarlyMode(row) {
@@ -588,7 +646,8 @@ function createLimitCell(row, field) {
       Number(schedule.idLeague) === Number(row.idLeague) &&
       Number(schedule.idSportType) === Number(row.idSportType) &&
       Number(schedule.periodNumber || 0) === Number(row.periodNumber || 0) &&
-      schedule.field === field
+      schedule.field === field &&
+      (schedule.limitMode || "normal") === limitMode
   );
 
   const lockingSchedule = [...scheduledChanges]
@@ -1086,7 +1145,7 @@ function renderSchedules() {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
 
-    cell.colSpan = 6;
+    cell.colSpan = 7;
     cell.className = "empty-state";
     cell.textContent = "No recurring schedules.";
 
@@ -1098,17 +1157,18 @@ function renderSchedules() {
   for (const schedule of schedules) {
     const row = document.createElement("tr");
 
-    const league = state.rows.find(
-      (item) =>
-        Number(item.idLeague) ===
-        Number(schedule.idLeague) &&
-        Number(item.idOrganization) ===
-        Number(schedule.idOrganization)
-    );
-
     row.append(
       createTextCell(
-        league?.leagueName ||
+        schedule.agentName ||
+        state.agents.find(
+          (agent) =>
+            Number(agent.id) ===
+            Number(schedule.accountId)
+        )?.name ||
+        `Agent ${schedule.accountId}`
+      ),
+      createTextCell(
+        schedule.leagueName ||
         `League ${schedule.idLeague}`
       ),
       createTextCell(
@@ -1911,7 +1971,19 @@ async function refreshScheduleStatuses() {
       finishedSchedule.status ===
       "completed"
     ) {
-      row[finishedSchedule.field] =
+      const finishedLimitMode =
+        finishedSchedule.limitMode === "early"
+          ? "early"
+          : "normal";
+      const finishedField = getModeFieldKey(
+        finishedSchedule.field,
+        finishedLimitMode
+      );
+
+      // Patch only the mode that actually completed. An Early schedule must
+      // update earlySpread/earlyMoneyLine/etc.; a Normal schedule must update
+      // spread/moneyLine/etc.
+      row[finishedField] =
         finishedSchedule.value;
 
       renderRows();
@@ -2035,7 +2107,9 @@ async function saveActiveChange() {
     "Saving…";
 
   try {
-    const limitMode = getSelectedLimitMode();
+    // The pending edit already remembers the mode in which it was created.
+    // Use that stored mode instead of reading the dropdown again at save time.
+    const limitMode = change.mode === "early" ? "early" : "normal";
     const savedField = getModeFieldKey(
       change.field,
       limitMode
@@ -2232,6 +2306,9 @@ async function scheduleActiveChange() {
   }
 
   const oneTimeSchedule = recurrenceDays.length === 0;
+  // Keep the schedule permanently tied to the mode in which the edit was
+  // created. Changing UI state later must never retarget the schedule.
+  const limitMode = change.mode === "early" ? "early" : "normal";
 
   if (oneTimeSchedule) {
     if (
@@ -2274,7 +2351,7 @@ async function scheduleActiveChange() {
             0,
           field: change.field,
           value: change.newValue,
-          limitMode: getSelectedLimitMode(),
+          limitMode,
           recurrenceDays,
           recurrenceTime: selectedTime,
           oneTimeSchedule,
@@ -2338,6 +2415,40 @@ async function scheduleActiveChange() {
       "Schedule";
   }
 }
+
+elements.activityLogsLink?.addEventListener(
+  "click",
+  (event) => {
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (!isActivityLogsRoute()) {
+      window.history.pushState(
+        {},
+        "",
+        "/activity_logs"
+      );
+    }
+
+    applyDashboardRoute();
+  }
+);
+
+window.addEventListener(
+  "popstate",
+  () => {
+    applyDashboardRoute();
+  }
+);
 
 elements.searchInput.addEventListener(
   "input",
@@ -2521,6 +2632,7 @@ async function startDashboard() {
   elements.dashboardHeader.hidden = false;
   elements.dashboardSidebar.hidden = false;
   elements.dashboardView.hidden = false;
+  applyDashboardRoute();
 
   try {
     await loadAgents();
