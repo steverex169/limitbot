@@ -1944,57 +1944,136 @@ def run_schedule_worker():
 
 def schedule_status_rows(account_id):
     auth = auth_context()
+    agents = load_agents()
+    agent_names = {
+        int(agent["id"]): agent.get("name") or f"Agent {agent['id']}"
+        for agent in agents
+    }
+
+    # Only the logged-in root/main agent gets the combined schedule history.
+    # Any selected sub-agent keeps the existing behavior and sees only its own
+    # schedules.
+    if int(account_id) == int(auth["id"]):
+        visible_account_ids = set(agent_names)
+    else:
+        visible_account_ids = {int(account_id)}
+
     with database_session() as db:
         jobs = list(
             db.scalars(
                 select(ScheduledLimit)
                 .where(
                     ScheduledLimit.user_id == auth["userId"],
-                    ScheduledLimit.account_id == account_id,
+                    ScheduledLimit.account_id.in_(visible_account_ids),
                 )
                 .order_by(ScheduledLimit.created_at)
             )
         )
-        return [{
-            "id": job.id,
-            "status": job.status,
-            "scheduledFor": job.scheduled_for.replace(
-                tzinfo=timezone.utc
-            ).astimezone(schedule_timezone).strftime("%Y-%m-%d %I:%M %p %Z"),
-            "scheduledForUtc": job.scheduled_for.replace(
-                tzinfo=timezone.utc
-            ).isoformat(),
-            "accountId": job.account_id,
-            "idOrganization": job.organization_id,
-            "idLeague": job.league_id,
-            "idSportType": job.sport_type_id,
-            "periodNumber": job.period_number,
-            "field": job.field,
-            "value": job.value,
-            "limitMode": "early" if job.is_early_limit else "normal",
-            "recurring": bool(job.recurrence_days and job.recurrence_time),
-            "recurrence": (
-                recurring_description(
-                    [int(day) for day in job.recurrence_days.split(",")],
-                    job.recurrence_time,
-                )
-                if job.recurrence_days and job.recurrence_time
-                else None
-            ),
-            "lastRunStatus": job.last_run_status,
-            "lastRunAt": (
-                job.last_run_at.replace(tzinfo=timezone.utc)
-                .astimezone(schedule_timezone)
-                .strftime("%Y-%m-%d %I:%M %p %Z")
-                if job.last_run_at
-                else None
-            ),
-            "lastRunAtUtc": (
-                job.last_run_at.replace(tzinfo=timezone.utc).isoformat()
-                if job.last_run_at
-                else None
-            ),
-        } for job in jobs]
+
+    # A root history can contain schedules from many different agents. Resolve
+    # league names once per scheduled account so the Activity Logs table does
+    # not depend on the currently selected agent's league rows.
+    league_names = {}
+    for scheduled_account_id in sorted({int(job.account_id) for job in jobs}):
+        try:
+            account_leagues = get_leagues(scheduled_account_id)
+        except Exception as error:
+            logger.warning(
+                "Could not resolve league names for account %s: %s",
+                scheduled_account_id,
+                error,
+            )
+            account_leagues = []
+
+        for league_row in account_leagues:
+            organization_id = safe_int(league_row.get("IdOrganization"))
+            league_id = safe_int(league_row.get("IdLeague"))
+            sport_type_id = safe_int(league_row.get("IdSportType"))
+            league_name = (
+                league_row.get("LeagueName")
+                or league_row.get("leagueName")
+                or league_row.get("Description")
+            )
+            if not league_name:
+                continue
+
+            league_names.setdefault(
+                (
+                    scheduled_account_id,
+                    organization_id,
+                    league_id,
+                    sport_type_id,
+                ),
+                league_name,
+            )
+            league_names.setdefault(
+                (
+                    scheduled_account_id,
+                    organization_id,
+                    league_id,
+                    None,
+                ),
+                league_name,
+            )
+
+    return [{
+        "id": job.id,
+        "status": job.status,
+        "scheduledFor": job.scheduled_for.replace(
+            tzinfo=timezone.utc
+        ).astimezone(schedule_timezone).strftime("%Y-%m-%d %I:%M %p %Z"),
+        "scheduledForUtc": job.scheduled_for.replace(
+            tzinfo=timezone.utc
+        ).isoformat(),
+        "accountId": job.account_id,
+        "agentName": agent_names.get(
+            int(job.account_id), f"Agent {job.account_id}"
+        ),
+        "idOrganization": job.organization_id,
+        "idLeague": job.league_id,
+        "leagueName": (
+            league_names.get((
+                int(job.account_id),
+                int(job.organization_id),
+                int(job.league_id),
+                int(job.sport_type_id),
+            ))
+            or league_names.get((
+                int(job.account_id),
+                int(job.organization_id),
+                int(job.league_id),
+                None,
+            ))
+            or f"League {job.league_id}"
+        ),
+        "idSportType": job.sport_type_id,
+        "periodNumber": job.period_number,
+        "field": job.field,
+        "value": job.value,
+        "limitMode": "early" if job.is_early_limit else "normal",
+        "recurring": bool(job.recurrence_days and job.recurrence_time),
+        "recurrence": (
+            recurring_description(
+                [int(day) for day in job.recurrence_days.split(",")],
+                job.recurrence_time,
+            )
+            if job.recurrence_days and job.recurrence_time
+            else None
+        ),
+        "lastRunStatus": job.last_run_status,
+        "lastRunAt": (
+            job.last_run_at.replace(tzinfo=timezone.utc)
+            .astimezone(schedule_timezone)
+            .strftime("%Y-%m-%d %I:%M %p %Z")
+            if job.last_run_at
+            else None
+        ),
+        "lastRunAtUtc": (
+            job.last_run_at.replace(tzinfo=timezone.utc).isoformat()
+            if job.last_run_at
+            else None
+        ),
+    } for job in jobs]
 
 
 
@@ -2159,8 +2238,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'self'; img-src 'self' data:; base-uri 'none'; "
-            "form-action 'self'; frame-ancestors 'none'",
+            "default-src 'self'; script-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+            "base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
         )
         if self.is_https():
             self.send_header(
@@ -2289,7 +2369,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.redirect("/")
             return
 
-        if path == "/":
+        if path in {"/", "/activity_logs", "/activity_logs/"}:
             self.path = "/index.html"
             super().do_GET()
             return
