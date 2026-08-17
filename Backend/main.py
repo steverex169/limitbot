@@ -2331,9 +2331,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     {
                         "parentId": auth["id"],
                         "parentName": auth["username"],
-                        # Login already loads and validates the hierarchy. Reuse
-                        # that per-session cache instead of immediately walking
-                        # every AcesHigh agent a second time.
+                        # Reuse the hierarchy after its first dashboard load.
+                        # Authentication itself intentionally does not wait for
+                        # this potentially expensive AcesHigh tree walk.
                         "agents": load_agents(),
                         "preferences": user_preferences(auth),
                     },
@@ -2496,8 +2496,6 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 session_hash = hash_session_token(session_id)
                 auth["sessionHash"] = session_hash
                 current_auth.set(auth)
-                # Verify and cache the hierarchy before considering login complete.
-                load_agents()
                 preferences = persist_login(
                     auth, password, auth.pop("accessToken"), session_id
                 )
