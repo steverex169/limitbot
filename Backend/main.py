@@ -2055,7 +2055,7 @@ def run_schedule_worker():
                 logger.exception("Session cleanup failed")
         prune_countdown -= 1
 
-        shutdown_event.wait(1)
+        shutdown_event.wait(0.25)
 
 
 def schedule_status_rows(account_id):

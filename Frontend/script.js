@@ -1502,25 +1502,6 @@ function createLimitCell(row, field) {
   const key = `${rowKey(row)}:${limitMode}:${field}`;
   const pendingChange = state.pending.get(key);
 
-  const scheduledChanges = state.schedules.filter(
-    (schedule) =>
-      Number(schedule.accountId) === Number(row.accountId) &&
-      Number(schedule.idOrganization) === Number(row.idOrganization) &&
-      Number(schedule.idLeague) === Number(row.idLeague) &&
-      Number(schedule.idSportType) === Number(row.idSportType) &&
-      Number(schedule.periodNumber || 0) === Number(row.periodNumber || 0) &&
-      schedule.field === field &&
-      (schedule.limitMode || "normal") === limitMode
-  );
-
-  const lockingSchedule = [...scheduledChanges]
-    .reverse()
-    .find(
-      (schedule) =>
-        !schedule.recurring &&
-        ["pending", "running"].includes(schedule.status)
-    );
-
   input.className = "limit-input";
   input.type = "number";
   input.min = "0";
@@ -1528,9 +1509,7 @@ function createLimitCell(row, field) {
 
   input.value =
     pendingChange?.newValue ??
-    (lockingSchedule
-      ? lockingSchedule.value
-      : originalValue) ??
+    originalValue ??
     "";
 
   // Remove the check that disabled parent rows
@@ -1540,15 +1519,13 @@ function createLimitCell(row, field) {
 
   input.disabled =
     !editableFields.includes(field) ||
-    Boolean(lockingSchedule) ||
     (limitMode === "early" && rowSupportsEarlyMode(row) === false);
 
   if (input.disabled) {
-    input.title = lockingSchedule
-      ? "This limit is locked until its scheduled change finishes"
-      : limitMode === "early" && rowSupportsEarlyMode(row) === false
+    input.title =
+      limitMode === "early" && rowSupportsEarlyMode(row) === false
         ? "Early values are not available for this league"
-      : row.disabledReason || "This field is not editable";
+        : row.disabledReason || "This field is not editable";
   }
 
   input.dataset.field = field;
@@ -1600,9 +1577,6 @@ function createLimitCell(row, field) {
       (typedValue === null && originalValue == null)
     ) {
       state.pending.delete(key);
-      if (!state.pending.size) {
-        state.activeEditRowKey = null;
-      }
     } else {
       state.pending.set(key, {
         row,
@@ -1613,6 +1587,9 @@ function createLimitCell(row, field) {
         isParentRow: isParentLimitRow(row), // Flag this as a parent update
       });
       state.activeEditRowKey = currentRowKey;
+      if (!state.pending.size) {
+        state.activeEditRowKey = null;
+      }
     }
 
     updateCounters();
@@ -3256,18 +3233,22 @@ async function savePendingBatch() {
 }
 
 async function scheduleActiveChange() {
-  const change = state.activeChange;
+  const batch =
+    Array.isArray(state.pendingSaveBatch) &&
+    state.pendingSaveBatch.length
+      ? state.pendingSaveBatch
+      : state.activeChange
+        ? [state.activeChange]
+        : [];
 
-  if (!change) {
+  if (!batch.length) {
     return;
   }
 
   const recurrenceDays =
     elements.scheduleDays
       .filter((input) => input.checked)
-      .map((input) =>
-        Number(input.value)
-      );
+      .map((input) => Number(input.value));
 
   const selectedTime = getSelectedScheduleTime();
   const customerSupportAgent =
@@ -3281,24 +3262,16 @@ async function scheduleActiveChange() {
   }
 
   if (!selectedTime) {
-    showDialogMessage(
-    "Select an ET time first."
-    );
+    showDialogMessage("Select an ET time first.");
     return;
   }
 
   const oneTimeSchedule = recurrenceDays.length === 0;
 
   if (!oneTimeSchedule && !customerSupportAgent) {
-    showDialogMessage(
-      "Enter the Customer Support Agent name."
-    );
+    showDialogMessage("Enter the Customer Support Agent name.");
     return;
   }
-
-  // Keep the schedule permanently tied to the mode in which the edit was
-  // created. Changing UI state later must never retarget the schedule.
-  const limitMode = change.mode === "early" ? "early" : "normal";
 
   if (oneTimeSchedule) {
     if (
@@ -3311,77 +3284,72 @@ async function scheduleActiveChange() {
   }
 
   clearDialogMessage();
-
-  elements.confirmSchedule.disabled =
-    true;
-
-  elements.confirmSchedule.textContent =
-    "Scheduling...";
+  elements.confirmSchedule.disabled = true;
+  elements.confirmSchedule.textContent = "Scheduling...";
 
   try {
-    const response = await fetch(
-      "/api/schedules",
-      {
+    const scheduledSummaries = [];
+    let firstScheduled = null;
+
+    for (const item of batch) {
+      const limitMode = item.mode === "early" ? "early" : "normal";
+      const response = await fetch("/api/schedules", {
         method: "POST",
         headers: {
-          "Content-Type":
-            "application/json",
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          accountId:
-            change.row.accountId,
-          idOrganization:
-            change.row.idOrganization,
-          idLeague:
-            change.row.idLeague,
-          idSportType:
-            change.row.idSportType,
-          periodNumber:
-            change.row.periodNumber ||
-            0,
-          field: change.field,
-          value: change.newValue,
+          accountId: item.row.accountId,
+          idOrganization: item.row.idOrganization,
+          idLeague: item.row.idLeague,
+          idSportType: item.row.idSportType,
+          periodNumber: item.row.periodNumber || 0,
+          field: item.field,
+          value: item.newValue,
           limitMode,
           recurrenceDays,
           recurrenceTime: selectedTime,
           customerSupportAgent,
           oneTimeSchedule,
         }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "The limit could not be scheduled");
       }
-    );
 
-    const data = await response.json();
+      removePendingChange(item);
+      scheduledSummaries.push(`${item.row.leagueName}: ${fieldLabels[item.field]}`);
+      if (!firstScheduled) {
+        firstScheduled = { item, data };
+      }
+    }
 
-    if (!response.ok) {
-      throw new Error(
-        data.error ||
-        "The limit could not be scheduled"
+    state.activeChange = null;
+    state.pendingSaveBatch = [];
+    elements.dialog.close();
+
+    if (firstScheduled) {
+      const { item, data } = firstScheduled;
+      showScheduleStatus(
+        "pending",
+        item.row.leagueName,
+        item.newValue,
+        formatEasternDateTime(data.scheduledForUtc || data.scheduledFor),
+        fieldLabels[item.field],
+        data.recurrence,
+        formatEasternDateTime(data.scheduledForUtc || data.scheduledFor)
       );
     }
 
-    removePendingChange(change);
-    state.activeChange = null;
-    elements.dialog.close();
-
-    /*
-     * The schedule was created successfully — report that before the
-     * follow-up refresh, whose failure must not read as a failed schedule.
-     */
-    showScheduleStatus(
-      "pending",
-      change.row.leagueName,
-      change.newValue,
-      formatEasternDateTime(
-        data.scheduledForUtc ||
-        data.scheduledFor
-      ),
-      fieldLabels[change.field],
-      data.recurrence,
-      formatEasternDateTime(
-        data.scheduledForUtc ||
-        data.scheduledFor
-      )
-    );
+    if (scheduledSummaries.length > 1) {
+      showMessage(
+        `${scheduledSummaries.length} limit changes scheduled successfully.`,
+        "success"
+      );
+    }
 
     try {
       await loadLeagues();
@@ -3393,17 +3361,10 @@ async function scheduleActiveChange() {
     }
   } catch (error) {
     elements.dialog.close();
-
-    showMessage(
-      error.message,
-      "error"
-    );
+    showMessage(error.message, "error");
   } finally {
-    elements.confirmSchedule.disabled =
-      false;
-
-    elements.confirmSchedule.textContent =
-      "Schedule";
+    elements.confirmSchedule.disabled = false;
+    elements.confirmSchedule.textContent = "Schedule";
   }
 }
 
@@ -3946,3 +3907,4 @@ setInterval(() => {
     () => { }
   );
 }, 5000);
+
