@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Limit Control Bot</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/styles.css?v=20260817-monitor-verification">
+</head>
+
+<body class="app-loading">
+  <main id="loginView" class="login-view">
+    <form id="loginForm" class="login-card">
+      <p class="eyebrow">LIMIT CONTROL BOT</p>
+      <h1>Log in</h1>
+      <p>Use the same account you use on AccessHigh.</p>
+      <label>
+        <span>Username</span>
+        <input id="username" name="username" autocomplete="username" required maxlength="100" autofocus>
+      </label>
+      <label>
+        <span>Password</span>
+        <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="200">
+      </label>
+      <div id="loginMessage" class="message error" role="alert" hidden></div>
+      <button id="loginButton" class="button primary" type="submit">Log in</button>
+    </form>
+  </main>
+
+  <header id="dashboardHeader" class="topbar" hidden>
+    <div class="topbar-actions">
+      <div class="topbar-title">
+        <p class="eyebrow">AUTHORIZED TESTING DASHBOARD</p>
+        <h1>Limit Control Bot</h1>
+      </div>
+      <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch theme" aria-pressed="false">
+        <span class="theme-toggle-icon theme-toggle-sun" aria-hidden="true">☀</span>
+        <span class="theme-toggle-icon theme-toggle-moon" aria-hidden="true">☾</span>
+      </button>
+      <div class="account-chip">
+        <span class="status-dot"></span>
+        <div>
+          <strong id="accountName">Loading…</strong>
+          <small id="accountId">Account</small>
+        </div>
+      </div>
+      <button id="logoutButton" class="button secondary logout-button" type="button">Log out</button>
+    </div>
+  </header>
+
+  <aside id="dashboardSidebar" class="dashboard-sidebar" aria-label="Dashboard filters" hidden>
+    <div class="sidebar-heading">
+      <div>
+        <p class="eyebrow">FILTERS</p>
+        <strong>League &amp; agent</strong>
+      </div>
+    </div>
+
+    <div class="sidebar-controls">
+      <label class="select-field limit-selector sidebar-control">
+        <span>Select League</span>
+        <select id="limitFilter">
+          <option value="">Select League</option>
+        </select>
+      </label>
+
+      <label class="agent-search sidebar-control">
+        <span>Find agent</span>
+        <input id="agentSearch" type="search" placeholder="Search agents...." autocomplete="off">
+        <div id="agentSearchResults" class="agent-search-results" role="listbox" hidden></div>
+      </label>
+
+      <label class="agent-selector sidebar-control">
+        <span>Select agent</span>
+        <button id="agentSelectButton" class="agent-select-button" type="button" disabled>
+          Loading agents...
+        </button>
+        <div id="agentTree" class="agent-tree" role="tree" hidden></div>
+      </label>
+    </div>
+    <div class="sidebar-footer">
+      <a id="dashboardHomeLink" class="sidebar-nav-link" href="/">Dashboard</a>
+      <a id="activityLogsLink" class="sidebar-nav-link" href="/activity_logs">Activity Logs</a>
+      <a id="pinnacleComparisonLink" class="sidebar-nav-link" href="/pinnacle_aceshigh">Pinnacle vs AcesHigh</a>
+      <a id="tradingMonitorLink" class="sidebar-nav-link" href="/trading_monitor">Trading Monitor</a>
+    </div>
+  </aside>
+  <main id="dashboardView" hidden>
+    <section id="dashboardSummary" class="summary-grid" aria-label="Dashboard summary">
+      <article class="summary-card">
+        <span>Editable rows</span>
+        <strong id="rowCount">—</strong>
+      </article>
+      <article class="summary-card">
+        <span>Visible rows</span>
+        <strong id="visibleCount">—</strong>
+      </article>
+      <article class="summary-card">
+        <span>Pending edits</span>
+        <strong id="pendingCount">0</strong>
+      </article>
+    </section>
+
+    <section id="limitsPanel" class="panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">STRAIGHT WAGER LIMITS</p>
+          <h2>Editable leagues</h2>
+          <p>Change one value, review it, then save it directly to Aces High.</p>
+        </div>
+
+        <div class="filters">
+          <label class="select-field">
+            <span>Options</span>
+            <select id="limitModeFilter">
+              <option value="normal">Normal limits</option>
+              <option value="early">Early limits only</option>
+            </select>
+          </label>
+          <label class="search-field">
+            <span>Search</span>
+            <input id="searchInput" type="search" placeholder="League or organization">
+          </label>
+          <label class="select-field">
+            <span>Rows</span>
+            <select id="rowTypeFilter">
+              <option value="all">All editable rows</option>
+              <option value="League">Leagues only</option>
+              <option value="Summary">Summaries only</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div id="message" class="message" role="status" hidden></div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>League</th>
+              <th>Period</th>
+              <th>Spread</th>
+              <th>Money line</th>
+              <th>Total</th>
+              <th>Team total</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="leagueRows">
+            <tr>
+              <td colspan="7" class="empty-state">No league is selected.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="activityLogsView" class="panel schedules-panel activity-logs-panel" hidden aria-hidden="true">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">AUTOMATION</p>
+          <h2>Recurring schedules</h2>
+          <p>Review upcoming ET limit changes or cancel an active schedule.</p>
+        </div>
+      </div>
+      <div class="table-wrap schedules-table-wrap">
+        <table class="schedules-table">
+          <thead>
+            <tr>
+              <th>Agent</th>
+              <th>Customer Support Agent</th>
+              <th>League</th>
+              <th>Limit</th>
+              <th>Repeats</th>
+              <th>Next run</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="scheduleRows">
+            <tr>
+            <td colspan="8" class="empty-state">No scheduled limits.</td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+    <section id="pinnacleComparisonView" class="panel comparison-panel" hidden aria-hidden="true">
+      <div class="panel-head comparison-head">
+        <div>
+          <p class="eyebrow">MARKET COMPARISON</p>
+          <h2>Pinnacle vs AcesHigh</h2>
+          <p>Current full-game and period lines, American odds, and available limits.</p>
+        </div>
+        <div class="comparison-actions">
+          <label for="comparisonLeague">League</label>
+          <select id="comparisonLeague" aria-label="Comparison league" disabled>
+            <option value="">Loading leagues...</option>
+          </select>
+          <button id="comparisonRefresh" class="button secondary" type="button">Refresh data</button>
+        </div>
+      </div>
+
+      <div id="comparisonMessage" class="message comparison-message" role="status" hidden></div>
+
+      <div class="comparison-summary" aria-label="Comparison summary">
+        <article class="comparison-summary-card">
+          <span>Matched fixtures</span>
+          <strong id="comparisonFixtureCount">—</strong>
+        </article>
+        <article class="comparison-summary-card">
+          <span>Periods compared</span>
+          <strong id="comparisonSectionCount">—</strong>
+        </article>
+        <article class="comparison-summary-card">
+          <span>Last refreshed</span>
+          <strong id="comparisonGeneratedAt">—</strong>
+        </article>
+      </div>
+
+      <div id="comparisonProfiles" class="comparison-profiles" aria-label="AcesHigh limit profiles"></div>
+      <div id="comparisonContent" class="comparison-content">
+        <p class="comparison-empty">Select an agent and league to load the comparison.</p>
+      </div>
+      <p class="comparison-source-note">Pinnacle limits are supplied in USD by OddsPapi. AcesHigh limits are the selected agent's configured values.</p>
+    </section>
+
+    <section id="tradingMonitorView" class="panel trading-monitor-panel" hidden aria-hidden="true">
+      <div class="panel-head trading-monitor-head">
+        <div>
+          <div class="trading-title-row">
+            <p class="eyebrow">LIVE TRADING</p>
+            <span class="dry-run-badge">Dry run — no writes</span>
+          </div>
+          <h2>Trading Monitor</h2>
+          <p>Mapped scores, availability, and Pinnacle suspension signals for AcesHigh.</p>
+        </div>
+        <div class="comparison-actions">
+          <label for="tradingLeague">League</label>
+          <select id="tradingLeague" aria-label="Trading monitor league" disabled>
+            <option value="">Loading leagues...</option>
+          </select>
+          <button id="tradingRefresh" class="button secondary" type="button">Refresh</button>
+        </div>
+      </div>
+
+      <div id="tradingMessage" class="message comparison-message" role="status" hidden></div>
+
+      <div class="comparison-summary" aria-label="Trading monitor summary">
+        <article class="comparison-summary-card">
+          <span>Mapped events</span>
+          <strong id="tradingEventCount">—</strong>
+        </article>
+        <article class="comparison-summary-card">
+          <span>Pinnacle suspended</span>
+          <strong id="tradingSuspendedCount">—</strong>
+        </article>
+        <article class="comparison-summary-card">
+          <span>Dry-run actions</span>
+          <strong id="tradingActionCount">—</strong>
+        </article>
+      </div>
+
+      <div class="table-wrap trading-table-wrap">
+        <table class="trading-table">
+          <thead>
+            <tr>
+              <th>Fixture</th>
+              <th>Score / clock</th>
+              <th>Game status</th>
+              <th>AcesHigh</th>
+              <th>Pinnacle</th>
+              <th>Dry-run signal</th>
+              <th>Updated</th>
+            </tr>
+          </thead>
+          <tbody id="tradingRows">
+            <tr><td colspan="7" class="empty-state">Select an agent and league to load the trading monitor.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="comparison-source-note">Auto-refreshes every 30 seconds. Stale or missing Pinnacle data never triggers a takedown recommendation.</p>
+    </section>
+  </main>
+
+  <dialog id="confirmDialog">
+    <form method="dialog">
+      <p class="eyebrow">CONFIRM LIMIT CHANGE</p>
+      <h2 id="confirmTitle">Save this value?</h2>
+      <p id="confirmText"></p>
+      <div class="change-preview">
+        <span id="oldValue">—</span>
+        <span aria-hidden="true">→</span>
+        <strong id="newValue">—</strong>
+      </div>
+      <fieldset class="schedule-days">
+        <legend>Repeat every week on</legend>
+        <label><input type="checkbox" name="scheduleDay" value="0"> Mon</label>
+        <label><input type="checkbox" name="scheduleDay" value="1"> Tue</label>
+        <label><input type="checkbox" name="scheduleDay" value="2"> Wed</label>
+        <label><input type="checkbox" name="scheduleDay" value="3"> Thu</label>
+        <label><input type="checkbox" name="scheduleDay" value="4"> Fri</label>
+        <label><input type="checkbox" name="scheduleDay" value="5"> Sat</label>
+        <label><input type="checkbox" name="scheduleDay" value="6"> Sun</label>
+      </fieldset>
+      <label class="schedule-field">
+        <span>Time (U.S. Eastern / ET)</span>
+        <div class="schedule-time-picker" aria-label="Schedule time in Eastern time">
+          <select id="scheduleHour" aria-label="Hour">
+            <option value="">HH</option>
+          </select>
+          <select id="scheduleMinute" aria-label="Minute">
+            <option value="">MM</option>
+          </select>
+          <select id="schedulePeriod" aria-label="AM or PM">
+            <option value="">AM/PM</option>
+            <option value="AM">AM</option>
+            <option value="PM">PM</option>
+          </select>
+        </div>
+      </label>
+      <label class="schedule-field">
+        <span>Customer Support Agent</span>
+        <input id="customerSupportAgent" type="text" maxlength="100" autocomplete="off" placeholder="Enter your name">
+      </label>
+      <button id="clearScheduleOptions" type="button" class="button secondary">
+        Clear schedule
+      </button>
+      <div id="dialogMessage" class="message error" role="alert" hidden></div>
+      <div class="dialog-actions">
+        <button value="cancel" class="button secondary">Cancel</button>
+        <button id="confirmSchedule" value="default" class="button secondary">Schedule</button>
+        <button id="confirmSave" value="default" class="button primary">Save to Aces High</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="scheduleStatusDialog" class="schedule-status-dialog">
+    <div class="schedule-status-content">
+      <p id="scheduleStatusEyebrow" class="eyebrow">SCHEDULED LIMIT</p>
+      <h2 id="scheduleStatusTitle">Limit change scheduled</h2>
+      <p id="scheduleStatusText"></p>
+      <div id="scheduleProgress" class="schedule-progress" aria-label="Waiting for scheduled time">
+        <span></span>
+      </div>
+      <button id="closeScheduleStatus" class="button primary" type="button">Close</button>
+    </div>
+  </dialog>
+
+  <script src="/script.js?v=20260817-monitor-verification" defer></script>
+</body>
+
+</html>

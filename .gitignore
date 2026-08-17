@@ -1,0 +1,16 @@
+credentials.json
+scheduled_limits.json
+editable_leagues*.csv
+dashboard.stdout.log
+dashboard.stderr.log
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+.limitbot.key
+*.pem
+*.key
+*.sqlite
+*.sqlite3
+package-lock.json
