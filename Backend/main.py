@@ -991,7 +991,7 @@ def account_name(account_id):
 def organization_url(account_id):
     return (
         "https://aceshigh.ag/partner-api/partner/"
-        f"Backbone/GetOrganizationAll/{account_id}/true/S"
+        f"Backbone/GetOrganizationAll/{account_id}/false/S"
     )
 
 league_rows = []
@@ -1173,10 +1173,39 @@ def get_leagues(account_id, force=False):
 
 
 def display_limit_value(row, field):
-    amount_max = row.get(f"{field}.AmountMax")
-    if amount_max not in (None, ""):
-        return amount_max
-    return row.get(f"{field}.Amount")
+    candidates = [
+        row.get(field),
+        row.get(f"{field}.Amount"),
+        row.get(f"{field}.AmountMax"),
+    ]
+
+    numeric_candidates = [
+        value
+        for candidate in candidates
+        for value in [
+            None
+            if candidate in (None, "")
+            else (
+                int(candidate)
+                if str(candidate).strip().lstrip("-").isdigit()
+                else None
+            )
+        ]
+        if value is not None
+    ]
+
+    positive_candidates = [value for value in numeric_candidates if value > 0]
+    if positive_candidates:
+        return min(positive_candidates)
+
+    if numeric_candidates:
+        return 0
+
+    for candidate in candidates:
+        if candidate not in (None, ""):
+            return candidate
+
+    return None
 
 
 def display_early_limit_value(row, field):
@@ -1254,6 +1283,29 @@ def dashboard_rows(account_id, force=False):
                 ),
             }
         )
+
+        if str(account_id) == "968875":
+            print(
+                "DASHBOARD DEBUG",
+                {
+                    "account": account_id,
+                    "league": row.get("LeagueName"),
+                    "path": row.get("JsonPath"),
+                    "spread": row.get("Spread"),
+                    "moneyLine": row.get("MoneyLine"),
+                    "total": row.get("Total"),
+                    "teamTotal": row.get("TeamTotal"),
+                    "spreadAmount": row.get("Spread.Amount"),
+                    "spreadMax": row.get("Spread.AmountMax"),
+                    "moneyAmount": row.get("MoneyLine.Amount"),
+                    "moneyMax": row.get("MoneyLine.AmountMax"),
+                    "totalAmount": row.get("Total.Amount"),
+                    "totalMax": row.get("Total.AmountMax"),
+                    "teamAmount": row.get("TeamTotal.Amount"),
+                    "teamMax": row.get("TeamTotal.AmountMax"),
+                },
+                flush=True,
+            )
     return rows
 
 

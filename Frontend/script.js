@@ -27,6 +27,7 @@ const state = {
   tradingLeague: "",
   tradingLoading: false,
   tradingRequest: 0,
+  scheduledHighlights: new Set(),
 };
 
 const pendingStorageKey = "aceshighPendingLimitEdits";
@@ -1014,6 +1015,10 @@ function rowKey(row) {
   return `${row.accountId}:${row.idOrganization}:${row.idLeague}:${row.idSportType}:${row.periodNumber || 0}`;
 }
 
+function scheduledHighlightKey(row, field, mode = getSelectedLimitMode()) {
+  return `${rowKey(row)}:${mode}:${field}`;
+}
+
 function inputKey(row, field) {
   return `${rowKey(row)}:${getSelectedLimitMode()}:${field}`;
 }
@@ -1501,8 +1506,22 @@ function createLimitCell(row, field) {
   const originalValue = getModeFieldValue(row, field, limitMode);
   const key = `${rowKey(row)}:${limitMode}:${field}`;
   const pendingChange = state.pending.get(key);
+  const hasScheduledChange = Boolean(pendingChange) || state.scheduledHighlights.has(key) || state.schedules.some(
+    (schedule) =>
+      Number(schedule.accountId) === Number(row.accountId) &&
+      Number(schedule.idOrganization) === Number(row.idOrganization) &&
+      Number(schedule.idLeague) === Number(row.idLeague) &&
+      Number(schedule.idSportType) === Number(row.idSportType) &&
+      Number(schedule.periodNumber || 0) === Number(row.periodNumber || 0) &&
+      schedule.field === field &&
+      (schedule.limitMode || "normal") === limitMode &&
+      ["pending", "running"].includes(String(schedule.status || "").toLowerCase())
+  );
 
   input.className = "limit-input";
+  if (hasScheduledChange) {
+    input.classList.add("limit-input--scheduled");
+  }
   input.type = "number";
   input.min = "0";
   input.step = "1";
@@ -2937,6 +2956,25 @@ async function refreshScheduleStatuses() {
       renderRows();
     }
 
+    if (
+      row &&
+      ["completed", "failed", "cancelled"].includes(
+        String(finishedSchedule.status || "").toLowerCase()
+      )
+    ) {
+      const finishedLimitMode =
+        finishedSchedule.limitMode === "early"
+          ? "early"
+          : "normal";
+      state.scheduledHighlights.delete(
+        scheduledHighlightKey(
+          row,
+          finishedSchedule.field,
+          finishedLimitMode
+        )
+      );
+    }
+
     showScheduleStatus(
       finishedSchedule.lastRunStatus ||
       finishedSchedule.status,
@@ -3320,6 +3358,9 @@ async function scheduleActiveChange() {
         throw new Error(data.error || "The limit could not be scheduled");
       }
 
+      state.scheduledHighlights.add(
+        scheduledHighlightKey(item.row, item.field, limitMode)
+      );
       removePendingChange(item);
       scheduledSummaries.push(`${item.row.leagueName}: ${fieldLabels[item.field]}`);
       if (!firstScheduled) {

@@ -1139,6 +1139,11 @@ tbody tr:hover {
   font-variant-numeric: tabular-nums;
 }
 
+.limit-input--scheduled {
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 1px #60a5fa inset;
+}
+
 .limit-input:disabled {
   border-color: #eaecf0;
   background: #f2f4f7;
