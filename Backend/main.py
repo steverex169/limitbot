@@ -899,9 +899,14 @@ def search_agents(search_value):
 
 def validate_account_id(account_id):
     auth = auth_context()
+    # The logged-in account is always valid. Do not walk the complete upstream
+    # hierarchy for the dashboard's default/root account on every API call.
+    if int(account_id) == int(auth["id"]):
+        return account_id
     if account_id in auth.get("searchableAgentIds", set()):
         return account_id
-    valid_ids = {agent["id"] for agent in load_agents()}
+    cached_agents = auth.get("agents") or []
+    valid_ids = {agent["id"] for agent in cached_agents}
     if account_id in valid_ids:
         return account_id
     # Customer accounts found via search are not part of the agent hierarchy.
@@ -912,12 +917,24 @@ def validate_account_id(account_id):
             user = db.get(User, auth["userId"])
             if user is not None and user.selected_agent_id == account_id:
                 return account_id
+    # Only unknown accounts require a hierarchy lookup. Normal dashboard,
+    # schedule, and comparison reads use one of the fast paths above.
+    valid_ids = {agent["id"] for agent in load_agents()}
+    if account_id in valid_ids:
+        return account_id
     raise ValueError("Selected agent is not available under this login")
 
 
 def account_name(account_id):
+    auth = auth_context()
+    if int(account_id) == int(auth["id"]):
+        return auth["username"]
     return next(
-        (agent["name"] for agent in load_agents() if agent["id"] == account_id),
+        (
+            agent["name"]
+            for agent in (auth.get("agents") or [])
+            if agent["id"] == account_id
+        ),
         f"Agent {account_id}",
     )
 
@@ -2042,11 +2059,15 @@ def run_schedule_worker():
 
 def schedule_status_rows(account_id):
     auth = auth_context()
-    agents = load_agents()
+    # Schedule history is database-backed and must remain available even when
+    # AcesHigh is rate-limiting its hierarchy endpoint. Use hierarchy data only
+    # when this session has already loaded it successfully.
+    agents = auth.get("agents") or []
     agent_names = {
         int(agent["id"]): agent.get("name") or f"Agent {agent['id']}"
         for agent in agents
     }
+    agent_names.setdefault(int(auth["id"]), auth["username"])
 
     # The logged-in root/main agent owns the combined schedule history for
     # every account it scheduled under. A selected child/sub-agent must still
