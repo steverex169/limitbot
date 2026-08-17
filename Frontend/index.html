@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Aces High Limit Control</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/styles.css?v=20260812-ui-v6-topbar-left">
+  <link rel="stylesheet" href="/styles.css?v=20260817-mlb-comparison">
 </head>
 
 <body class="app-loading">
@@ -81,6 +81,7 @@
     </div>
     <div class="sidebar-footer">
       <a id="activityLogsLink" class="sidebar-nav-link" href="/activity_logs">Activity Logs</a>
+      <a id="pinnacleComparisonLink" class="sidebar-nav-link" href="/pinnacle_aceshigh">Pinnacle vs AcesHigh</a>
     </div>
   </aside>
   <main id="dashboardView" hidden>
@@ -184,6 +185,40 @@
       </table>
       </div>
     </section>
+
+    <section id="pinnacleComparisonView" class="panel comparison-panel" hidden aria-hidden="true">
+      <div class="panel-head comparison-head">
+        <div>
+          <p class="eyebrow">MLB MARKET COMPARISON</p>
+          <h2>Pinnacle vs AcesHigh</h2>
+          <p>Current Full Game and 1st 5 Innings lines, American odds, and available limits.</p>
+        </div>
+        <button id="comparisonRefresh" class="button secondary" type="button">Refresh data</button>
+      </div>
+
+      <div id="comparisonMessage" class="message comparison-message" role="status" hidden></div>
+
+      <div class="comparison-summary" aria-label="Comparison summary">
+        <article class="comparison-summary-card">
+          <span>Matched fixtures</span>
+          <strong id="comparisonFixtureCount">—</strong>
+        </article>
+        <article class="comparison-summary-card">
+          <span>Periods compared</span>
+          <strong id="comparisonSectionCount">—</strong>
+        </article>
+        <article class="comparison-summary-card">
+          <span>Last refreshed</span>
+          <strong id="comparisonGeneratedAt">—</strong>
+        </article>
+      </div>
+
+      <div id="comparisonProfiles" class="comparison-profiles" aria-label="AcesHigh MLB limit profiles"></div>
+      <div id="comparisonContent" class="comparison-content">
+        <p class="comparison-empty">Select an agent to load the MLB comparison.</p>
+      </div>
+      <p class="comparison-source-note">Pinnacle limits are supplied in USD by OddsPapi. AcesHigh limits are the selected agent's configured values.</p>
+    </section>
   </main>
 
   <dialog id="confirmDialog">
@@ -250,7 +285,7 @@
     </div>
   </dialog>
 
-  <script src="/script.js?v=20260812-customer-support-agent" defer></script>
+  <script src="/script.js?v=20260817-mlb-comparison" defer></script>
 </body>
 
 </html>

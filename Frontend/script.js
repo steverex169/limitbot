@@ -10,6 +10,10 @@ const state = {
   expandedRows: new Set(),
   expandedAgentIds: new Set(),
   activeChange: null,
+  comparison: null,
+  comparisonAgentId: null,
+  comparisonLoading: false,
+  comparisonRequest: 0,
 };
 
 const pendingStorageKey = "aceshighPendingLimitEdits";
@@ -37,9 +41,18 @@ const elements = {
   themeToggle: document.querySelector("#themeToggle"),
   dashboardSidebar: document.querySelector("#dashboardSidebar"),
   activityLogsLink: document.querySelector("#activityLogsLink"),
+  pinnacleComparisonLink: document.querySelector("#pinnacleComparisonLink"),
   dashboardSummary: document.querySelector("#dashboardSummary"),
   limitsPanel: document.querySelector("#limitsPanel"),
   activityLogsView: document.querySelector("#activityLogsView"),
+  pinnacleComparisonView: document.querySelector("#pinnacleComparisonView"),
+  comparisonRefresh: document.querySelector("#comparisonRefresh"),
+  comparisonMessage: document.querySelector("#comparisonMessage"),
+  comparisonFixtureCount: document.querySelector("#comparisonFixtureCount"),
+  comparisonSectionCount: document.querySelector("#comparisonSectionCount"),
+  comparisonGeneratedAt: document.querySelector("#comparisonGeneratedAt"),
+  comparisonProfiles: document.querySelector("#comparisonProfiles"),
+  comparisonContent: document.querySelector("#comparisonContent"),
   limitFilter: document.querySelector("#limitFilter"),
   limitModeFilter: document.querySelector("#limitModeFilter"),
   agentSelectButton: document.querySelector("#agentSelectButton"),
@@ -87,15 +100,32 @@ function isActivityLogsRoute() {
   return normalizedPath === "/activity_logs";
 }
 
+function isPinnacleComparisonRoute() {
+  const normalizedPath =
+    window.location.pathname.replace(/\/+$/, "") || "/";
+
+  return normalizedPath === "/pinnacle_aceshigh";
+}
+
 function applyDashboardRoute() {
   const activityLogsActive = isActivityLogsRoute();
+  const comparisonActive = isPinnacleComparisonRoute();
+  const dashboardActive = !activityLogsActive && !comparisonActive;
 
   if (elements.dashboardSummary) {
-    elements.dashboardSummary.hidden = activityLogsActive;
+    elements.dashboardSummary.hidden = !dashboardActive;
   }
 
   if (elements.limitsPanel) {
-    elements.limitsPanel.hidden = activityLogsActive;
+    elements.limitsPanel.hidden = !dashboardActive;
+  }
+
+  if (elements.pinnacleComparisonView) {
+    elements.pinnacleComparisonView.hidden = !comparisonActive;
+    elements.pinnacleComparisonView.setAttribute(
+      "aria-hidden",
+      String(!comparisonActive)
+    );
   }
 
   if (elements.activityLogsView) {
@@ -124,8 +154,286 @@ function applyDashboardRoute() {
     }
   }
 
+  if (elements.pinnacleComparisonLink) {
+    elements.pinnacleComparisonLink.classList.toggle(
+      "active",
+      comparisonActive
+    );
+
+    if (comparisonActive) {
+      elements.pinnacleComparisonLink.setAttribute(
+        "aria-current",
+        "page"
+      );
+    } else {
+      elements.pinnacleComparisonLink.removeAttribute(
+        "aria-current"
+      );
+    }
+  }
+
   if (activityLogsActive) {
     renderSchedules();
+  }
+
+  if (comparisonActive && state.selectedAgentId) {
+    loadPinnacleComparison().catch(() => { });
+  }
+}
+
+function comparisonText(value, fallback = "—") {
+  return value === null || value === undefined || value === ""
+    ? fallback
+    : String(value);
+}
+
+function formatAmericanOdds(value) {
+  if (value === null || value === undefined || value === "") {
+    return "—";
+  }
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return String(value);
+  }
+  return number > 0 ? `+${Math.round(number)}` : String(Math.round(number));
+}
+
+function formatComparisonLine(value) {
+  if (value === null || value === undefined || value === "") {
+    return "—";
+  }
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return String(value);
+  }
+  return number > 0 ? `+${number}` : String(number);
+}
+
+function formatComparisonLimit(value, currency = "USD") {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return "—";
+  }
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: currency || "USD",
+    maximumFractionDigits: Number.isInteger(number) ? 0 : 2,
+  }).format(number);
+}
+
+function comparisonCell(text, className = "") {
+  const cell = document.createElement("td");
+  cell.textContent = text;
+  if (className) {
+    cell.className = className;
+  }
+  return cell;
+}
+
+function renderComparisonProfiles(data) {
+  elements.comparisonProfiles.replaceChildren();
+  const marketLabels = {
+    moneyline: "Moneyline",
+    spread: "Spread",
+    total: "Total",
+    teamtotal: "Team total",
+  };
+
+  Object.entries(data.configuredLimits || {}).forEach(([period, limits]) => {
+    const card = document.createElement("article");
+    card.className = "comparison-profile-card";
+    const heading = document.createElement("h3");
+    heading.textContent = `AcesHigh ${period} limits`;
+    card.append(heading);
+
+    const list = document.createElement("dl");
+    Object.entries(marketLabels).forEach(([key, label]) => {
+      const item = document.createElement("div");
+      const term = document.createElement("dt");
+      const value = document.createElement("dd");
+      term.textContent = label;
+      value.textContent = formatComparisonLimit(limits?.[key], "USD");
+      item.append(term, value);
+      list.append(item);
+    });
+    card.append(list);
+    elements.comparisonProfiles.append(card);
+  });
+}
+
+function renderPinnacleComparison(data) {
+  state.comparison = data;
+  elements.comparisonFixtureCount.textContent =
+    comparisonText(data.matchedFixtureCount, "0");
+  elements.comparisonSectionCount.textContent =
+    comparisonText(data.sectionCount, "0");
+
+  const generated = new Date(data.generatedAt);
+  elements.comparisonGeneratedAt.textContent = Number.isNaN(generated.valueOf())
+    ? "—"
+    : generated.toLocaleString([], {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+
+  renderComparisonProfiles(data);
+  elements.comparisonContent.replaceChildren();
+
+  if (!data.comparisons?.length) {
+    const empty = document.createElement("p");
+    empty.className = "comparison-empty";
+    empty.textContent =
+      "No current MLB fixtures could be mapped between AcesHigh and Pinnacle.";
+    elements.comparisonContent.append(empty);
+    return;
+  }
+
+  data.comparisons.forEach((section) => {
+    const card = document.createElement("article");
+    card.className = "comparison-card";
+
+    const header = document.createElement("header");
+    const titleWrap = document.createElement("div");
+    const title = document.createElement("h3");
+    title.textContent = comparisonText(section.fixture, "MLB fixture");
+    const meta = document.createElement("p");
+    const start = new Date(section.startTimeUtc);
+    meta.textContent = Number.isNaN(start.valueOf())
+      ? `AcesHigh game ${comparisonText(section.acesHighGameNumber)}`
+      : `${start.toLocaleString([], {
+          weekday: "short",
+          hour: "numeric",
+          minute: "2-digit",
+        })} · AcesHigh game ${comparisonText(section.acesHighGameNumber)}`;
+    titleWrap.append(title, meta);
+    const period = document.createElement("span");
+    period.className = "comparison-period";
+    period.textContent = comparisonText(section.period);
+    header.append(titleWrap, period);
+    card.append(header);
+
+    const wrap = document.createElement("div");
+    wrap.className = "comparison-table-wrap";
+    const table = document.createElement("table");
+    table.className = "comparison-table";
+    const head = document.createElement("thead");
+    const headRow = document.createElement("tr");
+    [
+      "Market",
+      "Selection",
+      "AcesHigh line",
+      "AcesHigh odds",
+      "Our limit",
+      "Pinnacle line",
+      "Pinnacle odds",
+      "Pinnacle limit",
+    ].forEach((label) => {
+      const th = document.createElement("th");
+      th.textContent = label;
+      headRow.append(th);
+    });
+    head.append(headRow);
+    table.append(head);
+
+    const body = document.createElement("tbody");
+    (section.rows || []).forEach((row) => {
+      const tr = document.createElement("tr");
+      const ourLimit = Number(row.acesHigh?.limit);
+      const pinnacleLimit = Number(row.pinnacle?.limit);
+      let ourLimitClass = "comparison-limit";
+      let pinnacleLimitClass = "comparison-limit";
+      if (Number.isFinite(ourLimit) && Number.isFinite(pinnacleLimit)) {
+        if (ourLimit > pinnacleLimit) {
+          ourLimitClass += " comparison-limit-higher";
+        } else if (pinnacleLimit > ourLimit) {
+          pinnacleLimitClass += " comparison-limit-higher";
+        }
+      }
+      tr.append(
+        comparisonCell(comparisonText(row.market)),
+        comparisonCell(comparisonText(row.selection), "comparison-selection"),
+        comparisonCell(formatComparisonLine(row.acesHigh?.line)),
+        comparisonCell(formatAmericanOdds(row.acesHigh?.oddsAmerican)),
+        comparisonCell(formatComparisonLimit(row.acesHigh?.limit), ourLimitClass),
+        comparisonCell(formatComparisonLine(row.pinnacle?.line)),
+        comparisonCell(formatAmericanOdds(row.pinnacle?.oddsAmerican)),
+        comparisonCell(
+          formatComparisonLimit(
+            row.pinnacle?.limit,
+            data.pinnacleLimitCurrency || "USD"
+          ),
+          pinnacleLimitClass
+        )
+      );
+      body.append(tr);
+    });
+    table.append(body);
+    wrap.append(table);
+    card.append(wrap);
+    elements.comparisonContent.append(card);
+  });
+}
+
+function setComparisonMessage(message = "", type = "") {
+  elements.comparisonMessage.textContent = message;
+  elements.comparisonMessage.className = `message comparison-message ${type}`.trim();
+  elements.comparisonMessage.hidden = !message;
+}
+
+async function loadPinnacleComparison(force = false) {
+  if (!state.selectedAgentId || state.comparisonLoading) {
+    return;
+  }
+  if (
+    !force &&
+    state.comparison &&
+    Number(state.comparisonAgentId) === Number(state.selectedAgentId)
+  ) {
+    renderPinnacleComparison(state.comparison);
+    return;
+  }
+
+  const requestId = ++state.comparisonRequest;
+  const accountId = state.selectedAgentId;
+  state.comparisonLoading = true;
+  elements.comparisonRefresh.disabled = true;
+  elements.comparisonRefresh.textContent = "Refreshing...";
+  setComparisonMessage("Loading current MLB lines and limits...");
+
+  try {
+    const params = new URLSearchParams({ accountId: String(accountId) });
+    if (force) {
+      params.set("refresh", "true");
+    }
+    const response = await fetch(`/api/pinnacle-comparison?${params}`, {
+      cache: "no-store",
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Could not load the MLB comparison");
+    }
+    if (
+      requestId !== state.comparisonRequest ||
+      Number(accountId) !== Number(state.selectedAgentId)
+    ) {
+      return;
+    }
+    state.comparisonAgentId = accountId;
+    renderPinnacleComparison(data);
+    setComparisonMessage("");
+  } catch (error) {
+    if (requestId === state.comparisonRequest) {
+      setComparisonMessage(error.message, "error");
+    }
+    throw error;
+  } finally {
+    if (requestId === state.comparisonRequest) {
+      state.comparisonLoading = false;
+      elements.comparisonRefresh.disabled = false;
+      elements.comparisonRefresh.textContent = "Refresh data";
+    }
   }
 }
 
@@ -1429,6 +1737,10 @@ async function loadAgents() {
   }
 
   await loadLeagues();
+
+  if (isPinnacleComparisonRoute()) {
+    await loadPinnacleComparison().catch(() => { });
+  }
 }
 
 function updateAgentSelectorLabel(agent) {
@@ -1724,6 +2036,10 @@ async function selectAgent(agent) {
   state.expandedRows.clear();
   state.activeChange = null;
   state.pendingSaveBatch = [];
+  state.comparisonRequest += 1;
+  state.comparison = null;
+  state.comparisonAgentId = null;
+  state.comparisonLoading = false;
 
   elements.leagueRows.innerHTML =
     '<tr><td colspan="7" class="empty-state">Loading leagues...</td></tr>';
@@ -1734,6 +2050,9 @@ async function selectAgent(agent) {
      * parent limit while loading this agent's values.
      */
     await loadLeagues();
+    if (isPinnacleComparisonRoute()) {
+      await loadPinnacleComparison().catch(() => { });
+    }
   } catch (error) {
     /*
      * Drop the previous agent's rows: leaving them in state would render
@@ -2468,6 +2787,40 @@ elements.activityLogsLink?.addEventListener(
   }
 );
 
+elements.pinnacleComparisonLink?.addEventListener(
+  "click",
+  (event) => {
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (!isPinnacleComparisonRoute()) {
+      window.history.pushState(
+        {},
+        "",
+        "/pinnacle_aceshigh"
+      );
+    }
+
+    applyDashboardRoute();
+  }
+);
+
+elements.comparisonRefresh?.addEventListener(
+  "click",
+  () => {
+    loadPinnacleComparison(true).catch(() => { });
+  }
+);
+
 window.addEventListener(
   "popstate",
   () => {
@@ -2743,6 +3096,10 @@ elements.logoutButton.addEventListener(
     state.expandedRows.clear();
     state.activeChange = null;
     state.pendingSaveBatch = [];
+    state.comparisonRequest += 1;
+    state.comparison = null;
+    state.comparisonAgentId = null;
+    state.comparisonLoading = false;
 
     clearPendingChanges();
 
@@ -2767,6 +3124,12 @@ elements.logoutButton.addEventListener(
     elements.agentSearchResults.hidden =
       true;
     elements.searchInput.value = "";
+    elements.comparisonContent.replaceChildren();
+    elements.comparisonProfiles.replaceChildren();
+    elements.comparisonFixtureCount.textContent = "—";
+    elements.comparisonSectionCount.textContent = "—";
+    elements.comparisonGeneratedAt.textContent = "—";
+    setComparisonMessage("");
 
     if (elements.dialog.open) {
       elements.dialog.close();

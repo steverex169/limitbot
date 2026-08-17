@@ -24,6 +24,7 @@ from sqlalchemy import delete, inspect, select, text, update
 from urllib.parse import urlparse, parse_qs
 from database import Base, database_session, engine
 from model import LoginSession, ScheduledLimit, User
+from odds_comparison import ComparisonError, build_mlb_comparison
 
 backend_directory = Path(__file__).resolve().parent
 app_directory = backend_directory.parent / "Frontend"
@@ -2340,6 +2341,49 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self.server_error("Agent load failed", error, "Agent data is unavailable")
             return
 
+        if path == "/api/pinnacle-comparison":
+            try:
+                auth = auth_context()
+                requested_account = query.get("accountId", [auth["id"]])[0]
+                account_id = validate_account_id(int(requested_account))
+                api_key = os.getenv("ODDSPAPI_KEY", "").strip()
+                if not api_key:
+                    self.send_json(
+                        503,
+                        {"error": "OddsPapi is not configured on this server"},
+                    )
+                    return
+                force = query.get("refresh", [""])[0].lower() in {
+                    "1", "true", "yes",
+                }
+                self.send_json(
+                    200,
+                    build_mlb_comparison(
+                        api_key,
+                        auth["http"],
+                        auth["headers"],
+                        account_id,
+                        force=force,
+                    ),
+                )
+            except (KeyError, TypeError, ValueError) as error:
+                self.send_json(400, {"error": str(error)})
+            except PermissionError as error:
+                self.send_json(401, {"error": str(error)})
+            except ComparisonError as error:
+                self.server_error(
+                    "MLB comparison failed",
+                    error,
+                    "Pinnacle or AcesHigh comparison data is unavailable",
+                )
+            except Exception as error:
+                self.server_error(
+                    "MLB comparison failed",
+                    error,
+                    "Comparison data is unavailable",
+                )
+            return
+
         if path == "/api/agent-search":
             try:
                 search_value = query.get("q", [""])[0]
@@ -2409,7 +2453,13 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.redirect("/")
             return
 
-        if path in {"/", "/activity_logs", "/activity_logs/"}:
+        if path in {
+            "/",
+            "/activity_logs",
+            "/activity_logs/",
+            "/pinnacle_aceshigh",
+            "/pinnacle_aceshigh/",
+        }:
             self.path = "/index.html"
             super().do_GET()
             return
