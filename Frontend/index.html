@@ -164,6 +164,16 @@
           <h2>Recurring schedules</h2>
           <p>Review upcoming ET limit changes or cancel an active schedule.</p>
         </div>
+        <div class="filters activity-log-filters">
+          <label class="select-field">
+            <span>Status</span>
+            <select id="scheduleStatusFilter">
+              <option value="all" selected>All</option>
+              <option value="active">Active</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </label>
+        </div>
       </div>
       <div class="table-wrap schedules-table-wrap">
         <table class="schedules-table">
@@ -331,7 +341,7 @@
       </button>
       <div id="dialogMessage" class="message error" role="alert" hidden></div>
       <div class="dialog-actions">
-        <button value="cancel" class="button secondary">Cancel</button>
+        <button id="cancelDialogButton" type="button" value="cancel" class="button secondary">Cancel</button>
         <button id="confirmSchedule" value="default" class="button secondary">Schedule</button>
         <button id="confirmSave" value="default" class="button primary">Save to Aces High</button>
       </div>

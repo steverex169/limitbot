@@ -80,6 +80,7 @@ const elements = {
   tradingRows: document.querySelector("#tradingRows"),
   limitFilter: document.querySelector("#limitFilter"),
   limitModeFilter: document.querySelector("#limitModeFilter"),
+  scheduleStatusFilter: document.querySelector("#scheduleStatusFilter"),
   agentSelectButton: document.querySelector("#agentSelectButton"),
   agentTree: document.querySelector("#agentTree"),
   agentSearch: document.querySelector("#agentSearch"),
@@ -104,6 +105,7 @@ const elements = {
   schedulePeriod: document.querySelector("#schedulePeriod"),
   customerSupportAgent: document.querySelector("#customerSupportAgent"),
   clearScheduleOptions: document.querySelector("#clearScheduleOptions"),
+  cancelDialogButton: document.querySelector("#cancelDialogButton"),
   scheduleDays: [
     ...document.querySelectorAll('input[name="scheduleDay"]'),
   ],
@@ -907,9 +909,9 @@ function formatEasternDateTime(value) {
 
   if (
     typeof value === "string" &&
-    /(?:\bET\b|\bEST\b|\bEDT\b)/.test(value)
+    /(?:\bET\b|\bEST\b)/.test(value)
   ) {
-    return value;
+    return value.replace(/\bEDT\b/g, "EST");
   }
 
   const parsed = new Date(value);
@@ -920,7 +922,8 @@ function formatEasternDateTime(value) {
 
   return easternDateTimeFormatter
     .format(parsed)
-    .replace(", ", " ");
+    .replace(", ", " ")
+    .replace(/\bEDT\b/g, "EST");
 }
 
 const easternTimeFormatter = new Intl.DateTimeFormat(
@@ -2008,10 +2011,22 @@ function applyFilters() {
 function renderSchedules() {
   elements.scheduleRows.replaceChildren();
 
-  const schedules = state.schedules.filter(
-    (schedule) =>
-      schedule.recurring
-  );
+  const statusFilter =
+    elements.scheduleStatusFilter?.value || "active";
+  const schedules = state.schedules.filter((schedule) => {
+    const isCancelled =
+      String(schedule.status || "").toLowerCase() === "cancelled";
+
+    if (statusFilter === "all") {
+      return true;
+    }
+
+    if (statusFilter === "cancelled") {
+      return isCancelled;
+    }
+
+    return !isCancelled;
+  });
 
   if (!schedules.length) {
     const row = document.createElement("tr");
@@ -2019,7 +2034,10 @@ function renderSchedules() {
 
     cell.colSpan = 8;
     cell.className = "empty-state";
-    cell.textContent = "No recurring schedules.";
+    cell.textContent =
+      statusFilter === "cancelled"
+        ? "No cancelled schedules."
+        : "No active schedules.";
 
     row.append(cell);
     elements.scheduleRows.append(row);
@@ -2130,6 +2148,12 @@ function renderSchedules() {
     row.append(action);
     elements.scheduleRows.append(row);
   }
+}
+
+if (elements.scheduleStatusFilter) {
+  elements.scheduleStatusFilter.addEventListener("change", () => {
+    renderSchedules();
+  });
 }
 
 async function loadLeagues(includeSchedules = true) {
@@ -3258,7 +3282,7 @@ async function scheduleActiveChange() {
 
   if (!selectedTime) {
     showDialogMessage(
-      "Select an Eastern time first."
+    "Select an ET time first."
     );
     return;
   }
@@ -3645,7 +3669,7 @@ elements.confirmSave.addEventListener(
 
     if (selectedDays.length) {
       showDialogMessage(
-        "Pick an Eastern time to create a schedule, or clear the schedule to save immediately."
+        "Pick an ET time to create a schedule, or clear the schedule to save immediately."
       );
       return;
     }
@@ -3670,6 +3694,13 @@ elements.dialog.addEventListener(
     window.setTimeout(() => {
       state.isSavingChange = false;
     }, 0);
+  }
+);
+
+elements.cancelDialogButton?.addEventListener(
+  "click",
+  () => {
+    elements.dialog.close("cancel");
   }
 );
 
@@ -3726,14 +3757,12 @@ async function startDashboard(sessionData = null) {
   }
   applyDashboardRoute();
 
-  try {
-    await loadAgents();
-  } catch (error) {
+  loadAgents().catch((error) => {
     showMessage(
       error.message,
       "error"
     );
-  }
+  });
 }
 
 elements.loginForm.addEventListener(
