@@ -6,6 +6,7 @@ const state = {
   pending: new Map(),
   pendingSaveBatch: [],
   schedules: [],
+  schedulesAgentId: null,
   periodRows: new Map(),
   expandedRows: new Set(),
   expandedAgentIds: new Set(),
@@ -174,6 +175,9 @@ function applyDashboardRoute() {
 
   if (activityLogsActive) {
     renderSchedules();
+    if (state.selectedAgentId) {
+      loadSchedules().catch(() => { });
+    }
   }
 
   if (comparisonActive && state.selectedAgentId) {
@@ -1641,6 +1645,7 @@ async function loadLeagues() {
   )
     ? scheduleData.schedules
     : [];
+  state.schedulesAgentId = accountId;
 
   state.filteredRows = [];
 
@@ -1656,6 +1661,32 @@ async function loadLeagues() {
 
   restorePendingFromLocalStorage();
   applyFilters();
+  renderSchedules();
+}
+
+async function loadSchedules(force = false) {
+  const accountId = state.selectedAgentId;
+  if (!accountId) {
+    return;
+  }
+  if (!force && Number(state.schedulesAgentId) === Number(accountId)) {
+    renderSchedules();
+    return;
+  }
+
+  const response = await fetch(
+    `/api/schedules?${new URLSearchParams({ accountId })}`,
+    { cache: "no-store" }
+  );
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || "Could not load activity logs");
+  }
+  if (Number(accountId) !== Number(state.selectedAgentId)) {
+    return;
+  }
+  state.schedules = Array.isArray(data.schedules) ? data.schedules : [];
+  state.schedulesAgentId = accountId;
   renderSchedules();
 }
 
@@ -1736,10 +1767,12 @@ async function loadAgents() {
       false;
   }
 
-  await loadLeagues();
-
-  if (isPinnacleComparisonRoute()) {
+  if (isActivityLogsRoute()) {
+    await loadSchedules();
+  } else if (isPinnacleComparisonRoute()) {
     await loadPinnacleComparison().catch(() => { });
+  } else {
+    await loadLeagues();
   }
 }
 
@@ -2040,6 +2073,7 @@ async function selectAgent(agent) {
   state.comparison = null;
   state.comparisonAgentId = null;
   state.comparisonLoading = false;
+  state.schedulesAgentId = null;
 
   elements.leagueRows.innerHTML =
     '<tr><td colspan="7" class="empty-state">Loading leagues...</td></tr>';
@@ -2049,9 +2083,12 @@ async function selectAgent(agent) {
      * loadLeagues preserves the currently selected
      * parent limit while loading this agent's values.
      */
-    await loadLeagues();
-    if (isPinnacleComparisonRoute()) {
+    if (isActivityLogsRoute()) {
+      await loadSchedules();
+    } else if (isPinnacleComparisonRoute()) {
       await loadPinnacleComparison().catch(() => { });
+    } else {
+      await loadLeagues();
     }
   } catch (error) {
     /*
@@ -3001,7 +3038,7 @@ function showLogin() {
   elements.password.value = "";
 }
 
-async function startDashboard() {
+async function startDashboard(sessionData = null) {
   document.body.classList.remove(
     "app-loading"
   );
@@ -3010,6 +3047,10 @@ async function startDashboard() {
   elements.dashboardHeader.hidden = false;
   elements.dashboardSidebar.hidden = false;
   elements.dashboardView.hidden = false;
+  if (sessionData) {
+    elements.accountName.textContent = sessionData.username || "Agent";
+    elements.accountId.textContent = `Account ${sessionData.id}`;
+  }
   applyDashboardRoute();
 
   try {
@@ -3062,7 +3103,7 @@ elements.loginForm.addEventListener(
 
       elements.password.value = "";
 
-      await startDashboard();
+      await startDashboard(data);
     } catch (error) {
       elements.loginMessage.textContent =
         error.message;
@@ -3092,6 +3133,7 @@ elements.logoutButton.addEventListener(
     state.rows = [];
     state.filteredRows = [];
     state.schedules = [];
+    state.schedulesAgentId = null;
     state.periodRows.clear();
     state.expandedRows.clear();
     state.activeChange = null;
@@ -3165,11 +3207,13 @@ elements.logoutButton.addEventListener(
 fetch("/api/session", {
   cache: "no-store",
 })
-  .then((response) =>
-    response.ok
-      ? startDashboard()
-      : showLogin()
-  )
+  .then(async (response) => {
+    if (!response.ok) {
+      showLogin();
+      return;
+    }
+    await startDashboard(await response.json());
+  })
   .catch(showLogin);
 
 setInterval(() => {

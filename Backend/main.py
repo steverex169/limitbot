@@ -2331,7 +2331,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     {
                         "parentId": auth["id"],
                         "parentName": auth["username"],
-                        "agents": load_agents(force=True),
+                        # Login already loads and validates the hierarchy. Reuse
+                        # that per-session cache instead of immediately walking
+                        # every AcesHigh agent a second time.
+                        "agents": load_agents(),
                         "preferences": user_preferences(auth),
                     },
                 )
