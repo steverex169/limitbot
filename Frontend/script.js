@@ -624,6 +624,7 @@ function renderTradingMonitor(data) {
     const fixture = document.createElement("td");
     const fixtureName = document.createElement("strong");
     const fixtureMeta = document.createElement("small");
+    const mappingMeta = document.createElement("small");
     fixtureName.textContent = comparisonText(event.fixture);
     const start = new Date(event.startTimeUtc);
     fixtureMeta.textContent = Number.isNaN(start.valueOf())
@@ -634,7 +635,14 @@ function renderTradingMonitor(data) {
           hour: "numeric",
           minute: "2-digit",
         })} · ${(event.periods || []).join(" · ")}`;
-    fixture.append(fixtureName, fixtureMeta);
+    const startDifference = event.mapping?.maxStartDifferenceMinutes;
+    mappingMeta.textContent = event.mapping?.verified
+      ? `Verified teams + start time (${comparisonText(startDifference, "0")} min difference)`
+      : "Mapping not verified";
+    mappingMeta.className = event.mapping?.verified
+      ? "trading-evidence trading-evidence-ok"
+      : "trading-evidence trading-evidence-warning";
+    fixture.append(fixtureName, fixtureMeta, mappingMeta);
 
     const score = document.createElement("td");
     const scoreValue = document.createElement("strong");
@@ -665,15 +673,30 @@ function renderTradingMonitor(data) {
       ? "Suspended"
       : event.pinnacle?.open
       ? "Open"
-      : "Closed";
+      : event.pinnacle?.hasOdds === false
+      ? "Unavailable"
+      : event.pinnacle?.quoteCount > 0
+      ? "Closed"
+      : "Unknown";
     const pinnacleState = event.pinnacle?.staleOdds
       ? "hold"
       : event.pinnacle?.suspended
       ? "suspend"
       : event.pinnacle?.open
       ? "open"
-      : "closed";
+      : event.pinnacle?.hasOdds === false
+      ? "hold"
+      : event.pinnacle?.quoteCount > 0
+      ? "closed"
+      : "hold";
     pinnacle.append(tradingStateBadge(pinnacleLabel, pinnacleState));
+    const pinnacleEvidence = document.createElement("small");
+    pinnacleEvidence.className = "trading-evidence";
+    pinnacleEvidence.textContent = `${comparisonText(
+      event.pinnacle?.activeQuoteCount,
+      "0"
+    )}/${comparisonText(event.pinnacle?.quoteCount, "0")} active quotes`;
+    pinnacle.append(pinnacleEvidence);
 
     const signal = document.createElement("td");
     signal.append(tradingStateBadge(

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, time as datetime_time, timezone
 import re
 import threading
 import time
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -16,6 +17,7 @@ PLAYER_API = f"{ACESHIGH_BASE}/player-api"
 ODDSPAPI_BASE = "https://v5.oddspapi.io/en"
 BOOKMAKER = "pinnacle"
 CACHE_SECONDS = 45
+FIXTURE_MATCH_TOLERANCE_SECONDS = 90 * 60
 
 PUBLIC_HEADERS = {
     "Accept": "application/json, text/plain, */*",
@@ -325,6 +327,26 @@ def _odds_period(description: object, period_number: object) -> str | None:
     return None
 
 
+def _aces_start_time(day_value: object, time_value: object, timezone_code: object) -> int | None:
+    """Convert the AcesHigh schedule's separate local date/time into Unix UTC."""
+    try:
+        day = datetime.fromisoformat(str(day_value).replace("Z", "+00:00")).date()
+        clock = datetime_time.fromisoformat(str(time_value))
+    except (TypeError, ValueError):
+        return None
+    zone_name = {
+        "PT": "America/Los_Angeles",
+        "ET": "America/New_York",
+        "CT": "America/Chicago",
+        "MT": "America/Denver",
+        "UTC": "UTC",
+    }.get(str(timezone_code or "").upper())
+    if not zone_name:
+        return None
+    local_start = datetime.combine(day, clock, ZoneInfo(zone_name))
+    return int(local_start.timestamp())
+
+
 def _period_limits(
     limits: dict[str, dict[str, float | int | None]],
     description: str,
@@ -416,6 +438,9 @@ def _parse_aces_games(
                 games.append(
                     {
                         "gameNumber": game_number,
+                        "startTime": _aces_start_time(
+                            day.get("d"), game.get("t"), sc.get("tz")
+                        ),
                         "period": period,
                         "oddsPeriod": odds_period,
                         "teamKeys": {_normalize_team(name) for name in names},
@@ -524,17 +549,32 @@ def _matching_aces_games(
     if "" in keys or keys[0] == keys[1]:
         return []
 
+    fixture_start = fixture.get("startTime")
+    if not isinstance(fixture_start, (int, float)):
+        return []
+
     matches = []
     for game in games:
         game_keys = list(game["teamKeys"])
         if len(game_keys) != 2:
             continue
-        if (
+        teams_match = (
             _same_team(keys[0], game_keys[0]) and _same_team(keys[1], game_keys[1])
         ) or (
             _same_team(keys[0], game_keys[1]) and _same_team(keys[1], game_keys[0])
+        )
+        game_start = game.get("startTime")
+        if (
+            teams_match
+            and isinstance(game_start, (int, float))
+            and abs(fixture_start - game_start) <= FIXTURE_MATCH_TOLERANCE_SECONDS
         ):
-            matches.append(game)
+            matches.append({
+                **game,
+                "startTimeDifferenceMinutes": round(
+                    abs(fixture_start - game_start) / 60, 1
+                ),
+            })
     return sorted(matches, key=lambda game: game["oddsPeriod"] != "result")
 
 
@@ -892,12 +932,14 @@ def _monitor_signal(
 ) -> tuple[str, str]:
     if bookmaker.get("staleOdds") is True:
         return "hold", "Feed stale — no automatic action"
-    if bookmaker.get("suspended") is True or bookmaker.get("hasOdds") is False:
+    if bookmaker.get("suspended") is True:
         return (
             ("would-suspend", "Would suspend AcesHigh")
             if aces_open
             else ("aligned-closed", "Both books closed")
         )
+    if bookmaker.get("hasOdds") is False:
+        return "hold", "Pinnacle has no odds — verify manually"
     if quote_count and active_quote_count == 0:
         return (
             ("would-suspend", "Would suspend AcesHigh")
@@ -979,7 +1021,23 @@ def _build_monitor_uncached(
                 },
                 "scores": _score_rows(payload),
                 "periods": sorted({match.get("period") for match in matches if match.get("period")}),
-                "acesHigh": {"open": aces_open},
+                "mapping": {
+                    "verified": True,
+                    "method": "teams-and-start-time",
+                    "maxStartDifferenceMinutes": max(
+                        match.get("startTimeDifferenceMinutes", 0) for match in matches
+                    ),
+                    "acesHighGameNumbers": sorted({
+                        match.get("gameNumber") for match in matches
+                        if match.get("gameNumber") is not None
+                    }),
+                },
+                "acesHigh": {
+                    "open": aces_open,
+                    "quoteCount": sum(
+                        len(match.get("entries") or []) for match in matches
+                    ),
+                },
                 "pinnacle": {
                     "open": bool(active_quotes) and bookmaker.get("suspended") is not True,
                     "suspended": bookmaker.get("suspended"),

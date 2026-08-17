@@ -840,6 +840,20 @@ tbody tr:hover {
   font-size: 11px;
 }
 
+.trading-table td .trading-evidence {
+  margin-top: 6px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.trading-table td .trading-evidence-ok {
+  color: #14804a;
+}
+
+.trading-table td .trading-evidence-warning {
+  color: #a15c00;
+}
+
 .trading-state {
   display: inline-flex;
   min-height: 25px;
