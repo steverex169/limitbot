@@ -27,6 +27,7 @@ from model import LoginSession, ScheduledLimit, User
 from odds_comparison import (
     ComparisonError,
     build_league_comparison,
+    build_trading_monitor,
     comparison_leagues,
 )
 
@@ -2523,6 +2524,49 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     "League comparison failed",
                     error,
                     "Comparison data is unavailable",
+                )
+            return
+
+        if path == "/api/trading-monitor":
+            try:
+                auth = auth_context()
+                requested_account = query.get("accountId", [auth["id"]])[0]
+                account_id = validate_account_id(int(requested_account))
+                api_key = os.getenv("ODDSPAPI_KEY", "").strip()
+                if not api_key:
+                    self.send_json(
+                        503,
+                        {"error": "OddsPapi is not configured on this server"},
+                    )
+                    return
+                force = query.get("refresh", [""])[0].lower() in {
+                    "1", "true", "yes",
+                }
+                league = query.get("league", ["mlb"])[0]
+                self.send_json(
+                    200,
+                    build_trading_monitor(
+                        api_key,
+                        account_id,
+                        league=league,
+                        force=force,
+                    ),
+                )
+            except (KeyError, TypeError, ValueError) as error:
+                self.send_json(400, {"error": str(error)})
+            except PermissionError as error:
+                self.send_json(401, {"error": str(error)})
+            except ComparisonError as error:
+                self.server_error(
+                    "Trading monitor failed",
+                    error,
+                    "Pinnacle or AcesHigh monitor data is unavailable",
+                )
+            except Exception as error:
+                self.server_error(
+                    "Trading monitor failed",
+                    error,
+                    "Trading monitor data is unavailable",
                 )
             return
 

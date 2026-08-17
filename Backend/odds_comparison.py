@@ -69,7 +69,9 @@ LEAGUE_CONFIGS: dict[str, dict[str, Any]] = {
 }
 
 _cache_lock = threading.Lock()
+_monitor_cache_lock = threading.Lock()
 _comparison_cache: dict[tuple[int, str], tuple[float, dict[str, Any]]] = {}
+_monitor_cache: dict[tuple[int, str], tuple[float, dict[str, Any]]] = {}
 
 
 class ComparisonError(RuntimeError):
@@ -866,3 +868,167 @@ def build_mlb_comparison(
     return build_league_comparison(
         api_key, partner_session, partner_headers, account_id, "mlb", force
     )
+
+
+def _score_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = []
+    for period, score in (payload.get("scores") or {}).items():
+        if not isinstance(score, dict):
+            continue
+        rows.append({
+            "period": score.get("period") or period,
+            "participant1Score": score.get("participant1Score"),
+            "participant2Score": score.get("participant2Score"),
+            "updatedAt": score.get("updatedAt"),
+        })
+    return rows
+
+
+def _monitor_signal(
+    bookmaker: dict[str, Any],
+    quote_count: int,
+    active_quote_count: int,
+    aces_open: bool,
+) -> tuple[str, str]:
+    if bookmaker.get("staleOdds") is True:
+        return "hold", "Feed stale — no automatic action"
+    if bookmaker.get("suspended") is True or bookmaker.get("hasOdds") is False:
+        return (
+            ("would-suspend", "Would suspend AcesHigh")
+            if aces_open
+            else ("aligned-closed", "Both books closed")
+        )
+    if quote_count and active_quote_count == 0:
+        return (
+            ("would-suspend", "Would suspend AcesHigh")
+            if aces_open
+            else ("aligned-closed", "Both books closed")
+        )
+    if active_quote_count:
+        return (
+            ("aligned-open", "Both books open")
+            if aces_open
+            else ("would-reopen", "Would review for reopening")
+        )
+    return "hold", "No Pinnacle state — no automatic action"
+
+
+def _build_monitor_uncached(
+    api_key: str,
+    account_id: int,
+    league: str,
+) -> dict[str, Any]:
+    config = LEAGUE_CONFIGS[league]
+    aces_games = _parse_aces_games(_guest_schedule(league), {}, league)
+    odds_session = requests.Session()
+    odds_session.headers.update(
+        {"Accept": "application/json", "User-Agent": "limitbot-trading-monitor/1.0"}
+    )
+    events: list[dict[str, Any]] = []
+    try:
+        fixtures = _league_fixtures(odds_session, api_key, league)
+        for fixture in fixtures:
+            matches = _matching_aces_games(fixture, aces_games)
+            if not matches:
+                continue
+            payload = _odds_get(
+                odds_session,
+                api_key,
+                "/fixtures/odds",
+                fixtureId=fixture["fixtureId"],
+                bookmakers=BOOKMAKER,
+                mainLine=True,
+            )
+            quote_map = ((payload.get("odds") or {}).get(BOOKMAKER) or {})
+            quotes = [quote for quote in quote_map.values() if isinstance(quote, dict)]
+            active_quotes = [
+                quote for quote in quotes
+                if quote.get("active") is True and quote.get("marketActive") is not False
+            ]
+            bookmaker = ((payload.get("bookmakers") or {}).get(BOOKMAKER) or {})
+            aces_open = any(
+                entry.get("oddsAmerican") not in (None, "")
+                for match in matches
+                for entry in match.get("entries") or []
+            )
+            signal, recommendation = _monitor_signal(
+                bookmaker, len(quotes), len(active_quotes), aces_open
+            )
+            participants = payload.get("participants") or {}
+            start_time = payload.get("startTime")
+            status = payload.get("status") or {}
+            clock = payload.get("clock") or {}
+            events.append({
+                "fixtureId": payload.get("fixtureId"),
+                "fixture": (
+                    f"{participants.get('participant1Name')} vs "
+                    f"{participants.get('participant2Name')}"
+                ),
+                "startTimeUtc": (
+                    datetime.fromtimestamp(start_time, timezone.utc).isoformat()
+                    if isinstance(start_time, (int, float)) else None
+                ),
+                "status": {
+                    "live": status.get("live"),
+                    "name": status.get("statusName"),
+                },
+                "clock": {
+                    "currentPeriod": clock.get("currentPeriod"),
+                    "remainingTime": clock.get("remainingTime"),
+                    "remainingTimeInPeriod": clock.get("remainingTimeInPeriod"),
+                },
+                "scores": _score_rows(payload),
+                "periods": sorted({match.get("period") for match in matches if match.get("period")}),
+                "acesHigh": {"open": aces_open},
+                "pinnacle": {
+                    "open": bool(active_quotes) and bookmaker.get("suspended") is not True,
+                    "suspended": bookmaker.get("suspended"),
+                    "staleOdds": bookmaker.get("staleOdds"),
+                    "hasOdds": bookmaker.get("hasOdds"),
+                    "activeQuoteCount": len(active_quotes),
+                    "quoteCount": len(quotes),
+                    "updatedAt": bookmaker.get("updatedAt"),
+                },
+                "signal": signal,
+                "recommendation": recommendation,
+            })
+            time.sleep(0.11)
+    finally:
+        odds_session.close()
+
+    return {
+        "mode": "dry-run",
+        "league": config["name"],
+        "leagueSlug": league,
+        "accountId": account_id,
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "eventCount": len(events),
+        "suspendedCount": sum(
+            event["pinnacle"]["suspended"] is True for event in events
+        ),
+        "actionCount": sum(
+            event["signal"] in {"would-suspend", "would-reopen"} for event in events
+        ),
+        "events": events,
+    }
+
+
+def build_trading_monitor(
+    api_key: str,
+    account_id: int,
+    league: str = "mlb",
+    force: bool = False,
+) -> dict[str, Any]:
+    """Return mapped Pinnacle/AcesHigh trading signals without making writes."""
+    league = str(league or "mlb").strip().lower()
+    if league not in LEAGUE_CONFIGS:
+        raise ValueError("Unsupported trading-monitor league")
+    now = time.monotonic()
+    cache_key = (account_id, league)
+    with _monitor_cache_lock:
+        cached = _monitor_cache.get(cache_key)
+        if not force and cached and now - cached[0] < CACHE_SECONDS:
+            return cached[1]
+        result = _build_monitor_uncached(api_key, account_id, league)
+        _monitor_cache[cache_key] = (time.monotonic(), result)
+        return result

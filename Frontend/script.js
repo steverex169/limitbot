@@ -18,6 +18,13 @@ const state = {
   comparisonLeague: "",
   comparisonLoading: false,
   comparisonRequest: 0,
+  tradingMonitor: null,
+  tradingAgentId: null,
+  tradingLeagues: [],
+  tradingLeaguesAgentId: null,
+  tradingLeague: "",
+  tradingLoading: false,
+  tradingRequest: 0,
 };
 
 const pendingStorageKey = "aceshighPendingLimitEdits";
@@ -25,6 +32,7 @@ const themeStorageKey = "aceshighTheme";
 let preferenceSaveTimer = null;
 let agentSearchTimer = null;
 let agentSearchRequest = 0;
+let tradingRefreshTimer = null;
 /*
  * Monotonic token for every write to state.rows. An async flow captures the
  * token before fetching and discards its response if another write happened
@@ -47,10 +55,12 @@ const elements = {
   dashboardHomeLink: document.querySelector("#dashboardHomeLink"),
   activityLogsLink: document.querySelector("#activityLogsLink"),
   pinnacleComparisonLink: document.querySelector("#pinnacleComparisonLink"),
+  tradingMonitorLink: document.querySelector("#tradingMonitorLink"),
   dashboardSummary: document.querySelector("#dashboardSummary"),
   limitsPanel: document.querySelector("#limitsPanel"),
   activityLogsView: document.querySelector("#activityLogsView"),
   pinnacleComparisonView: document.querySelector("#pinnacleComparisonView"),
+  tradingMonitorView: document.querySelector("#tradingMonitorView"),
   comparisonLeague: document.querySelector("#comparisonLeague"),
   comparisonRefresh: document.querySelector("#comparisonRefresh"),
   comparisonMessage: document.querySelector("#comparisonMessage"),
@@ -59,6 +69,13 @@ const elements = {
   comparisonGeneratedAt: document.querySelector("#comparisonGeneratedAt"),
   comparisonProfiles: document.querySelector("#comparisonProfiles"),
   comparisonContent: document.querySelector("#comparisonContent"),
+  tradingLeague: document.querySelector("#tradingLeague"),
+  tradingRefresh: document.querySelector("#tradingRefresh"),
+  tradingMessage: document.querySelector("#tradingMessage"),
+  tradingEventCount: document.querySelector("#tradingEventCount"),
+  tradingSuspendedCount: document.querySelector("#tradingSuspendedCount"),
+  tradingActionCount: document.querySelector("#tradingActionCount"),
+  tradingRows: document.querySelector("#tradingRows"),
   limitFilter: document.querySelector("#limitFilter"),
   limitModeFilter: document.querySelector("#limitModeFilter"),
   agentSelectButton: document.querySelector("#agentSelectButton"),
@@ -113,10 +130,23 @@ function isPinnacleComparisonRoute() {
   return normalizedPath === "/pinnacle_aceshigh";
 }
 
+function isTradingMonitorRoute() {
+  const normalizedPath =
+    window.location.pathname.replace(/\/+$/, "") || "/";
+
+  return normalizedPath === "/trading_monitor";
+}
+
 function applyDashboardRoute() {
   const activityLogsActive = isActivityLogsRoute();
   const comparisonActive = isPinnacleComparisonRoute();
-  const dashboardActive = !activityLogsActive && !comparisonActive;
+  const tradingActive = isTradingMonitorRoute();
+  const dashboardActive = !activityLogsActive && !comparisonActive && !tradingActive;
+
+  if (!tradingActive && tradingRefreshTimer) {
+    clearTimeout(tradingRefreshTimer);
+    tradingRefreshTimer = null;
+  }
 
   if (elements.dashboardSummary) {
     elements.dashboardSummary.hidden = !dashboardActive;
@@ -131,6 +161,14 @@ function applyDashboardRoute() {
     elements.pinnacleComparisonView.setAttribute(
       "aria-hidden",
       String(!comparisonActive)
+    );
+  }
+
+  if (elements.tradingMonitorView) {
+    elements.tradingMonitorView.hidden = !tradingActive;
+    elements.tradingMonitorView.setAttribute(
+      "aria-hidden",
+      String(!tradingActive)
     );
   }
 
@@ -187,6 +225,16 @@ function applyDashboardRoute() {
     }
   }
 
+
+  if (elements.tradingMonitorLink) {
+    elements.tradingMonitorLink.classList.toggle("active", tradingActive);
+    if (tradingActive) {
+      elements.tradingMonitorLink.setAttribute("aria-current", "page");
+    } else {
+      elements.tradingMonitorLink.removeAttribute("aria-current");
+    }
+  }
+
   if (activityLogsActive) {
     renderSchedules();
     if (state.selectedAgentId) {
@@ -197,6 +245,13 @@ function applyDashboardRoute() {
   if (comparisonActive && state.selectedAgentId) {
     loadComparisonLeagues()
       .then(() => loadPinnacleComparison())
+      .catch(() => { });
+  }
+
+
+  if (tradingActive && state.selectedAgentId) {
+    loadTradingLeagues()
+      .then(() => loadTradingMonitor())
       .catch(() => { });
   }
 
@@ -515,6 +570,245 @@ async function loadPinnacleComparison(force = false) {
       state.comparisonLoading = false;
       elements.comparisonRefresh.disabled = false;
       elements.comparisonRefresh.textContent = "Refresh data";
+    }
+  }
+}
+
+function setTradingMessage(message = "", type = "") {
+  elements.tradingMessage.textContent = message;
+  elements.tradingMessage.className = `message comparison-message ${type}`.trim();
+  elements.tradingMessage.hidden = !message;
+}
+
+function tradingStateBadge(label, stateName) {
+  const badge = document.createElement("span");
+  badge.className = `trading-state trading-state-${stateName}`;
+  badge.textContent = label;
+  return badge;
+}
+
+function tradingScoreText(event) {
+  const scores = Array.isArray(event.scores) ? event.scores : [];
+  const score = [...scores].reverse().find(
+    (item) => item.participant1Score !== null && item.participant2Score !== null
+  );
+  if (!score) {
+    return "—";
+  }
+  return `${score.participant1Score}–${score.participant2Score}`;
+}
+
+function renderTradingMonitor(data) {
+  state.tradingMonitor = data;
+  elements.tradingEventCount.textContent = comparisonText(data.eventCount, "0");
+  elements.tradingSuspendedCount.textContent = comparisonText(
+    data.suspendedCount,
+    "0"
+  );
+  elements.tradingActionCount.textContent = comparisonText(data.actionCount, "0");
+  elements.tradingRows.replaceChildren();
+
+  if (!data.events?.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 7;
+    cell.className = "empty-state";
+    cell.textContent = `No current ${comparisonText(data.league, "league")} events are mapped between AcesHigh and Pinnacle.`;
+    row.append(cell);
+    elements.tradingRows.append(row);
+    return;
+  }
+
+  data.events.forEach((event) => {
+    const row = document.createElement("tr");
+    const fixture = document.createElement("td");
+    const fixtureName = document.createElement("strong");
+    const fixtureMeta = document.createElement("small");
+    fixtureName.textContent = comparisonText(event.fixture);
+    const start = new Date(event.startTimeUtc);
+    fixtureMeta.textContent = Number.isNaN(start.valueOf())
+      ? (event.periods || []).join(" · ")
+      : `${start.toLocaleString([], {
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        })} · ${(event.periods || []).join(" · ")}`;
+    fixture.append(fixtureName, fixtureMeta);
+
+    const score = document.createElement("td");
+    const scoreValue = document.createElement("strong");
+    const clock = document.createElement("small");
+    scoreValue.textContent = tradingScoreText(event);
+    clock.textContent = [
+      event.clock?.currentPeriod,
+      event.clock?.remainingTimeInPeriod || event.clock?.remainingTime,
+    ].filter(Boolean).join(" · ") || "Not live";
+    score.append(scoreValue, clock);
+
+    const gameStatus = document.createElement("td");
+    gameStatus.append(tradingStateBadge(
+      comparisonText(event.status?.name, event.status?.live ? "Live" : "Scheduled"),
+      event.status?.live ? "live" : "neutral"
+    ));
+
+    const aces = document.createElement("td");
+    aces.append(tradingStateBadge(
+      event.acesHigh?.open ? "Open" : "Closed",
+      event.acesHigh?.open ? "open" : "closed"
+    ));
+
+    const pinnacle = document.createElement("td");
+    const pinnacleLabel = event.pinnacle?.staleOdds
+      ? "Stale"
+      : event.pinnacle?.suspended
+      ? "Suspended"
+      : event.pinnacle?.open
+      ? "Open"
+      : "Closed";
+    const pinnacleState = event.pinnacle?.staleOdds
+      ? "hold"
+      : event.pinnacle?.suspended
+      ? "suspend"
+      : event.pinnacle?.open
+      ? "open"
+      : "closed";
+    pinnacle.append(tradingStateBadge(pinnacleLabel, pinnacleState));
+
+    const signal = document.createElement("td");
+    signal.append(tradingStateBadge(
+      comparisonText(event.recommendation),
+      event.signal || "neutral"
+    ));
+
+    const updated = document.createElement("td");
+    const updatedAt = new Date(event.pinnacle?.updatedAt || data.generatedAt);
+    updated.textContent = Number.isNaN(updatedAt.valueOf())
+      ? "—"
+      : updatedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
+
+    row.append(fixture, score, gameStatus, aces, pinnacle, signal, updated);
+    elements.tradingRows.append(row);
+  });
+}
+
+async function loadTradingLeagues(force = false) {
+  if (!state.selectedAgentId) {
+    return;
+  }
+  const accountId = state.selectedAgentId;
+  if (
+    !force &&
+    Number(state.tradingLeaguesAgentId) === Number(accountId) &&
+    state.tradingLeagues.length
+  ) {
+    return;
+  }
+  elements.tradingLeague.disabled = true;
+  elements.tradingLeague.replaceChildren(new Option("Loading leagues...", ""));
+  const params = new URLSearchParams({ accountId: String(accountId) });
+  const response = await fetch(`/api/pinnacle-comparison/leagues?${params}`, {
+    cache: "no-store",
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || "Could not load trading leagues");
+  }
+  if (Number(accountId) !== Number(state.selectedAgentId)) {
+    return;
+  }
+  state.tradingLeagues = data.leagues || [];
+  state.tradingLeaguesAgentId = accountId;
+  const available = new Set(state.tradingLeagues.map((league) => league.slug));
+  if (!available.has(state.tradingLeague)) {
+    state.tradingLeague = available.has("mlb")
+      ? "mlb"
+      : (state.tradingLeagues[0]?.slug || "");
+  }
+  elements.tradingLeague.replaceChildren();
+  if (!state.tradingLeagues.length) {
+    elements.tradingLeague.append(new Option("No mapped leagues", ""));
+    setTradingMessage("No AcesHigh leagues overlap with this OddsPapi account.", "error");
+    return;
+  }
+  state.tradingLeagues.forEach((league) => {
+    elements.tradingLeague.append(new Option(league.name, league.slug));
+  });
+  elements.tradingLeague.value = state.tradingLeague;
+  elements.tradingLeague.disabled = false;
+}
+
+function scheduleTradingRefresh() {
+  if (tradingRefreshTimer) {
+    clearTimeout(tradingRefreshTimer);
+  }
+  if (!isTradingMonitorRoute()) {
+    tradingRefreshTimer = null;
+    return;
+  }
+  tradingRefreshTimer = setTimeout(() => {
+    // Ask the backend on every UI tick, while allowing its short cache to
+    // protect AcesHigh and OddsPapi from unnecessary repeated requests.
+    state.tradingMonitor = null;
+    loadTradingMonitor(false).catch(() => { });
+  }, 30000);
+}
+
+async function loadTradingMonitor(force = false) {
+  if (!state.selectedAgentId || !state.tradingLeague || state.tradingLoading) {
+    return;
+  }
+  if (
+    !force &&
+    state.tradingMonitor &&
+    Number(state.tradingAgentId) === Number(state.selectedAgentId) &&
+    state.tradingMonitor.leagueSlug === state.tradingLeague
+  ) {
+    renderTradingMonitor(state.tradingMonitor);
+    scheduleTradingRefresh();
+    return;
+  }
+  const requestId = ++state.tradingRequest;
+  const accountId = state.selectedAgentId;
+  state.tradingLoading = true;
+  elements.tradingRefresh.disabled = true;
+  elements.tradingRefresh.textContent = "Refreshing...";
+  setTradingMessage("Loading mapped events and Pinnacle trading state...");
+  try {
+    const params = new URLSearchParams({
+      accountId: String(accountId),
+      league: state.tradingLeague,
+    });
+    if (force) {
+      params.set("refresh", "true");
+    }
+    const response = await fetch(`/api/trading-monitor?${params}`, {
+      cache: "no-store",
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Could not load the trading monitor");
+    }
+    if (
+      requestId !== state.tradingRequest ||
+      Number(accountId) !== Number(state.selectedAgentId)
+    ) {
+      return;
+    }
+    state.tradingAgentId = accountId;
+    renderTradingMonitor(data);
+    setTradingMessage("");
+  } catch (error) {
+    if (requestId === state.tradingRequest) {
+      setTradingMessage(error.message, "error");
+    }
+    throw error;
+  } finally {
+    if (requestId === state.tradingRequest) {
+      state.tradingLoading = false;
+      elements.tradingRefresh.disabled = false;
+      elements.tradingRefresh.textContent = "Refresh";
+      scheduleTradingRefresh();
     }
   }
 }
@@ -2163,6 +2457,13 @@ async function selectAgent(agent) {
   state.comparisonLeaguesAgentId = null;
   state.comparisonLeague = "";
   state.comparisonLoading = false;
+  state.tradingRequest += 1;
+  state.tradingMonitor = null;
+  state.tradingAgentId = null;
+  state.tradingLeagues = [];
+  state.tradingLeaguesAgentId = null;
+  state.tradingLeague = "";
+  state.tradingLoading = false;
   state.schedulesAgentId = null;
 
   elements.leagueRows.innerHTML =
@@ -2182,6 +2483,12 @@ async function selectAgent(agent) {
       });
       await loadComparisonLeagues();
       await loadPinnacleComparison().catch(() => { });
+    } else if (isTradingMonitorRoute()) {
+      loadLeagues(false).catch((error) => {
+        showMessage(error.message, "error");
+      });
+      await loadTradingLeagues();
+      await loadTradingMonitor().catch(() => { });
     } else {
       await loadLeagues();
     }
@@ -2967,6 +3274,26 @@ elements.pinnacleComparisonLink?.addEventListener(
   }
 );
 
+elements.tradingMonitorLink?.addEventListener(
+  "click",
+  (event) => {
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+    event.preventDefault();
+    if (!isTradingMonitorRoute()) {
+      window.history.pushState({}, "", "/trading_monitor");
+    }
+    applyDashboardRoute();
+  }
+);
+
 elements.comparisonRefresh?.addEventListener(
   "click",
   () => {
@@ -2983,6 +3310,25 @@ elements.comparisonLeague?.addEventListener(
     state.comparisonAgentId = null;
     state.comparisonLoading = false;
     loadPinnacleComparison().catch(() => { });
+  }
+);
+
+elements.tradingRefresh?.addEventListener(
+  "click",
+  () => {
+    loadTradingMonitor(true).catch(() => { });
+  }
+);
+
+elements.tradingLeague?.addEventListener(
+  "change",
+  () => {
+    state.tradingLeague = elements.tradingLeague.value;
+    state.tradingRequest += 1;
+    state.tradingMonitor = null;
+    state.tradingAgentId = null;
+    state.tradingLoading = false;
+    loadTradingMonitor(true).catch(() => { });
   }
 );
 
@@ -3273,6 +3619,17 @@ elements.logoutButton.addEventListener(
     state.comparisonLeaguesAgentId = null;
     state.comparisonLeague = "";
     state.comparisonLoading = false;
+    state.tradingRequest += 1;
+    state.tradingMonitor = null;
+    state.tradingAgentId = null;
+    state.tradingLeagues = [];
+    state.tradingLeaguesAgentId = null;
+    state.tradingLeague = "";
+    state.tradingLoading = false;
+    if (tradingRefreshTimer) {
+      clearTimeout(tradingRefreshTimer);
+      tradingRefreshTimer = null;
+    }
 
     clearPendingChanges();
 
@@ -3304,6 +3661,13 @@ elements.logoutButton.addEventListener(
     elements.comparisonGeneratedAt.textContent = "—";
     elements.comparisonLeague.replaceChildren(new Option("Loading leagues...", ""));
     elements.comparisonLeague.disabled = true;
+    elements.tradingRows.replaceChildren();
+    elements.tradingEventCount.textContent = "—";
+    elements.tradingSuspendedCount.textContent = "—";
+    elements.tradingActionCount.textContent = "—";
+    elements.tradingLeague.replaceChildren(new Option("Loading leagues...", ""));
+    elements.tradingLeague.disabled = true;
+    setTradingMessage("");
     setComparisonMessage("");
 
     if (elements.dialog.open) {
