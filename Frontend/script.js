@@ -1578,7 +1578,7 @@ function renderSchedules() {
   }
 }
 
-async function loadLeagues() {
+async function loadLeagues(includeSchedules = true) {
   const accountId = state.selectedAgentId;
 
   if (!accountId) {
@@ -1600,21 +1600,23 @@ async function loadLeagues() {
     accountId,
   });
 
-  const [
-    response,
-    scheduleResponse,
-  ] = await Promise.all([
+  const requests = [
     fetch(`/api/leagues?${query}`, {
       cache: "no-store",
     }),
-    fetch(`/api/schedules?${query}`, {
-      cache: "no-store",
-    }),
-  ]);
+  ];
+  if (includeSchedules) {
+    requests.push(
+      fetch(`/api/schedules?${query}`, {
+        cache: "no-store",
+      })
+    );
+  }
+  const [response, scheduleResponse] = await Promise.all(requests);
 
   if (
     !response.ok ||
-    !scheduleResponse.ok
+    (scheduleResponse && !scheduleResponse.ok)
   ) {
     throw new Error(
       "Could not load editable leagues"
@@ -1622,8 +1624,9 @@ async function loadLeagues() {
   }
 
   const data = await response.json();
-  const scheduleData =
-    await scheduleResponse.json();
+  const scheduleData = scheduleResponse
+    ? await scheduleResponse.json()
+    : null;
 
   /*
    * Ignore an old response if another agent was selected or a newer
@@ -1640,12 +1643,12 @@ async function loadLeagues() {
     ? data.rows
     : [];
 
-  state.schedules = Array.isArray(
-    scheduleData.schedules
-  )
-    ? scheduleData.schedules
-    : [];
-  state.schedulesAgentId = accountId;
+  if (scheduleData) {
+    state.schedules = Array.isArray(scheduleData.schedules)
+      ? scheduleData.schedules
+      : [];
+    state.schedulesAgentId = accountId;
+  }
 
   state.filteredRows = [];
 
@@ -1769,7 +1772,13 @@ async function loadAgents() {
 
   if (isActivityLogsRoute()) {
     await loadSchedules();
+    loadLeagues(false).catch((error) => {
+      showMessage(error.message, "error");
+    });
   } else if (isPinnacleComparisonRoute()) {
+    loadLeagues(false).catch((error) => {
+      showMessage(error.message, "error");
+    });
     await loadPinnacleComparison().catch(() => { });
   } else {
     await loadLeagues();
@@ -2085,7 +2094,11 @@ async function selectAgent(agent) {
      */
     if (isActivityLogsRoute()) {
       await loadSchedules();
+      await loadLeagues(false);
     } else if (isPinnacleComparisonRoute()) {
+      loadLeagues(false).catch((error) => {
+        showMessage(error.message, "error");
+      });
       await loadPinnacleComparison().catch(() => { });
     } else {
       await loadLeagues();
