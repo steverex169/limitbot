@@ -17,6 +17,7 @@ class User(Base):
     accesshigh_agent_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
     username: Mapped[str] = mapped_column(String(100), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(Text)
+    password_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     access_token_encrypted: Mapped[str] = mapped_column(Text)
     selected_agent_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     search_query: Mapped[str] = mapped_column(String(200), default="")

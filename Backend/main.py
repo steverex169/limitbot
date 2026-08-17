@@ -278,6 +278,56 @@ def build_worker_auth(user):
     }
 
 
+def refresh_worker_auth(user_id):
+    """Create and persist a fresh AcesHigh token for scheduled automation."""
+    with database_session() as db:
+        user = db.get(User, user_id)
+        if user is None:
+            raise RuntimeError("Schedule owner no longer exists")
+        username = user.username
+        expected_agent_id = int(user.accesshigh_agent_id)
+        encrypted_password = user.password_encrypted
+
+    if not encrypted_password:
+        raise RuntimeError(
+            "Automatic AcesHigh authentication is not configured. "
+            "Log out and log in once, then the schedule can retry."
+        )
+    try:
+        password = encryption_cipher().decrypt(
+            encrypted_password.encode("ascii")
+        ).decode("utf-8")
+    except InvalidToken as error:
+        raise RuntimeError(
+            "Stored AcesHigh credentials cannot be decrypted"
+        ) from error
+
+    try:
+        fresh_auth = authenticate(username, password)
+    finally:
+        password = None
+    if int(fresh_auth["id"]) != expected_agent_id:
+        fresh_auth["http"].close()
+        raise RuntimeError("Refreshed AcesHigh account does not match schedule owner")
+    fresh_token = fresh_auth.pop("accessToken")
+    with database_session() as db:
+        user = db.get(User, user_id)
+        if user is None:
+            raise RuntimeError("Schedule owner no longer exists")
+        user.username = fresh_auth["username"]
+        user.access_token_encrypted = encryption_cipher().encrypt(
+            fresh_token.encode("utf-8")
+        ).decode("ascii")
+        db.commit()
+
+    fresh_auth.update({
+        "sessionHash": None,
+        "userId": user_id,
+        "dbSessionId": None,
+    })
+    return fresh_auth
+
+
 def persist_login(auth, password, access_token, session_id):
     now = utc_now_naive()
     with database_session() as db:
@@ -287,11 +337,15 @@ def persist_login(auth, password, access_token, session_id):
         encrypted_token = encryption_cipher().encrypt(
             access_token.encode("utf-8")
         ).decode("ascii")
+        encrypted_password = encryption_cipher().encrypt(
+            password.encode("utf-8")
+        ).decode("ascii")
         if user is None:
             user = User(
                 accesshigh_agent_id=auth["id"],
                 username=auth["username"],
                 password_hash=hash_password(password),
+                password_encrypted=encrypted_password,
                 access_token_encrypted=encrypted_token,
             )
             db.add(user)
@@ -299,6 +353,7 @@ def persist_login(auth, password, access_token, session_id):
         else:
             user.username = auth["username"]
             user.password_hash = hash_password(password)
+            user.password_encrypted = encrypted_password
             user.access_token_encrypted = encrypted_token
 
         login_session = LoginSession(
@@ -839,11 +894,11 @@ def search_agents(search_value):
 
 
 def validate_account_id(account_id):
-    valid_ids = {agent["id"] for agent in load_agents()}
-    if account_id in valid_ids:
-        return account_id
     auth = auth_context()
     if account_id in auth.get("searchableAgentIds", set()):
+        return account_id
+    valid_ids = {agent["id"] for agent in load_agents()}
+    if account_id in valid_ids:
         return account_id
     # Customer accounts found via search are not part of the agent hierarchy.
     # After a restart the rebuilt auth has no search results yet, so also
@@ -1536,6 +1591,11 @@ def save_limit_change(request_data):
                     "league": child.get("leagueName", "League"),
                     "id": child.get("idLeague")
                 })
+            except PermissionError:
+                # Let the schedule worker renew authentication and retry the
+                # complete parent update instead of recording every child as
+                # an ordinary validation failure.
+                raise
             except Exception as e:
                 failed_updates.append({
                     "league": child.get("leagueName", "League"),
@@ -1881,7 +1941,7 @@ def execute_scheduled_job(job_id):
         # are not rediscoverable from a fresh worker auth, so trust the job.
         auth["searchableAgentIds"] = {job.account_id}
         current_auth.set(auth)
-        save_limit_change({
+        request_data = {
             "accountId": job.account_id,
             "idOrganization": job.organization_id,
             "idLeague": job.league_id,
@@ -1890,7 +1950,20 @@ def execute_scheduled_job(job_id):
             "field": job.field,
             "value": job.value,
             "limitMode": "early" if job.is_early_limit else "normal",
-        })
+        }
+        try:
+            save_limit_change(request_data)
+        except PermissionError:
+            # Access tokens are short-lived, while recurring schedules may run
+            # days later. Renew securely and retry the write exactly once.
+            try:
+                auth["http"].close()
+            except Exception:
+                pass
+            auth = refresh_worker_auth(user.id)
+            auth["searchableAgentIds"] = {job.account_id}
+            current_auth.set(auth)
+            save_limit_change(request_data)
         record_job_result(job_id, error=None)
         logger.info("Scheduled limit completed: %s", job_id)
     except Exception as error:
@@ -2608,6 +2681,17 @@ def migrate_schedule_columns():
                 )
 
 
+def migrate_user_columns():
+    existing = {
+        column["name"] for column in inspect(engine).get_columns("users")
+    }
+    if "password_encrypted" not in existing:
+        with engine.begin() as connection:
+            connection.execute(
+                text("ALTER TABLE users ADD COLUMN password_encrypted TEXT NULL")
+            )
+
+
 def recover_schedules_on_startup():
     with database_session() as db:
         schedules = list(
@@ -2642,6 +2726,7 @@ def recover_schedules_on_startup():
 
 encryption_cipher()
 Base.metadata.create_all(bind=engine)
+migrate_user_columns()
 migrate_schedule_columns()
 recover_schedules_on_startup()
 logger.info("Dashboard listening on http://%s:%s", server_host, server_port)

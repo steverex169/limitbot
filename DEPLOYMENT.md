@@ -23,7 +23,8 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 ```
 
 Losing or changing this key invalidates encrypted Aces High sessions already
-stored in the database.
+stored in the database. It also prevents the schedule worker from decrypting
+the Aces High credentials used solely to renew expired automation tokens.
 
 ## Runtime settings
 
