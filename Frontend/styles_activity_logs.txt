@@ -1648,7 +1648,7 @@ dialog h2 {
   gap: 10px;
 }
 
-/* Authorized Testing Dashboard + League limit control are top-left. */
+/* Authorized Testing Dashboard + Limit Control Bot are top-left. */
 #dashboardHeader .topbar-title {
   display: flex;
   min-width: 0;
