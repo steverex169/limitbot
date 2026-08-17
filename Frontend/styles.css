@@ -493,12 +493,54 @@ main {
 }
 
 .schedules-table-wrap {
-  max-height: 360px;
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+.schedules-table {
+  min-width: 1080px;
+  table-layout: fixed;
+}
+
+/* The page itself scrolls, so a sticky table header only obscures the first
+   schedule row when the browser restores an old inner scroll position. */
+.schedules-table thead {
+  position: static;
+}
+
+.schedules-table th,
+.schedules-table td {
+  padding: 12px 14px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.schedules-table th:nth-child(1) { width: 9%; }
+.schedules-table th:nth-child(2) { width: 15%; }
+.schedules-table th:nth-child(3) { width: 13%; }
+.schedules-table th:nth-child(4) { width: 11%; }
+.schedules-table th:nth-child(5) { width: 22%; }
+.schedules-table th:nth-child(6) { width: 14%; }
+.schedules-table th:nth-child(7) { width: 8%; }
+.schedules-table th:nth-child(8) { width: 8%; }
+
+.schedules-table td:nth-child(1),
+.schedules-table td:nth-child(7),
+.schedules-table td:nth-child(8) {
+  white-space: nowrap;
+}
+
+.schedules-table td:nth-child(7) {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  text-transform: capitalize;
 }
 
 .schedule-cancel {
-  min-height: 34px;
-  padding: 0 12px;
+  min-height: 32px;
+  padding: 0 10px;
   border: 1px solid #fda29b;
   border-radius: 8px;
   background: #fff;
