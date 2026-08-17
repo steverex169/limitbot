@@ -41,6 +41,7 @@ const elements = {
   logoutButton: document.querySelector("#logoutButton"),
   themeToggle: document.querySelector("#themeToggle"),
   dashboardSidebar: document.querySelector("#dashboardSidebar"),
+  dashboardHomeLink: document.querySelector("#dashboardHomeLink"),
   activityLogsLink: document.querySelector("#activityLogsLink"),
   pinnacleComparisonLink: document.querySelector("#pinnacleComparisonLink"),
   dashboardSummary: document.querySelector("#dashboardSummary"),
@@ -155,6 +156,15 @@ function applyDashboardRoute() {
     }
   }
 
+  if (elements.dashboardHomeLink) {
+    elements.dashboardHomeLink.classList.toggle("active", dashboardActive);
+    if (dashboardActive) {
+      elements.dashboardHomeLink.setAttribute("aria-current", "page");
+    } else {
+      elements.dashboardHomeLink.removeAttribute("aria-current");
+    }
+  }
+
   if (elements.pinnacleComparisonLink) {
     elements.pinnacleComparisonLink.classList.toggle(
       "active",
@@ -182,6 +192,12 @@ function applyDashboardRoute() {
 
   if (comparisonActive && state.selectedAgentId) {
     loadPinnacleComparison().catch(() => { });
+  }
+
+  if (dashboardActive && state.selectedAgentId && !state.rows.length) {
+    loadLeagues().catch((error) => {
+      showMessage(error.message, "error");
+    });
   }
 }
 
@@ -2833,6 +2849,27 @@ elements.activityLogsLink?.addEventListener(
       );
     }
 
+    applyDashboardRoute();
+  }
+);
+
+elements.dashboardHomeLink?.addEventListener(
+  "click",
+  (event) => {
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    if (window.location.pathname !== "/") {
+      window.history.pushState({}, "", "/");
+    }
     applyDashboardRoute();
   }
 );
