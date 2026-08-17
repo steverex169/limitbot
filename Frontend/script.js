@@ -13,6 +13,9 @@ const state = {
   activeChange: null,
   comparison: null,
   comparisonAgentId: null,
+  comparisonLeagues: [],
+  comparisonLeaguesAgentId: null,
+  comparisonLeague: "",
   comparisonLoading: false,
   comparisonRequest: 0,
 };
@@ -48,6 +51,7 @@ const elements = {
   limitsPanel: document.querySelector("#limitsPanel"),
   activityLogsView: document.querySelector("#activityLogsView"),
   pinnacleComparisonView: document.querySelector("#pinnacleComparisonView"),
+  comparisonLeague: document.querySelector("#comparisonLeague"),
   comparisonRefresh: document.querySelector("#comparisonRefresh"),
   comparisonMessage: document.querySelector("#comparisonMessage"),
   comparisonFixtureCount: document.querySelector("#comparisonFixtureCount"),
@@ -191,7 +195,9 @@ function applyDashboardRoute() {
   }
 
   if (comparisonActive && state.selectedAgentId) {
-    loadPinnacleComparison().catch(() => { });
+    loadComparisonLeagues()
+      .then(() => loadPinnacleComparison())
+      .catch(() => { });
   }
 
   if (dashboardActive && state.selectedAgentId && !state.rows.length) {
@@ -305,7 +311,7 @@ function renderPinnacleComparison(data) {
     const empty = document.createElement("p");
     empty.className = "comparison-empty";
     empty.textContent =
-      "No current MLB fixtures could be mapped between AcesHigh and Pinnacle.";
+      `No current ${comparisonText(data.league, "league")} fixtures could be mapped between AcesHigh and Pinnacle.`;
     elements.comparisonContent.append(empty);
     return;
   }
@@ -317,7 +323,7 @@ function renderPinnacleComparison(data) {
     const header = document.createElement("header");
     const titleWrap = document.createElement("div");
     const title = document.createElement("h3");
-    title.textContent = comparisonText(section.fixture, "MLB fixture");
+    title.textContent = comparisonText(section.fixture, `${comparisonText(data.league, "League")} fixture`);
     const meta = document.createElement("p");
     const start = new Date(section.startTimeUtc);
     meta.textContent = Number.isNaN(start.valueOf())
@@ -402,14 +408,64 @@ function setComparisonMessage(message = "", type = "") {
   elements.comparisonMessage.hidden = !message;
 }
 
+async function loadComparisonLeagues(force = false) {
+  if (!state.selectedAgentId) {
+    return;
+  }
+  const accountId = state.selectedAgentId;
+  if (
+    !force &&
+    Number(state.comparisonLeaguesAgentId) === Number(accountId) &&
+    state.comparisonLeagues.length
+  ) {
+    return;
+  }
+  elements.comparisonLeague.disabled = true;
+  elements.comparisonLeague.replaceChildren(new Option("Loading leagues...", ""));
+  const params = new URLSearchParams({ accountId: String(accountId) });
+  const response = await fetch(`/api/pinnacle-comparison/leagues?${params}`, {
+    cache: "no-store",
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || "Could not load comparison leagues");
+  }
+  if (Number(accountId) !== Number(state.selectedAgentId)) {
+    return;
+  }
+  state.comparisonLeagues = data.leagues || [];
+  state.comparisonLeaguesAgentId = accountId;
+  const available = new Set(state.comparisonLeagues.map((league) => league.slug));
+  if (!available.has(state.comparisonLeague)) {
+    state.comparisonLeague = available.has("mlb")
+      ? "mlb"
+      : (state.comparisonLeagues[0]?.slug || "");
+  }
+  elements.comparisonLeague.replaceChildren();
+  if (!state.comparisonLeagues.length) {
+    elements.comparisonLeague.append(new Option("No mapped leagues", ""));
+    setComparisonMessage(
+      "No AcesHigh leagues for this agent overlap with the sports enabled in OddsPapi.",
+      "error"
+    );
+    return;
+  }
+  state.comparisonLeagues.forEach((league) => {
+    elements.comparisonLeague.append(new Option(league.name, league.slug));
+  });
+  elements.comparisonLeague.value = state.comparisonLeague;
+  elements.comparisonLeague.disabled = false;
+}
+
 async function loadPinnacleComparison(force = false) {
-  if (!state.selectedAgentId || state.comparisonLoading) {
+  if (!state.selectedAgentId || !state.comparisonLeague || state.comparisonLoading) {
     return;
   }
   if (
     !force &&
     state.comparison &&
-    Number(state.comparisonAgentId) === Number(state.selectedAgentId)
+    Number(state.comparisonAgentId) === Number(state.selectedAgentId) &&
+    state.comparison.leagueSlug === state.comparisonLeague
   ) {
     renderPinnacleComparison(state.comparison);
     return;
@@ -420,10 +476,16 @@ async function loadPinnacleComparison(force = false) {
   state.comparisonLoading = true;
   elements.comparisonRefresh.disabled = true;
   elements.comparisonRefresh.textContent = "Refreshing...";
-  setComparisonMessage("Loading current MLB lines and limits...");
+  const leagueName = state.comparisonLeagues.find(
+    (league) => league.slug === state.comparisonLeague
+  )?.name || "league";
+  setComparisonMessage(`Loading current ${leagueName} lines and limits...`);
 
   try {
-    const params = new URLSearchParams({ accountId: String(accountId) });
+    const params = new URLSearchParams({
+      accountId: String(accountId),
+      league: state.comparisonLeague,
+    });
     if (force) {
       params.set("refresh", "true");
     }
@@ -432,7 +494,7 @@ async function loadPinnacleComparison(force = false) {
     });
     const data = await response.json();
     if (!response.ok) {
-      throw new Error(data.error || "Could not load the MLB comparison");
+      throw new Error(data.error || "Could not load the league comparison");
     }
     if (
       requestId !== state.comparisonRequest ||
@@ -2097,6 +2159,9 @@ async function selectAgent(agent) {
   state.comparisonRequest += 1;
   state.comparison = null;
   state.comparisonAgentId = null;
+  state.comparisonLeagues = [];
+  state.comparisonLeaguesAgentId = null;
+  state.comparisonLeague = "";
   state.comparisonLoading = false;
   state.schedulesAgentId = null;
 
@@ -2115,6 +2180,7 @@ async function selectAgent(agent) {
       loadLeagues(false).catch((error) => {
         showMessage(error.message, "error");
       });
+      await loadComparisonLeagues();
       await loadPinnacleComparison().catch(() => { });
     } else {
       await loadLeagues();
@@ -2908,6 +2974,18 @@ elements.comparisonRefresh?.addEventListener(
   }
 );
 
+elements.comparisonLeague?.addEventListener(
+  "change",
+  () => {
+    state.comparisonLeague = elements.comparisonLeague.value;
+    state.comparisonRequest += 1;
+    state.comparison = null;
+    state.comparisonAgentId = null;
+    state.comparisonLoading = false;
+    loadPinnacleComparison().catch(() => { });
+  }
+);
+
 window.addEventListener(
   "popstate",
   () => {
@@ -3191,6 +3269,9 @@ elements.logoutButton.addEventListener(
     state.comparisonRequest += 1;
     state.comparison = null;
     state.comparisonAgentId = null;
+    state.comparisonLeagues = [];
+    state.comparisonLeaguesAgentId = null;
+    state.comparisonLeague = "";
     state.comparisonLoading = false;
 
     clearPendingChanges();
@@ -3221,6 +3302,8 @@ elements.logoutButton.addEventListener(
     elements.comparisonFixtureCount.textContent = "—";
     elements.comparisonSectionCount.textContent = "—";
     elements.comparisonGeneratedAt.textContent = "—";
+    elements.comparisonLeague.replaceChildren(new Option("Loading leagues...", ""));
+    elements.comparisonLeague.disabled = true;
     setComparisonMessage("");
 
     if (elements.dialog.open) {

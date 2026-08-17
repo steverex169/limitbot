@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Limit Control Bot</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/styles.css?v=20260817-mlb-comparison">
+  <link rel="stylesheet" href="/styles.css?v=20260817-league-comparison">
 </head>
 
 <body class="app-loading">
@@ -190,11 +190,17 @@
     <section id="pinnacleComparisonView" class="panel comparison-panel" hidden aria-hidden="true">
       <div class="panel-head comparison-head">
         <div>
-          <p class="eyebrow">MLB MARKET COMPARISON</p>
+          <p class="eyebrow">MARKET COMPARISON</p>
           <h2>Pinnacle vs AcesHigh</h2>
-          <p>Current Full Game and 1st 5 Innings lines, American odds, and available limits.</p>
+          <p>Current full-game and period lines, American odds, and available limits.</p>
         </div>
-        <button id="comparisonRefresh" class="button secondary" type="button">Refresh data</button>
+        <div class="comparison-actions">
+          <label for="comparisonLeague">League</label>
+          <select id="comparisonLeague" aria-label="Comparison league" disabled>
+            <option value="">Loading leagues...</option>
+          </select>
+          <button id="comparisonRefresh" class="button secondary" type="button">Refresh data</button>
+        </div>
       </div>
 
       <div id="comparisonMessage" class="message comparison-message" role="status" hidden></div>
@@ -214,9 +220,9 @@
         </article>
       </div>
 
-      <div id="comparisonProfiles" class="comparison-profiles" aria-label="AcesHigh MLB limit profiles"></div>
+      <div id="comparisonProfiles" class="comparison-profiles" aria-label="AcesHigh limit profiles"></div>
       <div id="comparisonContent" class="comparison-content">
-        <p class="comparison-empty">Select an agent to load the MLB comparison.</p>
+        <p class="comparison-empty">Select an agent and league to load the comparison.</p>
       </div>
       <p class="comparison-source-note">Pinnacle limits are supplied in USD by OddsPapi. AcesHigh limits are the selected agent's configured values.</p>
     </section>
@@ -286,7 +292,7 @@
     </div>
   </dialog>
 
-  <script src="/script.js?v=20260817-dashboard-home-link" defer></script>
+  <script src="/script.js?v=20260817-league-comparison" defer></script>
 </body>
 
 </html>

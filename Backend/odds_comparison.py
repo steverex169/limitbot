@@ -1,4 +1,4 @@
-"""Read-only MLB comparison between AcesHigh and Pinnacle/OddsPapi."""
+"""Read-only league comparisons between AcesHigh and Pinnacle/OddsPapi."""
 
 from __future__ import annotations
 
@@ -32,8 +32,44 @@ MARKET_LIMIT_KEYS = {
     "teamtotal": "TeamTotal",
 }
 
+LEAGUE_CONFIGS: dict[str, dict[str, Any]] = {
+    "mlb": {
+        "name": "MLB", "sportId": 13, "limitRow": "Baseball -- Full Game",
+        "tournaments": ("MLB", "MLB Spring Training"), "aliases": ("mlb",),
+    },
+    "nba": {
+        "name": "NBA", "sportId": 11, "limitRow": "Pro Basketball -- Full Game",
+        "tournaments": ("NBA", "NBA Preseason", "NBA Summer League"),
+        "aliases": ("nba",),
+    },
+    "wnba": {
+        "name": "WNBA", "sportId": 11, "limitRow": "WNBA -- Full Game",
+        "tournaments": ("WNBA", "WNBA Preseason"), "aliases": ("wnba",),
+    },
+    "nfl": {
+        "name": "NFL", "sportId": 14, "limitRow": "Pro Football -- Full Game",
+        "tournaments": ("NFL", "NFL Preseason"), "aliases": ("nfl",),
+    },
+    "ncaa-football": {
+        "name": "NCAA Football", "sportId": 14,
+        "limitRow": "College Football -- Full Game",
+        "tournamentPrefixes": ("NCAA",),
+        "aliases": ("ncaa football", "college football"),
+    },
+    "ncaa-basketball": {
+        "name": "NCAA Basketball", "sportId": 11,
+        "limitRow": "College Basketball -- Full Game",
+        "tournamentPrefixes": ("NCAA",),
+        "aliases": ("ncaa basketball", "college basketball", "march madness"),
+    },
+    "nhl": {
+        "name": "NHL", "sportId": 15, "limitRow": "Hockey -- Full Game",
+        "tournaments": ("NHL", "NHL Preseason"), "aliases": ("nhl",),
+    },
+}
+
 _cache_lock = threading.Lock()
-_comparison_cache: dict[int, tuple[float, dict[str, Any]]] = {}
+_comparison_cache: dict[tuple[int, str], tuple[float, dict[str, Any]]] = {}
 
 
 class ComparisonError(RuntimeError):
@@ -86,18 +122,20 @@ def _load_aceshigh_limits(
     session: requests.Session,
     headers: dict[str, str],
     account_id: int,
+    league: str,
 ) -> dict[str, dict[str, float | int | None]]:
+    config = LEAGUE_CONFIGS[league]
     data = _partner_get(
         session,
         headers,
         f"{ACESHIGH_BASE}/partner-api/partner/Backbone/"
         f"GetOrganizationAll/{account_id}/true/S",
-        "AcesHigh MLB limit lookup",
+        "AcesHigh limit lookup",
     )
-    baseball_row: dict[str, Any] | None = None
+    limit_row: dict[str, Any] | None = None
 
     def walk(value: Any) -> None:
-        nonlocal baseball_row
+        nonlocal limit_row
         if isinstance(value, dict):
             label = (
                 value.get("LeagueDescription")
@@ -107,8 +145,8 @@ def _load_aceshigh_limits(
                 or value.get("OrganizationLabel")
                 or ""
             )
-            if label == "Baseball -- Full Game":
-                baseball_row = value
+            if label == config["limitRow"]:
+                limit_row = value
             for child in value.values():
                 walk(child)
         elif isinstance(value, list):
@@ -116,29 +154,65 @@ def _load_aceshigh_limits(
                 walk(child)
 
     walk((data or {}).get("Payload") if isinstance(data, dict) else None)
-    if baseball_row is None:
-        raise ComparisonError("AcesHigh MLB limits are unavailable for this agent")
+    if limit_row is None:
+        raise ComparisonError(
+            f"AcesHigh {config['name']} limits are unavailable for this agent"
+        )
 
-    result = {"Full Game": _limit_values(baseball_row)}
-    organization_id = baseball_row.get("IdOrganization") or baseball_row.get("Id")
+    result = {"Full Game": _limit_values(limit_row)}
+    organization_id = limit_row.get("IdOrganization") or limit_row.get("Id")
     if isinstance(organization_id, int):
         periods = _partner_get(
             session,
             headers,
             f"{ACESHIGH_BASE}/partner-api/partner/Backbone/"
             f"GetOrganizationPeriods/{account_id}/{organization_id}/S",
-            "AcesHigh MLB period limit lookup",
+            "AcesHigh period limit lookup",
         )
         for period in (periods or {}).get("Payload") or []:
             if not isinstance(period, dict):
                 continue
-            description = str(period.get("PeriodDescription") or "")
-            if "inning" in description.lower():
-                result["1st 5 Innings"] = _limit_values(period)
+            description = str(period.get("PeriodDescription") or "").strip()
+            if description:
+                result[description] = _limit_values(period)
     return result
 
 
-def _guest_schedule() -> list[dict[str, Any]]:
+def _league_from_text(group_name: object, subtype: object = "") -> str | None:
+    text = f"{group_name or ''} {subtype or ''}".lower()
+    # Check NCAA before NBA so a broader token can never capture it.
+    for slug in ("ncaa-football", "ncaa-basketball", "wnba", "mlb", "nfl", "nba", "nhl"):
+        if any(alias in text for alias in LEAGUE_CONFIGS[slug]["aliases"]):
+            return slug
+    return None
+
+
+def _schedule_requests(menu: dict[str, Any], league: str) -> list[dict[str, int]]:
+    requests_by_key: dict[tuple[int, int], dict[str, int]] = {}
+    groups = menu.get("Items") or {}
+    for group_name, group in groups.items() if isinstance(groups, dict) else []:
+        if not isinstance(group, dict):
+            continue
+        for item in group.get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            subtype = str(item.get("SportSubType") or "")
+            if _league_from_text(group_name, subtype) != league:
+                continue
+            if re.search(r"future|season|playoff|division|award|heisman", subtype, re.I):
+                continue
+            for combined in item.get("CombinedItems") or []:
+                sport_id = combined.get("IdSportType")
+                period = combined.get("PeriodNumber")
+                if isinstance(sport_id, int) and isinstance(period, int):
+                    requests_by_key[(sport_id, period)] = {
+                        "IdSport": sport_id,
+                        "Period": period,
+                    }
+    return list(requests_by_key.values())
+
+
+def _guest_schedule(league: str) -> list[dict[str, Any]]:
     session = requests.Session()
     try:
         try:
@@ -158,20 +232,27 @@ def _guest_schedule() -> list[dict[str, Any]]:
             raise ComparisonError("AcesHigh guest login did not return a token")
         headers = {**PUBLIC_HEADERS, "Authorization": f"Bearer {token}"}
         try:
+            menu_response = session.get(
+                f"{PLAYER_API}/api/wager/public/"
+                "sportsavailablebyplayeronleague/false",
+                headers=headers,
+                timeout=30,
+            )
+            menu = _json(menu_response, "AcesHigh sports lookup")
+            request_body = _schedule_requests(menu, league)
+            if not request_body:
+                return []
             response = session.post(
                 f"{PLAYER_API}/api/wager/public/schedules/S/0",
                 headers=headers,
-                json=[
-                    {"IdSport": 1, "Period": 0},
-                    {"IdSport": 1, "Period": 1},
-                ],
+                json=request_body,
                 timeout=30,
             )
         except requests.RequestException as error:
             raise ComparisonError(
-                f"AcesHigh MLB schedule failed: {type(error).__name__}"
+                f"AcesHigh schedule failed: {type(error).__name__}"
             ) from None
-        data = _json(response, "AcesHigh MLB schedule")
+        data = _json(response, "AcesHigh schedule")
         return data if isinstance(data, list) else []
     finally:
         session.close()
@@ -180,6 +261,13 @@ def _guest_schedule() -> list[dict[str, Any]]:
 def _normalize_team(name: object) -> str:
     text = re.sub(r"\([^)]*\)", "", str(name or "")).lower()
     return "".join(re.findall(r"[a-z0-9]+", text))
+
+
+def _same_team(left: str, right: str) -> bool:
+    if left == right:
+        return True
+    shorter, longer = sorted((left, right), key=len)
+    return len(shorter) >= 4 and longer.startswith(shorter)
 
 
 def _main_aces_line(lines: Any, game_number: object) -> dict[str, Any] | None:
@@ -216,19 +304,64 @@ def _add_aces_entry(
     )
 
 
+def _odds_period(description: object, period_number: object) -> str | None:
+    text = str(description or "").strip().lower()
+    if period_number == 0 or text in {"", "game", "full game"}:
+        return "result"
+    if "1st 5" in text and "inning" in text:
+        return "p1+p2+p3+p4+p5"
+    number_match = re.search(r"(?:^|\s)(\d+)(?:st|nd|rd|th)?", text)
+    if number_match and any(
+        word in text for word in ("half", "quarter", "period", "inning")
+    ):
+        return f"p{int(number_match.group(1))}"
+    for word, number in {
+        "first": 1, "second": 2, "third": 3, "fourth": 4,
+    }.items():
+        if word in text:
+            return f"p{number}"
+    return None
+
+
+def _period_limits(
+    limits: dict[str, dict[str, float | int | None]],
+    description: str,
+) -> dict[str, float | int | None]:
+    if description in limits:
+        return limits[description]
+    lowered = description.lower()
+    for name, values in limits.items():
+        if name.lower() == lowered:
+            return values
+    category = next(
+        (word for word in ("inning", "half", "quarter", "period") if word in lowered),
+        None,
+    )
+    if category:
+        for name, values in limits.items():
+            if category in name.lower():
+                return values
+    return {}
+
+
 def _parse_aces_games(
     schedule: list[dict[str, Any]],
     limits: dict[str, dict[str, float | int | None]],
+    league: str,
 ) -> list[dict[str, Any]]:
     games: list[dict[str, Any]] = []
     for envelope in schedule:
         sc = envelope.get("sc") if isinstance(envelope, dict) else None
-        if not isinstance(sc, dict) or str(sc.get("l") or "") != "MLB":
+        if not isinstance(sc, dict):
+            continue
+        if _league_from_text(sc.get("l"), sc.get("sb")) != league:
             continue
         period_number = sc.get("p")
         period = "Full Game" if period_number == 0 else str(sc.get("pd") or "")
-        odds_period = "result" if period_number == 0 else "p1+p2+p3+p4+p5"
-        period_limits = limits.get(period, {})
+        odds_period = _odds_period(period, period_number)
+        if odds_period is None:
+            continue
+        period_limits = _period_limits(limits, period)
         for day in sc.get("schl") or []:
             for game in day.get("g") or []:
                 teams = game.get("ts") if isinstance(game, dict) else None
@@ -330,16 +463,39 @@ def _pinnacle_currency(session: requests.Session, api_key: str) -> str | None:
     return None
 
 
-def _mlb_fixtures(session: requests.Session, api_key: str) -> list[dict[str, Any]]:
+def _is_league_tournament(config: dict[str, Any], tournament_name: object) -> bool:
+    name = str(tournament_name or "").strip().casefold()
+    exact = {str(value).casefold() for value in config.get("tournaments", ())}
+    prefixes = tuple(
+        str(value).casefold() for value in config.get("tournamentPrefixes", ())
+    )
+    return name in exact or any(name.startswith(prefix) for prefix in prefixes)
+
+
+def _league_fixtures(
+    session: requests.Session,
+    api_key: str,
+    league: str,
+) -> list[dict[str, Any]]:
+    config = LEAGUE_CONFIGS[league]
     fixtures: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for path in ("/fixtures/live", "/fixtures/today"):
+    now = int(time.time())
+    lookups = (
+        ("/fixtures/live", {}),
+        ("/fixtures", {
+            "startTimeFrom": now - 6 * 60 * 60,
+            "startTimeTo": now + 60 * 24 * 60 * 60,
+        }),
+    )
+    for path, time_params in lookups:
         data = _odds_get(
             session,
             api_key,
             path,
             bookmakers=BOOKMAKER,
-            sportId=13,
+            sportId=config["sportId"],
+            **time_params,
         )
         for fixture in data if isinstance(data, list) else []:
             fixture_id = fixture.get("fixtureId")
@@ -347,7 +503,7 @@ def _mlb_fixtures(session: requests.Session, api_key: str) -> list[dict[str, Any
             if (
                 isinstance(fixture_id, str)
                 and fixture_id not in seen
-                and str(tournament.get("tournamentName") or "").upper() == "MLB"
+                and _is_league_tournament(config, tournament.get("tournamentName"))
             ):
                 seen.add(fixture_id)
                 fixtures.append(fixture)
@@ -359,13 +515,24 @@ def _matching_aces_games(
     games: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     participants = fixture.get("participants") or {}
-    keys = {
+    keys = [
         _normalize_team(participants.get("participant1Name")),
         _normalize_team(participants.get("participant2Name")),
-    }
-    if "" in keys or len(keys) != 2:
+    ]
+    if "" in keys or keys[0] == keys[1]:
         return []
-    matches = [game for game in games if game["teamKeys"] == keys]
+
+    matches = []
+    for game in games:
+        game_keys = list(game["teamKeys"])
+        if len(game_keys) != 2:
+            continue
+        if (
+            _same_team(keys[0], game_keys[0]) and _same_team(keys[1], game_keys[1])
+        ) or (
+            _same_team(keys[0], game_keys[1]) and _same_team(keys[1], game_keys[0])
+        ):
+            matches.append(game)
     return sorted(matches, key=lambda game: game["oddsPeriod"] != "result")
 
 
@@ -410,6 +577,7 @@ def _pinnacle_entries(
     participants = fixture.get("participants") or {}
     participant1 = str(participants.get("participant1Name") or "Participant 1")
     participant2 = str(participants.get("participant2Name") or "Participant 2")
+    sport_name = str((fixture.get("sport") or {}).get("sportName") or "")
     entries: list[dict[str, Any]] = []
     for quote in quotes:
         market = markets.get(quote.get("outcomeId"))
@@ -426,7 +594,7 @@ def _pinnacle_entries(
             selection = participant1 if outcome == "1" else participant2
         elif market_type == "spreads" and outcome in {"1", "2"}:
             selection = participant1 if outcome == "1" else participant2
-            if desired_period != "result" and handicap == 0:
+            if sport_name == "Baseball" and desired_period != "result" and handicap == 0:
                 comparison_market = "moneyline"
             else:
                 comparison_market = "spread"
@@ -474,10 +642,18 @@ def _comparison_section(
     aces_game: dict[str, Any],
     pinnacle_entries: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    pinnacle_by_key = {_entry_key(entry): entry for entry in pinnacle_entries}
     rows = []
     for aces in aces_game["entries"]:
-        pinnacle = pinnacle_by_key.get(_entry_key(aces))
+        aces_market, aces_selection = _entry_key(aces)
+        pinnacle = next(
+            (
+                entry
+                for entry in pinnacle_entries
+                if str(entry.get("marketKey")) == aces_market
+                and _same_team(str(entry.get("selectionKey")), aces_selection)
+            ),
+            None,
+        )
         if pinnacle is None:
             continue
         rows.append(
@@ -520,20 +696,23 @@ def _build_uncached(
     partner_session: requests.Session,
     partner_headers: dict[str, str],
     account_id: int,
+    league: str,
 ) -> dict[str, Any]:
+    config = LEAGUE_CONFIGS[league]
     limits = _load_aceshigh_limits(
         partner_session,
         partner_headers,
         account_id,
+        league,
     )
-    aces_games = _parse_aces_games(_guest_schedule(), limits)
+    aces_games = _parse_aces_games(_guest_schedule(league), limits, league)
     odds_session = requests.Session()
     odds_session.headers.update(
         {"Accept": "application/json", "User-Agent": "limitbot-comparison/1.0"}
     )
     try:
         currency = _pinnacle_currency(odds_session, api_key)
-        fixtures = _mlb_fixtures(odds_session, api_key)
+        fixtures = _league_fixtures(odds_session, api_key, league)
         comparisons: list[dict[str, Any]] = []
         matched_fixture_ids: set[str] = set()
         for fixture in fixtures:
@@ -574,7 +753,8 @@ def _build_uncached(
         odds_session.close()
 
     return {
-        "league": "MLB",
+        "league": config["name"],
+        "leagueSlug": league,
         "accountId": account_id,
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "pinnacleLimitCurrency": currency,
@@ -590,17 +770,22 @@ def _build_uncached(
     }
 
 
-def build_mlb_comparison(
+def build_league_comparison(
     api_key: str,
     partner_session: requests.Session,
     partner_headers: dict[str, str],
     account_id: int,
+    league: str = "mlb",
     force: bool = False,
 ) -> dict[str, Any]:
-    """Return the current MLB comparison, cached briefly per AcesHigh agent."""
+    """Return one current league comparison, cached briefly per agent."""
+    league = str(league or "mlb").strip().lower()
+    if league not in LEAGUE_CONFIGS:
+        raise ValueError("Unsupported comparison league")
     now = time.monotonic()
+    cache_key = (account_id, league)
     with _cache_lock:
-        cached = _comparison_cache.get(account_id)
+        cached = _comparison_cache.get(cache_key)
         if not force and cached and now - cached[0] < CACHE_SECONDS:
             return cached[1]
         result = _build_uncached(
@@ -608,6 +793,76 @@ def build_mlb_comparison(
             partner_session,
             partner_headers,
             account_id,
+            league,
         )
-        _comparison_cache[account_id] = (time.monotonic(), result)
+        _comparison_cache[cache_key] = (time.monotonic(), result)
         return result
+
+
+def comparison_leagues(
+    api_key: str,
+    partner_session: requests.Session,
+    partner_headers: dict[str, str],
+    account_id: int,
+) -> list[dict[str, Any]]:
+    """Return leagues configured at AcesHigh and supported by this OddsPapi key."""
+    data = _partner_get(
+        partner_session,
+        partner_headers,
+        f"{ACESHIGH_BASE}/partner-api/partner/Backbone/"
+        f"GetOrganizationAll/{account_id}/true/S",
+        "AcesHigh league lookup",
+    )
+    labels: set[str] = set()
+
+    def walk(value: Any) -> None:
+        if isinstance(value, dict):
+            label = (
+                value.get("LeagueDescription")
+                or value.get("Description")
+                or value.get("Name")
+                or value.get("OrganizationLabelParent")
+                or value.get("OrganizationLabel")
+            )
+            if label:
+                labels.add(str(label))
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    walk((data or {}).get("Payload") if isinstance(data, dict) else None)
+    odds_session = requests.Session()
+    odds_session.headers.update(
+        {"Accept": "application/json", "User-Agent": "limitbot-comparison/1.0"}
+    )
+    try:
+        sports = _odds_get(odds_session, api_key, "/sports")
+    finally:
+        odds_session.close()
+    enabled_sports = {
+        row.get("sportId") for row in sports if isinstance(row, dict)
+    } if isinstance(sports, list) else set()
+    return [
+        {
+            "slug": slug,
+            "name": config["name"],
+            "sportId": config["sportId"],
+        }
+        for slug, config in LEAGUE_CONFIGS.items()
+        if config["limitRow"] in labels and config["sportId"] in enabled_sports
+    ]
+
+
+# Kept for callers of the first MLB-only implementation.
+def build_mlb_comparison(
+    api_key: str,
+    partner_session: requests.Session,
+    partner_headers: dict[str, str],
+    account_id: int,
+    force: bool = False,
+) -> dict[str, Any]:
+    return build_league_comparison(
+        api_key, partner_session, partner_headers, account_id, "mlb", force
+    )
