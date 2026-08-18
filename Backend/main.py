@@ -2227,10 +2227,28 @@ def execute_scheduled_job(job_id):
                 auth["http"].close()
             except Exception:
                 pass
+            logger.info(
+                "Automation token rejected for job %s; renewing it", job_id
+            )
             auth = refresh_worker_auth(user.id)
             auth["searchableAgentIds"] = {job.account_id}
             current_auth.set(auth)
-            save_limit_change(request_data)
+            logger.info(
+                "Automation token renewed for job %s; retrying the write",
+                job_id,
+            )
+            try:
+                save_limit_change(request_data)
+            except PermissionError as retry_error:
+                # A token AccessHigh has only just issued being rejected is a
+                # different fault from one that simply aged out, and "log in
+                # again" is meaningless advice for an unattended job. Say what
+                # actually happened so the log names the real problem.
+                raise RuntimeError(
+                    "AccessHigh rejected the automation token immediately "
+                    "after renewing it, so the scheduled limit could not be "
+                    "written"
+                ) from retry_error
         record_job_result(job_id, error=None)
         logger.info("Scheduled limit completed: %s", job_id)
     except Exception as error:
