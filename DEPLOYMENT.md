@@ -35,8 +35,13 @@ the Aces High credentials used solely to renew expired automation tokens.
   the hosting provider's trusted HTTPS proxy
 - `LOG_LEVEL=INFO`
 - `HIERARCHY_WORKERS`: how many AccessHigh hierarchy nodes are expanded at
-  once when the agent tree is built. Defaults to `10`, clamped to 1-32. Lower
-  it if AccessHigh rate limits the walk.
+  once when the agent tree is built. Defaults to `4`, clamped to 1-32.
+  AccessHigh rate limits this endpoint, and the tree is cached afterwards, so
+  a modest walk is worth more than a fast one that gets throttled.
+- `HIERARCHY_RETRIES`: how many times a rate-limited hierarchy request is
+  retried. Defaults to `8`, clamped to 1-20. A 429 from any worker pauses the
+  whole walk, honouring `Retry-After` where AccessHigh sends one, so the walk
+  settles to a rate AccessHigh accepts rather than failing.
 - `AGENT_TREE_TTL_SECONDS`: how long a stored agent tree is served before it
   is rebuilt. Defaults to `900`. A tree past its TTL is still returned
   immediately and refreshed in the background, so only an account's very first

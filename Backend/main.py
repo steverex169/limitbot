@@ -7,6 +7,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import random
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import uuid
@@ -43,9 +44,26 @@ data_lock = threading.Lock()
 # AccessHigh expands one hierarchy node per request, so a large agent tree
 # costs one upstream round trip per node. The walk is pure network wait, so
 # each level is fetched concurrently instead of one node at a time.
+# AccessHigh rate limits this endpoint, so the walk stays deliberately
+# modest: the tree is cached afterwards, which makes a slower walk far
+# cheaper than a rate-limited one that fails outright.
 hierarchy_worker_count = max(
-    1, min(32, int(os.getenv("HIERARCHY_WORKERS", "10")))
+    1, min(32, int(os.getenv("HIERARCHY_WORKERS", "4")))
 )
+hierarchy_retry_limit = max(
+    1, min(20, int(os.getenv("HIERARCHY_RETRIES", "8")))
+)
+
+
+def hierarchy_retry_delay(response, attempt):
+    """How long to wait before retrying a rate-limited hierarchy request."""
+    try:
+        delay = float(response.headers.get("Retry-After", "").strip())
+    except ValueError:
+        delay = 0.5 * (2 ** attempt)
+    # Jitter stops the concurrent workers retrying in lockstep and tripping
+    # the same limit all over again.
+    return max(0.5, min(30.0, delay)) + random.uniform(0, 0.5)
 # How long a stored hierarchy is served before it is refreshed. A stale tree
 # is still returned immediately and refreshed behind the request, so a login
 # never waits for the walk once the tree has been built at least once.
@@ -525,6 +543,7 @@ def api_request(method, url, **kwargs):
 
 def build_agent_tree(auth):
     """Walk the complete AccessHigh hierarchy for a logged-in agent."""
+    started_at = time.monotonic()
     logged_in_agent_id = auth["id"]
     root = {
         "id": logged_in_agent_id,
@@ -630,13 +649,47 @@ def build_agent_tree(auth):
                 items.extend(value)
         return items or [payload]
 
+    # AccessHigh throttles this endpoint per account, so a 429 seen by one
+    # worker pauses all of them. Retrying without slowing the whole walk down
+    # just trips the same limit again.
+    rate_limit_guard = threading.Lock()
+    rate_limited_until = 0.0
+
+    def hold_off_while_rate_limited():
+        while True:
+            with rate_limit_guard:
+                remaining = rate_limited_until - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(remaining, 5.0))
+
+    def note_rate_limit(response, attempt):
+        nonlocal rate_limited_until
+        delay = hierarchy_retry_delay(response, attempt)
+        with rate_limit_guard:
+            rate_limited_until = max(
+                rate_limited_until, time.monotonic() + delay
+            )
+
     def expand_node(parent_id):
-        response = api_request(
-            "GET",
-            "https://aceshigh.ag/partner-api/partner/accounts/"
-            f"hierarchy/node/{parent_id}?IdAgent={logged_in_agent_id}",
-            timeout=30,
-        )
+        for attempt in range(hierarchy_retry_limit):
+            hold_off_while_rate_limited()
+            response = api_request(
+                "GET",
+                "https://aceshigh.ag/partner-api/partner/accounts/"
+                f"hierarchy/node/{parent_id}?IdAgent={logged_in_agent_id}",
+                timeout=30,
+            )
+            # A rate-limited node is a wait, not a failure. Losing the whole
+            # hierarchy over one throttled request would leave the dashboard
+            # with no agents at all.
+            if response.status_code != 429:
+                break
+            note_rate_limit(response, attempt)
+            if attempt == hierarchy_retry_limit - 1:
+                logger.warning(
+                    "AccessHigh kept rate limiting hierarchy node %s", parent_id
+                )
         response.raise_for_status()
         data = response.json()
         if data.get("Errors"):
@@ -794,6 +847,12 @@ def build_agent_tree(auth):
 
     append_tree(logged_in_agent_id, 0)
 
+    logger.info(
+        "Built agent hierarchy for %s: %s agents in %.1fs",
+        logged_in_agent_id,
+        len(agents),
+        time.monotonic() - started_at,
+    )
     return agents
 
 
