@@ -1420,20 +1420,23 @@ def get_leagues(account_id, force=False):
 
 
 def display_limit_value(row, field):
-    """The number AccessHigh itself shows and writes for this limit.
+    """The number AccessHigh itself shows for this limit.
 
-    Its own grid binds the input to `.Amount`
-    (ng-model="getAmountOrEarly(node[...]).Amount") and its save payload is
-    built from `.Amount` too. Preferring `.AmountMax` made this dashboard
-    disagree with AccessHigh on every row where the two differ, and made the
-    skip check compare against a number AccessHigh never displays.
-    `.AmountMax` remains only as a fallback for a row that carries no
-    `.Amount` at all.
+    `.AmountMax` is the effective limit and is what AccessHigh displays.
+    Where a wager limit caps the configured amount the two diverge, and the
+    capped figure is the real one: account 996059's Hockey Total carries
+    Amount 2500 against AmountMax 500 with HasWagerLimitOverrides set, and
+    AccessHigh shows 500.
+
+    A previous change preferred `.Amount` on the grounds that AccessHigh's
+    grid binds its input to it. That binding is real but it is not what the
+    row displays, and the change made every capped limit read high. Prefer
+    `.AmountMax`, falling back to `.Amount` only when it is absent.
     """
-    amount = row.get(f"{field}.Amount")
-    if amount not in (None, ""):
-        return amount
-    return row.get(f"{field}.AmountMax")
+    amount_max = row.get(f"{field}.AmountMax")
+    if amount_max not in (None, ""):
+        return amount_max
+    return row.get(f"{field}.Amount")
 
 
 def display_early_limit_value(row, field):
