@@ -1227,9 +1227,18 @@ def account_name(account_id):
 # print("Save response:", save_limit_response.text)
 
 def organization_url(account_id):
+    """The account's own limits, not the ceilings it inherits.
+
+    The path segment before the wager type is AccessHigh's "Show Agent
+    Limits" switch. Sending `true` returns the parent agent's limits for
+    every account, so a sub-account read as its parent: account 996059
+    showed Spread 75550 under `true` against the 100 AccessHigh displays,
+    and `false` returns 100. Everything downstream depends on this being the
+    account's own value, including the skip check and the change log.
+    """
     return (
         "https://aceshigh.ag/partner-api/partner/"
-        f"Backbone/GetOrganizationAll/{account_id}/true/S"
+        f"Backbone/GetOrganizationAll/{account_id}/false/S"
     )
 
 league_rows = []
