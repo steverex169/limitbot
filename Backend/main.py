@@ -1426,6 +1426,30 @@ def display_early_limit_value(row, field):
         return amount_max
     return row.get(field)
 
+def limit_colour(row, field, is_early):
+    """The colour AccessHigh paints this limit, from its own rules.
+
+    Taken from getBBInputClass in AccessHigh's bundle: csPlayerLimit is blue
+    (#0026ff) and wins outright, csWagerLimit is orange (#ff6a00) and applies
+    only when no player override exists, and a cell with neither class stays
+    black. Both flags travel in the payload the dashboard already fetches.
+    """
+    base = allowed_limit_fields[field]
+    prefix = f"{base}.EarlyLimit" if is_early else base
+
+    def flag(name):
+        value = row.get(f"{prefix}.{name}")
+        if isinstance(value, str):
+            return value.strip().casefold() == "true"
+        return bool(value)
+
+    if flag("HasPlayerOverrides"):
+        return "blue"
+    if flag("HasWagerLimitOverrides"):
+        return "orange"
+    return "black"
+
+
 def stored_limit_value(row, field, is_early):
     """The value AccessHigh currently holds for one market on one row.
 
@@ -1490,6 +1514,16 @@ def dashboard_rows(account_id, force=False):
                     else ""
                 ),
                 "supportsEarlyLimit": supports_early_limit,
+                # AccessHigh's own colour for each market, so the grid can be
+                # read the same way as the system it mirrors.
+                "colours": {
+                    name: limit_colour(row, name, False)
+                    for name in allowed_limit_fields
+                },
+                "earlyColours": {
+                    name: limit_colour(row, name, True)
+                    for name in allowed_limit_fields
+                },
                 "spread": display_limit_value(row, "Spread"),
                 "moneyLine": display_limit_value(row, "MoneyLine"),
                 "total": display_limit_value(row, "Total"),
@@ -1673,6 +1707,7 @@ def save_single_limit(
     api_field,
     return_full=False,
     change_type="Immediate limit",
+    skip_blue=True,
 ):
     """Helper function to save a single limit change"""
     matching_row = find_limit_row(
@@ -1693,8 +1728,35 @@ def save_single_limit(
     # for no change, and a needless write is also a needless chance to mark a
     # limit. Report the skip instead of performing it.
     if matching_row is not None:
+        is_early = api_field.startswith("Early")
+
+        # A blue limit carries a player-level override. Writing over it would
+        # silently discard that override, so leave it alone unless the caller
+        # has explicitly asked to.
+        if skip_blue and limit_colour(matching_row, field, is_early) == "blue":
+            note = "Skipped, limit is blue (player override)"
+            logger.info(
+                "Skipped %s for account %s: blue (player override)",
+                api_field,
+                account_id,
+            )
+            if return_full:
+                return {
+                    "message": note,
+                    "value": new_value,
+                    "rows": dashboard_rows(account_id),
+                    "changed": False,
+                    "note": note,
+                }
+            return {
+                "success": True,
+                "value": new_value,
+                "changed": False,
+                "note": note,
+            }
+
         current_value = stored_limit_value(
-            matching_row, field, api_field.startswith("Early")
+            matching_row, field, is_early
         )
         if current_value not in (None, "") and safe_int(current_value, -1) == new_value:
             note = f"No change needed, already {new_value:,}"
