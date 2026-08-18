@@ -2067,11 +2067,13 @@ function describeScheduleLastRun(schedule) {
 }
 
 /*
- * Status says what happened and Last run says when. Detail exists for the one
- * thing neither can show: why a run failed.
+ * Status says what happened and Last run says when. Detail carries the one
+ * thing neither can show: why. A failure explains itself, and a run that
+ * completed without changing anything says so rather than looking identical
+ * to one that did.
  */
 function describeScheduleDetail(schedule) {
-  return schedule.error || "";
+  return schedule.error || schedule.runNote || "";
 }
 
 /*
@@ -3345,6 +3347,7 @@ async function savePendingBatch() {
 
   try {
     const savedSummaries = [];
+    const skippedSummaries = [];
     const failedSummaries = [];
 
     for (const item of batch) {
@@ -3404,9 +3407,18 @@ async function savePendingBatch() {
 
         leagueDataVersion += 1;
         removePendingChange(item);
-        savedSummaries.push(
-          `${fieldLabels[item.field] || item.field}`
-        );
+
+        // A limit AcesHigh already held is not a failure, but it is not a
+        // change either, and saying "saved" for both hides the difference.
+        if (data.changed === false) {
+          skippedSummaries.push(
+            `${fieldLabels[item.field] || item.field} (${data.note || "already set"})`
+          );
+        } else {
+          savedSummaries.push(
+            `${fieldLabels[item.field] || item.field}`
+          );
+        }
       } catch (error) {
         failedSummaries.push(
           `${fieldLabels[item.field] || item.field} (${error.message})`
@@ -3419,14 +3431,23 @@ async function savePendingBatch() {
     elements.dialog.close();
     applyFilters();
 
+    const skippedText = skippedSummaries.length
+      ? ` Skipped: ${skippedSummaries.join(", ")}.`
+      : "";
+
     if (failedSummaries.length) {
       showMessage(
-        `Saved ${savedSummaries.join(", ") || "nothing"}. Failed: ${failedSummaries.join("; ")}.`,
+        `Saved ${savedSummaries.join(", ") || "nothing"}. Failed: ${failedSummaries.join("; ")}.${skippedText}`,
         "error"
+      );
+    } else if (!savedSummaries.length && skippedSummaries.length) {
+      showMessage(
+        `Nothing to change.${skippedText}`,
+        "success"
       );
     } else {
       showMessage(
-        `Saved ${savedSummaries.length} change${savedSummaries.length === 1 ? "" : "s"}: ${savedSummaries.join(", ")}.`,
+        `Saved ${savedSummaries.length} change${savedSummaries.length === 1 ? "" : "s"}: ${savedSummaries.join(", ")}.${skippedText}`,
         "success"
       );
     }

@@ -1426,6 +1426,18 @@ def display_early_limit_value(row, field):
         return amount_max
     return row.get(field)
 
+def stored_limit_value(row, field, is_early):
+    """The value AccessHigh currently holds for one market on one row.
+
+    Read exactly the way the dashboard displays it, so "already 500" means
+    the same number the operator is looking at.
+    """
+    base = allowed_limit_fields[field]
+    if is_early:
+        return display_early_limit_value(row, f"{base}.EarlyLimit")
+    return display_limit_value(row, base)
+
+
 def dashboard_rows(account_id, force=False):
     rows = []
     for row in get_leagues(account_id, force=force):
@@ -1677,6 +1689,36 @@ def save_single_limit(
         org_id = safe_int(organization_id)
         sport_id = safe_int(sport_type_id)
 
+    # Writing a value AccessHigh already holds spends a rate-limited request
+    # for no change, and a needless write is also a needless chance to mark a
+    # limit. Report the skip instead of performing it.
+    if matching_row is not None:
+        current_value = stored_limit_value(
+            matching_row, field, api_field.startswith("Early")
+        )
+        if current_value not in (None, "") and safe_int(current_value, -1) == new_value:
+            note = f"No change needed, already {new_value:,}"
+            logger.info(
+                "Skipped %s for account %s: already %s",
+                api_field,
+                account_id,
+                new_value,
+            )
+            if return_full:
+                return {
+                    "message": note,
+                    "value": new_value,
+                    "rows": dashboard_rows(account_id),
+                    "changed": False,
+                    "note": note,
+                }
+            return {
+                "success": True,
+                "value": new_value,
+                "changed": False,
+                "note": note,
+            }
+
     change = {
         "IdOrganization": org_id,
         "IdSportType": sport_id,
@@ -1775,8 +1817,10 @@ def save_single_limit(
             "message": "Limit updated successfully",
             "value": new_value,
             "rows": dashboard_rows(account_id),
+            "changed": True,
+            "note": None,
         }
-    return {"success": True, "value": new_value}
+    return {"success": True, "value": new_value, "changed": True, "note": None}
 
 def save_limit_change(request_data):
     field = request_data.get("field")
@@ -1845,12 +1889,13 @@ def save_limit_change(request_data):
             )
 
         successful_updates = []
+        skipped_updates = []
         failed_updates = []
 
         for child in child_rows:
             try:
                 api_field = f"{limit_mode_prefixes[limit_mode]}{allowed_limit_fields[field]}"
-                save_single_limit(
+                child_outcome = save_single_limit(
                     account_id,
                     safe_int(child["idOrganization"]),
                     safe_int(child["idLeague"]),
@@ -1861,7 +1906,13 @@ def save_limit_change(request_data):
                     api_field,
                     change_type="Early limit" if limit_mode == "early" else "Immediate limit",
                 )
-                successful_updates.append({
+                target = (
+                    skipped_updates
+                    if isinstance(child_outcome, dict)
+                    and child_outcome.get("changed") is False
+                    else successful_updates
+                )
+                target.append({
                     "league": child.get("leagueName", "League"),
                     "id": child.get("idLeague")
                 })
@@ -1877,7 +1928,8 @@ def save_limit_change(request_data):
                     "error": str(e)
                 })
 
-        if not successful_updates:
+        # A parent whose children were all already correct has not failed.
+        if not successful_updates and not skipped_updates:
             first_error = failed_updates[0]['error'] if failed_updates else 'unknown error'
             raise ValueError(f"Failed to update child leagues: {first_error}")
 
@@ -1890,12 +1942,24 @@ def save_limit_change(request_data):
         except Exception as e:
             logger.exception("Failed to refresh leagues after parent update: %s", e)
 
+        parent_message = f"Updated {len(successful_updates)} leagues under parent limit"
+        if skipped_updates:
+            parent_message += (
+                f", {len(skipped_updates)} already at {new_value:,}"
+            )
         return {
-            "message": f"Updated {len(successful_updates)} leagues under parent limit",
+            "message": parent_message,
             "value": new_value,
             "rows": dashboard_rows(account_id),
             "successful": successful_updates,
-            "failed": failed_updates if failed_updates else None
+            "skipped": skipped_updates or None,
+            "failed": failed_updates if failed_updates else None,
+            "changed": bool(successful_updates),
+            "note": (
+                None
+                if successful_updates
+                else f"No change needed, {len(skipped_updates)} leagues already at {new_value:,}"
+            ),
         }
     else:
         # Regular single league / child update
@@ -2204,7 +2268,7 @@ def claim_due_jobs():
         return claimed_ids
 
 
-def record_job_result(job_id, error):
+def record_job_result(job_id, error, note=None):
     try:
         with database_session() as db:
             stored_job = db.get(ScheduledLimit, job_id)
@@ -2214,6 +2278,7 @@ def record_job_result(job_id, error):
             stored_job.last_run_at = run_at
             stored_job.last_run_status = "failed" if error else "completed"
             stored_job.error = str(error) if error else None
+            stored_job.run_note = None if error else note
             if not error:
                 stored_job.completed_at = run_at
             if stored_job.recurrence_days and stored_job.recurrence_time:
@@ -2268,8 +2333,9 @@ def execute_scheduled_job(job_id):
             "value": job.value,
             "limitMode": "early" if job.is_early_limit else "normal",
         }
+        outcome = None
         try:
-            save_limit_change(request_data)
+            outcome = save_limit_change(request_data)
         except PermissionError:
             # Access tokens are short-lived, while recurring schedules may run
             # days later. Renew securely and retry the write exactly once.
@@ -2288,7 +2354,7 @@ def execute_scheduled_job(job_id):
                 job_id,
             )
             try:
-                save_limit_change(request_data)
+                outcome = save_limit_change(request_data)
             except PermissionError as retry_error:
                 # A token AccessHigh has only just issued being rejected is a
                 # different fault from one that simply aged out, and "log in
@@ -2299,8 +2365,11 @@ def execute_scheduled_job(job_id):
                     "after renewing it, so the scheduled limit could not be "
                     "written"
                 ) from retry_error
-        record_job_result(job_id, error=None)
-        logger.info("Scheduled limit completed: %s", job_id)
+        note = outcome.get("note") if isinstance(outcome, dict) else None
+        record_job_result(job_id, error=None, note=note)
+        logger.info(
+            "Scheduled limit completed: %s%s", job_id, f" ({note})" if note else ""
+        )
     except Exception as error:
         logger.exception("Scheduled limit failed: %s", job_id)
         record_job_result(job_id, error=error)
@@ -2553,6 +2622,8 @@ def schedule_status_rows(account_id):
         # The reason a run failed is the single most useful thing the log can
         # show, and it was being stored and then never surfaced.
         "error": job.error,
+        # Why a successful run changed nothing, when that is the case.
+        "runNote": getattr(job, "run_note", None),
     } for job in jobs]
 
 
@@ -3150,6 +3221,7 @@ def migrate_schedule_columns():
         "last_run_status": "VARCHAR(20) NULL",
         "last_run_at": "DATETIME NULL",
         "customer_support_agent": "VARCHAR(100) NULL",
+        "run_note": "VARCHAR(255) NULL",
     }
     with engine.begin() as connection:
         for column_name, column_type in additions.items():
