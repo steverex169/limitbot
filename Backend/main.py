@@ -22,7 +22,7 @@ import time  # Added for retry delays
 
 import requests
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import delete, inspect, select, text, update
+from sqlalchemy import case, delete, inspect, select, text, update
 from urllib.parse import urlparse, parse_qs
 from database import Base, database_session, engine
 from model import AgentTreeCache, LoginSession, ScheduledLimit, User
@@ -53,6 +53,19 @@ hierarchy_worker_count = max(
 rate_limit_retry_limit = max(
     1, min(20, int(os.getenv("HIERARCHY_RETRIES", "8")))
 )
+
+
+def eastern_timestamp(value):
+    """Format an Eastern timestamp with the label the operators read.
+
+    Eastern is EDT for most of the year, but the desk works in "EST" as the
+    name of the zone itself, so the abbreviation is fixed while the clock
+    time stays true New York local time. Scheduling is unaffected: this only
+    decides what the label says.
+    """
+    return value.astimezone(schedule_timezone).strftime(
+        "%Y-%m-%d %I:%M %p EST"
+    )
 
 
 def rate_limit_retry_delay(response, attempt):
@@ -2045,7 +2058,7 @@ def create_schedule(request_data):
     return {
         "id": job_id,
         "message": "Limit change scheduled",
-        "scheduledFor": scheduled_for.strftime("%Y-%m-%d %I:%M %p %Z"),
+        "scheduledFor": eastern_timestamp(scheduled_for),
         "scheduledForUtc": scheduled_for_utc.isoformat(),
         "limitMode": limit_mode,
         "customerSupportAgent": customer_support_agent,
@@ -2293,7 +2306,22 @@ def schedule_status_rows(account_id):
     with database_session() as db:
         jobs = list(
             db.scalars(
-                schedule_query.order_by(ScheduledLimit.created_at.desc())
+                schedule_query.order_by(
+                    # Anything still waiting to run sorts above anything
+                    # already finished, so a completed job never sits on top
+                    # of one the operator is still waiting on. Newest first
+                    # within each group.
+                    case(
+                        (
+                            ScheduledLimit.status.in_(
+                                ("pending", "running")
+                            ),
+                            0,
+                        ),
+                        else_=1,
+                    ),
+                    ScheduledLimit.created_at.desc(),
+                )
             )
         )
 
@@ -2367,9 +2395,9 @@ def schedule_status_rows(account_id):
     return [{
         "id": job.id,
         "status": job.status,
-        "scheduledFor": job.scheduled_for.replace(
-            tzinfo=timezone.utc
-        ).astimezone(schedule_timezone).strftime("%Y-%m-%d %I:%M %p %Z"),
+        "scheduledFor": eastern_timestamp(
+            job.scheduled_for.replace(tzinfo=timezone.utc)
+        ),
         "scheduledForUtc": job.scheduled_for.replace(
             tzinfo=timezone.utc
         ).isoformat(),
@@ -2411,9 +2439,7 @@ def schedule_status_rows(account_id):
         ),
         "lastRunStatus": job.last_run_status,
         "lastRunAt": (
-            job.last_run_at.replace(tzinfo=timezone.utc)
-            .astimezone(schedule_timezone)
-            .strftime("%Y-%m-%d %I:%M %p %Z")
+            eastern_timestamp(job.last_run_at.replace(tzinfo=timezone.utc))
             if job.last_run_at
             else None
         ),
@@ -2422,16 +2448,14 @@ def schedule_status_rows(account_id):
             if job.last_run_at
             else None
         ),
-        "createdAt": job.created_at.replace(
-            tzinfo=timezone.utc
-        ).astimezone(schedule_timezone).strftime("%Y-%m-%d %I:%M %p %Z"),
+        "createdAt": eastern_timestamp(
+            job.created_at.replace(tzinfo=timezone.utc)
+        ),
         "createdAtUtc": job.created_at.replace(
             tzinfo=timezone.utc
         ).isoformat(),
         "completedAt": (
-            job.completed_at.replace(tzinfo=timezone.utc)
-            .astimezone(schedule_timezone)
-            .strftime("%Y-%m-%d %I:%M %p %Z")
+            eastern_timestamp(job.completed_at.replace(tzinfo=timezone.utc))
             if job.completed_at
             else None
         ),

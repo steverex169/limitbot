@@ -954,15 +954,16 @@ function formatEasternDateTime(value) {
   }
 
   /*
-   * Eastern is EST in winter and EDT in summer. Printing "EST" all year
-   * round made every summer timestamp claim an abbreviation an hour off the
-   * offset the schedule actually runs at, so the true one is kept.
+   * The desk works in "EST" as the name of the zone, so the label is fixed
+   * while the clock time stays true New York local time — the same instant
+   * the schedule actually runs at, daylight saving included. Only the
+   * abbreviation is decided here.
    */
   if (
     typeof value === "string" &&
     /\b(?:ET|EST|EDT)\b/.test(value)
   ) {
-    return value;
+    return value.replace(/\bEDT\b/g, "EST");
   }
 
   const parsed = new Date(value);
@@ -973,7 +974,8 @@ function formatEasternDateTime(value) {
 
   return easternDateTimeFormatter
     .format(parsed)
-    .replace(", ", " ");
+    .replace(", ", " ")
+    .replace(/\bEDT\b/g, "EST");
 }
 
 const easternTimeFormatter = new Intl.DateTimeFormat(
@@ -2044,22 +2046,31 @@ function describeScheduleLastRun(schedule) {
   if (!schedule.lastRunAtUtc && !schedule.lastRunAt) {
     return "Not run yet";
   }
+
   const when = formatEasternDateTime(
     schedule.lastRunAtUtc || schedule.lastRunAt
   );
-  return schedule.lastRunStatus
-    ? `${schedule.lastRunStatus} · ${when}`
+  const lastStatus = String(
+    schedule.lastRunStatus || ""
+  ).toLowerCase();
+  const rowStatus = String(schedule.status || "").toLowerCase();
+
+  /*
+   * Status already carries the current state. Repeat the last run's own
+   * outcome only when it differs from it — a recurring schedule that is
+   * pending again after a failed run is the case worth seeing.
+   */
+  return lastStatus && lastStatus !== rowStatus
+    ? `${lastStatus} · ${when}`
     : when;
 }
 
+/*
+ * Status says what happened and Last run says when. Detail exists for the one
+ * thing neither can show: why a run failed.
+ */
 function describeScheduleDetail(schedule) {
-  if (schedule.error) {
-    return schedule.error;
-  }
-  if (schedule.completedAt) {
-    return `Completed ${schedule.completedAt}`;
-  }
-  return "";
+  return schedule.error || "";
 }
 
 /*
