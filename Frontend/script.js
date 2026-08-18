@@ -3127,8 +3127,9 @@ async function refreshScheduleStatuses() {
 
     if (
       row &&
-      finishedSchedule.status ===
-      "completed"
+      finishedSchedule.status === "completed" &&
+      // A skipped run wrote nothing, so there is nothing to patch in.
+      !finishedSchedule.runNote
     ) {
       const finishedLimitMode =
         finishedSchedule.limitMode === "early"
@@ -3167,7 +3168,8 @@ async function refreshScheduleStatuses() {
       formatEasternDateTime(
         finishedSchedule.scheduledForUtc ||
         finishedSchedule.scheduledFor
-      )
+      ),
+      finishedSchedule.runNote
     );
   }
 }
@@ -3179,10 +3181,18 @@ function showScheduleStatus(
   scheduledFor,
   fieldLabel,
   recurrence = null,
-  nextRun = null
+  nextRun = null,
+  runNote = null
 ) {
+  /*
+   * A run that completed without changing anything is not a change. Saying
+   * "applied successfully" for it would claim a limit moved when it did not.
+   */
+  const skipped =
+    status === "completed" && Boolean(runNote);
+
   const successful =
-    status === "completed";
+    status === "completed" && !skipped;
 
   const failed =
     status === "failed";
@@ -3200,20 +3210,26 @@ function showScheduleStatus(
   elements.scheduleStatusEyebrow.textContent =
     failed
       ? "SCHEDULE FAILED"
-      : successful
-        ? "SCHEDULE COMPLETED"
-        : "SCHEDULED LIMIT";
+      : skipped
+        ? "SCHEDULE SKIPPED"
+        : successful
+          ? "SCHEDULE COMPLETED"
+          : "SCHEDULED LIMIT";
 
   elements.scheduleStatusTitle.textContent =
     failed
       ? "Limit not applied"
-      : successful
-        ? "Limit has applied successfully"
-        : "Limit change scheduled";
+      : skipped
+        ? "Limit was not changed"
+        : successful
+          ? "Limit has applied successfully"
+          : "Limit change scheduled";
 
   elements.scheduleStatusText.textContent =
-    successful
-      ? `${leagueName} ${fieldLabel} was changed to ${Number(
+    skipped
+      ? `${leagueName} ${fieldLabel} was left unchanged at ${scheduledFor}. ${runNote}.${nextRun ? ` Next run: ${nextRun}.` : ""}`
+      : successful
+        ? `${leagueName} ${fieldLabel} was changed to ${Number(
         value
       ).toLocaleString()} at ${scheduledFor}.${nextRun
         ? ` Next run: ${nextRun}.`
@@ -3234,9 +3250,11 @@ function showScheduleStatus(
         }.`;
 
   elements.scheduleProgress.hidden =
-    successful || failed;
+    successful || failed || skipped;
 
-  if (successful || failed) {
+  elements.scheduleStatusDialog.classList.toggle("status-skipped", skipped);
+
+  if (successful || failed || skipped) {
     if (elements.scheduleStatusDialog.open) {
       elements.scheduleStatusDialog.close();
     }
@@ -3311,14 +3329,22 @@ async function saveActiveChange() {
 
     // Optimistically update the matching row in state.rows so the UI
     // always reflects the saved value regardless of backend cache timing.
-    const savedValue = change.newValue;
-    const savedRow = change.row;
-
-    applySavedValueToRows(savedRow, savedField, savedValue);
-    setInputValueForChange(change, savedValue);
+    const skipped = data.changed === false;
 
     // Invalidate any in-flight poll so its pre-save data is discarded.
     leagueDataVersion += 1;
+
+    /*
+     * Only a write that actually happened may update what we show. A skip
+     * leaves AcesHigh untouched, so the grid goes back to the stored value
+     * rather than displaying one that was never accepted.
+     */
+    if (skipped) {
+      restorePendingInput(change);
+    } else {
+      applySavedValueToRows(change.row, savedField, change.newValue);
+      setInputValueForChange(change, change.newValue);
+    }
 
     // Remove only the change that was saved; edits pending on other rows
     // must survive this save.
@@ -3330,9 +3356,14 @@ async function saveActiveChange() {
     applyFilters();
 
     showMessage(
-      `${data.message}. New value: ${data.value.toLocaleString()}.`,
-      "success"
+      skipped
+        ? `Not changed. ${data.message}.`
+        : `${data.message}. New value: ${data.value.toLocaleString()}.`,
+      skipped ? "error" : "success"
     );
+
+    // Re-read from AcesHigh so the grid shows its values, not ours.
+    loadLeagues(false).catch(() => { });
   } catch (error) {
     elements.dialog.close();
 
@@ -3417,21 +3448,23 @@ async function savePendingBatch() {
           );
         }
 
-        const savedValue = item.newValue;
-        const savedRow = item.row;
-        applySavedValueToRows(savedRow, savedField, savedValue);
-        setInputValueForChange(item, savedValue);
-
         leagueDataVersion += 1;
-        removePendingChange(item);
 
-        // A limit AcesHigh already held is not a failure, but it is not a
-        // change either, and saying "saved" for both hides the difference.
+        /*
+         * A skipped save changed nothing at AcesHigh, so it must change
+         * nothing here either. Applying it locally would leave our grid
+         * claiming a value AcesHigh never accepted.
+         */
         if (data.changed === false) {
+          restorePendingInput(item);
+          removePendingChange(item);
           skippedSummaries.push(
             `${fieldLabels[item.field] || item.field} (${data.note || "already set"})`
           );
         } else {
+          applySavedValueToRows(item.row, savedField, item.newValue);
+          setInputValueForChange(item, item.newValue);
+          removePendingChange(item);
           savedSummaries.push(
             `${fieldLabels[item.field] || item.field}`
           );
@@ -3447,6 +3480,10 @@ async function savePendingBatch() {
     state.pendingSaveBatch = [];
     elements.dialog.close();
     applyFilters();
+
+    // One re-read for the whole batch, so the grid shows AcesHigh's values
+    // rather than the ones we optimistically painted.
+    loadLeagues(false).catch(() => { });
 
     const skippedText = skippedSummaries.length
       ? ` Skipped: ${skippedSummaries.join(", ")}.`

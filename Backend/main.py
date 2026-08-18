@@ -2502,6 +2502,19 @@ def execute_scheduled_job(job_id):
         auth["searchableAgentIds"] = {job.account_id}
         current_auth.set(auth)
         current_change_source.set(("schedule", job_id))
+
+        # league_cache is process-wide and this job may be running hours after
+        # it was filled. Decide skip-or-write against AccessHigh's current
+        # values, not a stale copy.
+        try:
+            refresh_leagues(job.account_id)
+        except Exception:
+            logger.warning(
+                "Could not refresh leagues before job %s; using cached values",
+                job_id,
+                exc_info=True,
+            )
+
         request_data = {
             "accountId": job.account_id,
             "idOrganization": job.organization_id,

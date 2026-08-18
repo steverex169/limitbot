@@ -1800,6 +1800,10 @@ dialog h2 {
   animation: schedule-progress 1.35s ease-in-out infinite;
 }
 
+.schedule-status-dialog.status-skipped .eyebrow {
+  color: var(--muted);
+}
+
 .schedule-status-dialog.status-success .eyebrow {
   color: #027a48;
 }
