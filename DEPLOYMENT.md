@@ -47,6 +47,12 @@ the Aces High credentials used solely to renew expired automation tokens.
   immediately and refreshed in the background, so only an account's very first
   login ever waits for the walk. Set it lower where agents are added often.
 
+- `LOG_FILE`: path to write logs to as well as stdout, e.g.
+  `/app/logs/limitbot.log`. Container logs are destroyed with the container,
+  so without this a redeploy erases the record of why a scheduled limit
+  failed. Point it at a mounted volume. `LOG_FILE_MAX_BYTES` (default 16MB)
+  and `LOG_FILE_BACKUPS` (default 5) bound the rotation.
+
 The agent tree is stored in the `agent_tree_cache` table, which the
 application creates on startup. No migration step is required. Use
 `GET /api/agents?refresh=1` to force a rebuild for a hierarchy that changed

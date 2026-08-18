@@ -5,6 +5,7 @@ import hashlib
 import ipaddress
 import json
 import logging
+import logging.handlers
 import os
 from pathlib import Path
 import random
@@ -144,6 +145,28 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
 )
 logger = logging.getLogger("aceshigh-dashboard")
+
+# Container logs die with the container, so every redeploy used to destroy the
+# history of why a scheduled limit failed. Point LOG_FILE at a mounted volume
+# and the record outlives the container that wrote it.
+log_file_path = os.getenv("LOG_FILE", "").strip()
+if log_file_path:
+    try:
+        Path(log_file_path).parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_file_path,
+            maxBytes=int(os.getenv("LOG_FILE_MAX_BYTES", str(16 * 1024 * 1024))),
+            backupCount=int(os.getenv("LOG_FILE_BACKUPS", "5")),
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+        )
+        logging.getLogger().addHandler(file_handler)
+        logger.info("Logging to %s", log_file_path)
+    except Exception:
+        # A log file that cannot be opened must never stop the app booting.
+        logger.warning("Could not open %s for logging", log_file_path, exc_info=True)
 
 telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
