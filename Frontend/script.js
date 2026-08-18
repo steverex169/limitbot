@@ -953,11 +953,16 @@ function formatEasternDateTime(value) {
     return "";
   }
 
+  /*
+   * Eastern is EST in winter and EDT in summer. Printing "EST" all year
+   * round made every summer timestamp claim an abbreviation an hour off the
+   * offset the schedule actually runs at, so the true one is kept.
+   */
   if (
     typeof value === "string" &&
-    /(?:\bET\b|\bEST\b)/.test(value)
+    /\b(?:ET|EST|EDT)\b/.test(value)
   ) {
-    return value.replace(/\bEDT\b/g, "EST");
+    return value;
   }
 
   const parsed = new Date(value);
@@ -968,8 +973,7 @@ function formatEasternDateTime(value) {
 
   return easternDateTimeFormatter
     .format(parsed)
-    .replace(", ", " ")
-    .replace(/\bEDT\b/g, "EST");
+    .replace(", ", " ");
 }
 
 const easternTimeFormatter = new Intl.DateTimeFormat(

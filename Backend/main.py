@@ -2596,7 +2596,23 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_response(self, *args, **kwargs):
+        self.cache_control_sent = False
+        super().send_response(*args, **kwargs)
+
+    def send_header(self, keyword, value):
+        if keyword.lower() == "cache-control":
+            self.cache_control_sent = True
+        super().send_header(keyword, value)
+
     def end_headers(self):
+        if not getattr(self, "cache_control_sent", False):
+            # Static assets carried only Last-Modified, so browsers cached
+            # them heuristically. A deploy could leave a browser running the
+            # previous script.js against the new index.html, which mismatches
+            # the two without any visible error. Revalidate every load; an
+            # unchanged file still answers 304.
+            self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
@@ -2933,7 +2949,15 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 if rate_key is not None:
                     self.record_login_failure(rate_key)
                 self.send_json(401, {"error": str(error)})
-            except Exception:
+            except Exception as error:
+                # This path used to swallow the cause completely, which left
+                # a failing login with nothing at all to diagnose it from.
+                logger.error(
+                    "AccessHigh login failed for %s: %s",
+                    username or "unknown",
+                    type(error).__name__,
+                    exc_info=True,
+                )
                 self.send_json(502, {"error": "AccessHigh login is currently unavailable"})
             return
 
