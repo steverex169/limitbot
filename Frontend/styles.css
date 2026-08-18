@@ -633,6 +633,28 @@ main {
   color: var(--muted);
 }
 
+.danger-button {
+  align-self: end;
+  min-height: 38px;
+  padding: 0 16px;
+  border: 1px solid var(--red);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--red);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.danger-button:hover:not(:disabled) {
+  background: var(--red);
+  color: #fff;
+}
+
+.danger-button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
 .schedule-cancel {
   min-height: 32px;
   padding: 0 10px;

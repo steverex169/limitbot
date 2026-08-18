@@ -150,6 +150,7 @@ const elements = {
   scheduleMinute: document.querySelector("#scheduleMinute"),
   schedulePeriod: document.querySelector("#schedulePeriod"),
   customerSupportAgent: document.querySelector("#customerSupportAgent"),
+  deleteAllSchedules: document.querySelector("#deleteAllSchedules"),
   clearScheduleOptions: document.querySelector("#clearScheduleOptions"),
   cancelDialogButton: document.querySelector("#cancelDialogButton"),
   scheduleDays: [
@@ -2242,6 +2243,74 @@ function renderSchedules() {
 if (elements.scheduleStatusFilter) {
   elements.scheduleStatusFilter.addEventListener("change", () => {
     renderSchedules();
+  });
+}
+
+if (elements.deleteAllSchedules) {
+  elements.deleteAllSchedules.addEventListener("click", async () => {
+    const accountId = state.selectedAgentId;
+
+    if (!accountId) {
+      showMessage("Select an agent first.", "error");
+      return;
+    }
+
+    const count = state.schedules.length;
+
+    if (!count) {
+      showMessage("There are no schedules to delete.", "error");
+      return;
+    }
+
+    /*
+     * Deleting the history cannot be undone, so the agent and the count are
+     * both named in the prompt rather than asking a bare "are you sure".
+     */
+    const agentName =
+      state.agents.find(
+        (agent) => Number(agent.id) === Number(accountId)
+      )?.name || `Account ${accountId}`;
+
+    if (
+      !window.confirm(
+        `Delete all ${count} schedule${count === 1 ? "" : "s"} for ${agentName}? This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+
+    elements.deleteAllSchedules.disabled = true;
+    elements.deleteAllSchedules.textContent = "Deleting...";
+
+    try {
+      const response = await fetch("/api/schedules/delete-all", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ accountId }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Could not delete the schedules");
+      }
+
+      state.schedules = [];
+      state.schedulesAgentId = null;
+      renderSchedules();
+      renderRows();
+      showMessage(data.message, "success");
+      // A running job survives the delete, so reload rather than trusting
+      // the emptied list.
+      loadSchedules().catch(() => { });
+    } catch (error) {
+      showMessage(error.message, "error");
+    } finally {
+      elements.deleteAllSchedules.disabled = false;
+      elements.deleteAllSchedules.textContent = "Delete all";
+    }
   });
 }
 

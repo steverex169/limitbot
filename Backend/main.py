@@ -23,7 +23,7 @@ import time  # Added for retry delays
 
 import requests
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import case, delete, inspect, select, text, update
+from sqlalchemy import case, delete, func, inspect, select, text, update
 from urllib.parse import urlparse, parse_qs
 from database import Base, database_session, engine
 from model import AgentTreeCache, LoginSession, ScheduledLimit, User
@@ -533,7 +533,14 @@ def authenticate(username, password):
         token_data = token_response.json()
 
         if token_data.get("Errors"):
-            raise RuntimeError(", ".join(token_data["Errors"]))
+            upstream_errors = ", ".join(token_data["Errors"])
+            # AccessHigh reports a rejected username or password here rather
+            # than on the redirect, and it used to surface as "AccessHigh
+            # login is currently unavailable" — telling every user who
+            # mistyped a password that the service was down.
+            if "invalid username or password" in upstream_errors.casefold():
+                raise ValueError("Invalid AccessHigh username or password")
+            raise RuntimeError(upstream_errors)
 
         access_token = token_data.get("Payload", {}).get("AccessToken")
         if not access_token:
@@ -2126,6 +2133,49 @@ def cancel_schedule(request_data):
     return {"message": "Recurring schedule cancelled", "id": schedule_id}
 
 
+def delete_all_schedules(request_data):
+    """Remove the schedule history the operator is currently looking at.
+
+    Scoped exactly like the Activity Log itself: the root account clears
+    everything it scheduled, a selected sub-agent clears only that account.
+    A job the worker has already claimed is left alone so a delete cannot
+    race a write that is part-way to AccessHigh.
+    """
+    auth = auth_context()
+    account_id = validate_account_id(safe_int(request_data["accountId"]))
+
+    conditions = [ScheduledLimit.user_id == auth["userId"]]
+    if int(account_id) != int(auth["id"]):
+        conditions.append(ScheduledLimit.account_id == int(account_id))
+
+    with database_session() as db:
+        running = db.scalar(
+            select(func.count())
+            .select_from(ScheduledLimit)
+            .where(*conditions, ScheduledLimit.status == "running")
+        )
+        removed = db.execute(
+            delete(ScheduledLimit).where(
+                *conditions, ScheduledLimit.status != "running"
+            )
+        ).rowcount
+        db.commit()
+
+    logger.info(
+        "Deleted %s schedules for account %s (user %s)",
+        removed,
+        account_id,
+        auth["userId"],
+    )
+    message = f"Deleted {removed} schedule{'' if removed == 1 else 's'}"
+    if running:
+        message += (
+            f". {running} currently running "
+            f"{'was' if running == 1 else 'were'} left in place"
+        )
+    return {"message": message, "deleted": removed, "running": running}
+
+
 def claim_due_jobs():
     with database_session() as db:
         due_job_ids = list(
@@ -3059,6 +3109,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             "/api/limits",
             "/api/schedules",
             "/api/schedules/cancel",
+            "/api/schedules/delete-all",
             "/api/preferences",
         }:
             self.send_json(404, {"error": "Not found"})
@@ -3071,6 +3122,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             result = (
                 cancel_schedule(request_data)
                 if path == "/api/schedules/cancel"
+                else delete_all_schedules(request_data)
+                if path == "/api/schedules/delete-all"
                 else create_schedule(request_data)
                 if path == "/api/schedules"
                 else save_user_preferences(auth_context(), request_data)
