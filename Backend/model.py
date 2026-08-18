@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -32,6 +33,27 @@ class User(Base):
     )
     schedules: Mapped[list["ScheduledLimit"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class AgentTreeCache(Base):
+    """Last known AccessHigh hierarchy for one logged-in agent.
+
+    Rebuilding the tree costs one upstream request per node, so the result is
+    stored here and reused across logins and container restarts instead of
+    being walked again from scratch every time a user signs in.
+    """
+
+    __tablename__ = "agent_tree_cache"
+
+    # The AccessHigh agent id is supplied by the caller, never generated.
+    accesshigh_agent_id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, autoincrement=False
+    )
+    tree_json: Mapped[str] = mapped_column(Text().with_variant(LONGTEXT, "mysql"))
+    agent_count: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
     )
 
 

@@ -34,6 +34,18 @@ the Aces High credentials used solely to renew expired automation tokens.
 - `TRUST_PROXY_HEADERS=true` only when traffic reaches the container through
   the hosting provider's trusted HTTPS proxy
 - `LOG_LEVEL=INFO`
+- `HIERARCHY_WORKERS`: how many AccessHigh hierarchy nodes are expanded at
+  once when the agent tree is built. Defaults to `10`, clamped to 1-32. Lower
+  it if AccessHigh rate limits the walk.
+- `AGENT_TREE_TTL_SECONDS`: how long a stored agent tree is served before it
+  is rebuilt. Defaults to `900`. A tree past its TTL is still returned
+  immediately and refreshed in the background, so only an account's very first
+  login ever waits for the walk. Set it lower where agents are added often.
+
+The agent tree is stored in the `agent_tree_cache` table, which the
+application creates on startup. No migration step is required. Use
+`GET /api/agents?refresh=1` to force a rebuild for a hierarchy that changed
+and has to be picked up immediately.
 
 The container health check uses `/api/health`. A healthy response confirms the
 application can connect to MySQL.

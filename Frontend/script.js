@@ -41,6 +41,52 @@ let tradingRefreshTimer = null;
  * meanwhile, so a slow poll can never overwrite fresher data.
  */
 let leagueDataVersion = 0;
+/*
+ * The first league load is the one upstream call queued behind the agent
+ * tree, and the account it will use is already known from the login response.
+ * Starting it next to the agent request takes it off the critical path.
+ */
+let prefetchedLeagues = null;
+
+function prefetchLeagues(accountId) {
+  if (!accountId) {
+    return;
+  }
+
+  const query = new URLSearchParams({
+    accountId,
+  });
+
+  prefetchedLeagues = {
+    accountId: Number(accountId),
+    response: fetch(
+      `/api/leagues?${query}`,
+      {
+        cache: "no-store",
+      }
+    ).catch(() => null),
+  };
+}
+
+/*
+ * Hand the in-flight response to the first league load for that account. Any
+ * other account, a second load, or a failed prefetch falls back to a fresh
+ * request.
+ */
+function takePrefetchedLeagues(accountId) {
+  const prefetch = prefetchedLeagues;
+
+  prefetchedLeagues = null;
+
+  if (
+    !prefetch ||
+    prefetch.accountId !== Number(accountId)
+  ) {
+    return null;
+  }
+
+  return prefetch.response;
+}
 
 const elements = {
   loginView: document.querySelector("#loginView"),
@@ -2155,10 +2201,21 @@ async function loadLeagues(includeSchedules = true) {
     accountId,
   });
 
+  const prefetched =
+    takePrefetchedLeagues(accountId);
+
   const requests = [
-    fetch(`/api/leagues?${query}`, {
-      cache: "no-store",
-    }),
+    prefetched
+      ? prefetched.then(
+        (response) =>
+          response ||
+          fetch(`/api/leagues?${query}`, {
+            cache: "no-store",
+          })
+      )
+      : fetch(`/api/leagues?${query}`, {
+        cache: "no-store",
+      }),
   ];
   if (includeSchedules) {
     requests.push(
@@ -3718,6 +3775,15 @@ async function startDashboard(sessionData = null) {
   }
   applyDashboardRoute();
 
+  if (sessionData) {
+    prefetchLeagues(
+      Number(
+        sessionData.preferences
+          ?.selectedAgentId
+      ) || Number(sessionData.id)
+    );
+  }
+
   loadAgents().catch((error) => {
     showMessage(
       error.message,
@@ -3819,6 +3885,9 @@ elements.logoutButton.addEventListener(
       clearTimeout(tradingRefreshTimer);
       tradingRefreshTimer = null;
     }
+    // Drop any league response still in flight for the account that just
+    // signed out.
+    prefetchedLeagues = null;
 
     clearPendingChanges();
 

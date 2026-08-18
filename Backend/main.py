@@ -14,7 +14,8 @@ import secrets
 import signal
 from zoneinfo import ZoneInfo
 from collections import defaultdict, deque
-from contextvars import ContextVar
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import ContextVar, copy_context
 from urllib.parse import urlsplit
 import time  # Added for retry delays
 
@@ -23,7 +24,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import delete, inspect, select, text, update
 from urllib.parse import urlparse, parse_qs
 from database import Base, database_session, engine
-from model import LoginSession, ScheduledLimit, User
+from model import AgentTreeCache, LoginSession, ScheduledLimit, User
 from odds_comparison import (
     ComparisonError,
     build_league_comparison,
@@ -38,6 +39,37 @@ app_directory = backend_directory.parent / "Frontend"
 login_locks_guard = threading.Lock()
 login_locks = {}
 data_lock = threading.Lock()
+
+# AccessHigh expands one hierarchy node per request, so a large agent tree
+# costs one upstream round trip per node. The walk is pure network wait, so
+# each level is fetched concurrently instead of one node at a time.
+hierarchy_worker_count = max(
+    1, min(32, int(os.getenv("HIERARCHY_WORKERS", "10")))
+)
+# How long a stored hierarchy is served before it is refreshed. A stale tree
+# is still returned immediately and refreshed behind the request, so a login
+# never waits for the walk once the tree has been built at least once.
+agent_tree_ttl = timedelta(
+    seconds=max(0, int(os.getenv("AGENT_TREE_TTL_SECONDS", "900")))
+)
+agent_refresh_guard = threading.Lock()
+agent_refresh_in_flight = set()
+
+
+def upstream_session():
+    """A requests session sized for the concurrent hierarchy walk.
+
+    The default connection pool holds ten sockets, which the walk would
+    exhaust and then rebuild on every request.
+    """
+    session = requests.Session()
+    pool_size = max(10, hierarchy_worker_count + 4)
+    adapter = requests.adapters.HTTPAdapter(
+        pool_connections=pool_size, pool_maxsize=pool_size
+    )
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
 
 
 def login_serialization_lock(username):
@@ -249,7 +281,7 @@ def build_auth_from_database(user, login_session, session_hash=None):
     except InvalidToken as error:
         raise PermissionError("Stored AccessHigh session is invalid") from error
     return {
-        "http": requests.Session(),
+        "http": upstream_session(),
         "headers": {**api_headers, "Authorization": f"Bearer {access_token}"},
         "id": int(user.accesshigh_agent_id),
         "username": user.username,
@@ -270,7 +302,7 @@ def build_worker_auth(user):
     except InvalidToken as error:
         raise PermissionError("Stored AccessHigh session is invalid") from error
     return {
-        "http": requests.Session(),
+        "http": upstream_session(),
         "headers": {**api_headers, "Authorization": f"Bearer {access_token}"},
         "id": int(user.accesshigh_agent_id),
         "username": user.username,
@@ -417,7 +449,7 @@ def save_user_preferences(auth, request_data):
 
 def authenticate(username, password):
     with login_serialization_lock(username):
-        upstream = requests.Session()
+        upstream = upstream_session()
         login_response = upstream.post(
             login_url,
             headers=login_headers,
@@ -491,10 +523,8 @@ def api_request(method, url, **kwargs):
     return response
 
 
-def load_agents(force=False):
-    auth = auth_context()
-    if auth["agents"] is not None and not force:
-        return auth["agents"]
+def build_agent_tree(auth):
+    """Walk the complete AccessHigh hierarchy for a logged-in agent."""
     logged_in_agent_id = auth["id"]
     root = {
         "id": logged_in_agent_id,
@@ -600,10 +630,7 @@ def load_agents(force=False):
                 items.extend(value)
         return items or [payload]
 
-    # AccessHigh returns one expanded hierarchy node at a time. Walk every agent
-    # node so accounts nested under intermediary agents are also available.
-    while pending:
-        parent_id = pending.pop(0)
+    def expand_node(parent_id):
         response = api_request(
             "GET",
             "https://aceshigh.ag/partner-api/partner/accounts/"
@@ -615,7 +642,9 @@ def load_agents(force=False):
         if data.get("Errors"):
             raise RuntimeError(", ".join(data["Errors"]))
 
-        payload = hierarchy_items(data.get("Payload") or [])
+        return hierarchy_items(data.get("Payload") or [])
+
+    def absorb(parent_id, payload):
         contains_full_tree = (
             any(
                 hierarchy_value(item, "ParentId", "IdParent") not in (None, parent_id)
@@ -654,6 +683,31 @@ def load_agents(force=False):
             discovery_order.append(agent_id)
             if len(visited) < 500:
                 pending.append(agent_id)
+
+    # AccessHigh returns one expanded hierarchy node at a time. Walk every agent
+    # node so accounts nested under intermediary agents are also available.
+    # A level is requested concurrently because the walk is pure network wait,
+    # and the replies are absorbed in queue order so the tree comes out
+    # identical to the one a node-at-a-time walk builds.
+    with ThreadPoolExecutor(max_workers=hierarchy_worker_count) as pool:
+        while pending:
+            level = pending
+            pending = []
+            # Worker threads start with an empty context, so every task carries
+            # its own copy of this request's authentication. One context cannot
+            # be entered twice, hence a separate copy per task.
+            replies = [
+                pool.submit(copy_context().run, expand_node, node_id)
+                for node_id in level
+            ]
+            try:
+                payloads = [reply.result() for reply in replies]
+            except BaseException:
+                for reply in replies:
+                    reply.cancel()
+                raise
+            for parent_id, payload in zip(level, payloads):
+                absorb(parent_id, payload)
 
     for agent_id, count in player_counts.items():
         if agent_id in agents_by_id:
@@ -740,7 +794,89 @@ def load_agents(force=False):
 
     append_tree(logged_in_agent_id, 0)
 
+    return agents
+
+
+def read_agent_tree_cache(agent_id):
+    try:
+        with database_session() as db:
+            stored = db.get(AgentTreeCache, int(agent_id))
+            if stored is None:
+                return None
+            agents = json.loads(stored.tree_json)
+            updated_at = stored.updated_at
+    except Exception:
+        logger.warning("Stored agent hierarchy is unreadable", exc_info=True)
+        return None
+    if not isinstance(agents, list) or not agents:
+        return None
+    return agents, updated_at
+
+
+def write_agent_tree_cache(agent_id, agents):
+    try:
+        with database_session() as db:
+            stored = db.get(AgentTreeCache, int(agent_id))
+            if stored is None:
+                stored = AgentTreeCache(accesshigh_agent_id=int(agent_id))
+                db.add(stored)
+            stored.tree_json = json.dumps(agents)
+            stored.agent_count = len(agents)
+            stored.updated_at = utc_now_naive()
+            db.commit()
+    except Exception:
+        # A hierarchy that cannot be stored only costs the next login the walk.
+        logger.warning("Storing the agent hierarchy failed", exc_info=True)
+
+
+def refresh_agent_tree_in_background(auth):
+    agent_id = int(auth["id"])
+    with agent_refresh_guard:
+        if agent_id in agent_refresh_in_flight:
+            return
+        agent_refresh_in_flight.add(agent_id)
+
+    def refresh():
+        # A new thread starts with an empty context, so the walk needs this
+        # login installed before it can reach AccessHigh.
+        current_auth.set(auth)
+        try:
+            agents = build_agent_tree(auth)
+            auth["agents"] = agents
+            write_agent_tree_cache(agent_id, agents)
+        except Exception:
+            # The stored hierarchy stays in service; the next request that
+            # finds it stale starts another refresh.
+            logger.warning(
+                "Background agent hierarchy refresh failed", exc_info=True
+            )
+        finally:
+            with agent_refresh_guard:
+                agent_refresh_in_flight.discard(agent_id)
+
+    threading.Thread(
+        target=refresh, name=f"agent-refresh-{agent_id}", daemon=True
+    ).start()
+
+
+def load_agents(force=False):
+    auth = auth_context()
+    if auth["agents"] is not None and not force:
+        return auth["agents"]
+    if not force:
+        stored = read_agent_tree_cache(auth["id"])
+        if stored is not None:
+            agents, updated_at = stored
+            auth["agents"] = agents
+            # The stored hierarchy is served immediately. Once it ages past the
+            # TTL it is rebuilt behind this request, so only the first ever
+            # login for an account waits for the upstream walk.
+            if utc_now_naive() - updated_at > agent_tree_ttl:
+                refresh_agent_tree_in_background(auth)
+            return agents
+    agents = build_agent_tree(auth)
     auth["agents"] = agents
+    write_agent_tree_cache(auth["id"], agents)
     return agents
 
 
@@ -2430,10 +2566,14 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     {
                         "parentId": auth["id"],
                         "parentName": auth["username"],
-                        # Reuse the hierarchy after its first dashboard load.
-                        # Authentication itself intentionally does not wait for
-                        # this potentially expensive AcesHigh tree walk.
-                        "agents": load_agents(),
+                        # Served from this login, then from the stored tree,
+                        # and only walked upstream when neither is available.
+                        # Authentication itself never waits for that walk.
+                        # ?refresh=1 forces a rebuild for a hierarchy that
+                        # changed and has to be picked up right now.
+                        "agents": load_agents(
+                            force=query.get("refresh", ["0"])[0] == "1"
+                        ),
                         "preferences": user_preferences(auth),
                     },
                 )
