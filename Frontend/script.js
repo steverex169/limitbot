@@ -2031,6 +2031,49 @@ function applyFilters() {
   renderRows();
 }
 
+function describeSchedulePeriod(schedule) {
+  const periodNumber = Number(schedule.periodNumber || 0);
+  return periodNumber ? `Period ${periodNumber}` : "Full game";
+}
+
+function describeScheduleLastRun(schedule) {
+  if (!schedule.lastRunAtUtc && !schedule.lastRunAt) {
+    return "Not run yet";
+  }
+  const when = formatEasternDateTime(
+    schedule.lastRunAtUtc || schedule.lastRunAt
+  );
+  return schedule.lastRunStatus
+    ? `${schedule.lastRunStatus} · ${when}`
+    : when;
+}
+
+function describeScheduleDetail(schedule) {
+  if (schedule.error) {
+    return schedule.error;
+  }
+  if (schedule.completedAt) {
+    return `Completed ${schedule.completedAt}`;
+  }
+  return "";
+}
+
+/*
+ * Status carries a colour so a failed run is visible at a glance rather than
+ * being one lowercase word among twelve columns.
+ */
+function createStatusCell(status) {
+  const cell = document.createElement("td");
+  const badge = document.createElement("span");
+  const value = String(status || "").toLowerCase();
+  badge.className = `schedule-status schedule-status-${value || "unknown"}`;
+  badge.textContent = value
+    ? value.charAt(0).toUpperCase() + value.slice(1)
+    : "—";
+  cell.append(badge);
+  return cell;
+}
+
 function renderSchedules() {
   elements.scheduleRows.replaceChildren();
 
@@ -2055,7 +2098,7 @@ function renderSchedules() {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
 
-    cell.colSpan = 8;
+    cell.colSpan = 13;
     cell.className = "empty-state";
     cell.textContent =
       statusFilter === "cancelled"
@@ -2072,6 +2115,11 @@ function renderSchedules() {
 
     row.append(
       createTextCell(
+        formatEasternDateTime(
+          schedule.createdAtUtc || schedule.createdAt
+        )
+      ),
+      createTextCell(
         schedule.agentName ||
         state.agents.find(
           (agent) =>
@@ -2085,22 +2133,25 @@ function renderSchedules() {
         schedule.leagueName ||
         `League ${schedule.idLeague}`
       ),
+      createTextCell(describeSchedulePeriod(schedule)),
       createTextCell(
-        `${fieldLabels[schedule.field] ||
-        schedule.field
-        }${schedule.limitMode === "early" ? " (Early)" : ""}: ${Number(
-          schedule.value
-        ).toLocaleString()}`
+        `${fieldLabels[schedule.field] || schedule.field}${schedule.limitMode === "early" ? " (Early)" : ""}`
       ),
-      createTextCell(schedule.recurrence),
+      createTextCell(Number(schedule.value).toLocaleString()),
+      createTextCell(schedule.recurrence || "One time"),
       createTextCell(
         formatEasternDateTime(
           schedule.scheduledForUtc ||
           schedule.scheduledFor
         )
       ),
-      createTextCell(schedule.status)
+      createTextCell(describeScheduleLastRun(schedule)),
+      createStatusCell(schedule.status)
     );
+
+    // The failure reason and the completion time are recorded on every job
+    // and were never shown, which is what made a failed run unexplainable.
+    row.append(createTextCell(describeScheduleDetail(schedule)));
 
     const action =
       document.createElement("td");
@@ -3210,6 +3261,7 @@ async function savePendingBatch() {
 
   try {
     const savedSummaries = [];
+    const failedSummaries = [];
 
     for (const item of batch) {
       const limitMode =
@@ -3218,52 +3270,64 @@ async function savePendingBatch() {
         item.field,
         limitMode
       );
-      const response = await fetch(
-        "/api/limits",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-          body: JSON.stringify({
-            accountId:
-              item.row.accountId,
-            idOrganization:
-              item.row.idOrganization,
-            idLeague:
-              item.row.idLeague,
-            idSportType:
-              item.row.idSportType,
-            periodNumber:
-              item.row.periodNumber ||
-              0,
-            field: item.field,
-            value: item.newValue,
-            limitMode,
-          }),
+
+      /*
+       * Each field is saved on its own request. A field AcesHigh rejects
+       * must not abandon the fields queued behind it, otherwise saving
+       * Spread, Money Line and Total together can persist only the first.
+       */
+      try {
+        const response = await fetch(
+          "/api/limits",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              accountId:
+                item.row.accountId,
+              idOrganization:
+                item.row.idOrganization,
+              idLeague:
+                item.row.idLeague,
+              idSportType:
+                item.row.idSportType,
+              periodNumber:
+                item.row.periodNumber ||
+                0,
+              field: item.field,
+              value: item.newValue,
+              limitMode,
+            }),
+          }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            data.error ||
+            "The limit could not be updated"
+          );
         }
-      );
 
-      const data = await response.json();
+        const savedValue = item.newValue;
+        const savedRow = item.row;
+        applySavedValueToRows(savedRow, savedField, savedValue);
+        setInputValueForChange(item, savedValue);
 
-      if (!response.ok) {
-        throw new Error(
-          data.error ||
-          "The limit could not be updated"
+        leagueDataVersion += 1;
+        removePendingChange(item);
+        savedSummaries.push(
+          `${fieldLabels[item.field] || item.field}`
+        );
+      } catch (error) {
+        failedSummaries.push(
+          `${fieldLabels[item.field] || item.field} (${error.message})`
         );
       }
-
-      const savedValue = item.newValue;
-      const savedRow = item.row;
-      applySavedValueToRows(savedRow, savedField, savedValue);
-      setInputValueForChange(item, savedValue);
-
-      leagueDataVersion += 1;
-      removePendingChange(item);
-      savedSummaries.push(
-        `${item.row.leagueName}: ${item.newValue.toLocaleString()}`
-      );
     }
 
     state.activeChange = null;
@@ -3271,10 +3335,17 @@ async function savePendingBatch() {
     elements.dialog.close();
     applyFilters();
 
-    showMessage(
-      `${savedSummaries.length} pending changes saved successfully.`,
-      "success"
-    );
+    if (failedSummaries.length) {
+      showMessage(
+        `Saved ${savedSummaries.join(", ") || "nothing"}. Failed: ${failedSummaries.join("; ")}.`,
+        "error"
+      );
+    } else {
+      showMessage(
+        `Saved ${savedSummaries.length} change${savedSummaries.length === 1 ? "" : "s"}: ${savedSummaries.join(", ")}.`,
+        "success"
+      );
+    }
   } catch (error) {
     elements.dialog.close();
     showMessage(
@@ -3325,7 +3396,7 @@ async function scheduleActiveChange() {
 
   const oneTimeSchedule = recurrenceDays.length === 0;
 
-  if (!oneTimeSchedule && !customerSupportAgent) {
+  if (!customerSupportAgent) {
     showDialogMessage("Enter the Customer Support Agent name.");
     return;
   }
@@ -3348,40 +3419,60 @@ async function scheduleActiveChange() {
     const scheduledSummaries = [];
     let firstScheduled = null;
 
+    const failedSummaries = [];
+
     for (const item of batch) {
       const limitMode = item.mode === "early" ? "early" : "normal";
-      const response = await fetch("/api/schedules", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          accountId: item.row.accountId,
-          idOrganization: item.row.idOrganization,
-          idLeague: item.row.idLeague,
-          idSportType: item.row.idSportType,
-          periodNumber: item.row.periodNumber || 0,
-          field: item.field,
-          value: item.newValue,
-          limitMode,
-          recurrenceDays,
-          recurrenceTime: selectedTime,
-          customerSupportAgent,
-          oneTimeSchedule,
-        }),
-      });
 
-      const data = await response.json();
+      /*
+       * One schedule per field. A field the backend rejects must not stop
+       * the fields queued behind it from being scheduled at all.
+       */
+      try {
+        const response = await fetch("/api/schedules", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            accountId: item.row.accountId,
+            idOrganization: item.row.idOrganization,
+            idLeague: item.row.idLeague,
+            idSportType: item.row.idSportType,
+            periodNumber: item.row.periodNumber || 0,
+            field: item.field,
+            value: item.newValue,
+            limitMode,
+            recurrenceDays,
+            recurrenceTime: selectedTime,
+            customerSupportAgent,
+            oneTimeSchedule,
+          }),
+        });
 
-      if (!response.ok) {
-        throw new Error(data.error || "The limit could not be scheduled");
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || "The limit could not be scheduled");
+        }
+
+        removePendingChange(item);
+        scheduledSummaries.push(`${item.row.leagueName}: ${fieldLabels[item.field]}`);
+        if (!firstScheduled) {
+          firstScheduled = { item, data };
+        }
+      } catch (error) {
+        failedSummaries.push(
+          `${fieldLabels[item.field] || item.field} (${error.message})`
+        );
       }
+    }
 
-      removePendingChange(item);
-      scheduledSummaries.push(`${item.row.leagueName}: ${fieldLabels[item.field]}`);
-      if (!firstScheduled) {
-        firstScheduled = { item, data };
-      }
+    if (failedSummaries.length) {
+      showMessage(
+        `Scheduled ${scheduledSummaries.length} of ${batch.length}. Failed: ${failedSummaries.join("; ")}.`,
+        "error"
+      );
     }
 
     state.activeChange = null;

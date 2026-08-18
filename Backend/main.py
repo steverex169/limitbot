@@ -50,13 +50,13 @@ data_lock = threading.Lock()
 hierarchy_worker_count = max(
     1, min(32, int(os.getenv("HIERARCHY_WORKERS", "4")))
 )
-hierarchy_retry_limit = max(
+rate_limit_retry_limit = max(
     1, min(20, int(os.getenv("HIERARCHY_RETRIES", "8")))
 )
 
 
-def hierarchy_retry_delay(response, attempt):
-    """How long to wait before retrying a rate-limited hierarchy request."""
+def rate_limit_retry_delay(response, attempt):
+    """How long to wait before retrying a rate-limited AccessHigh request."""
     try:
         delay = float(response.headers.get("Retry-After", "").strip())
     except ValueError:
@@ -665,14 +665,14 @@ def build_agent_tree(auth):
 
     def note_rate_limit(response, attempt):
         nonlocal rate_limited_until
-        delay = hierarchy_retry_delay(response, attempt)
+        delay = rate_limit_retry_delay(response, attempt)
         with rate_limit_guard:
             rate_limited_until = max(
                 rate_limited_until, time.monotonic() + delay
             )
 
     def expand_node(parent_id):
-        for attempt in range(hierarchy_retry_limit):
+        for attempt in range(rate_limit_retry_limit):
             hold_off_while_rate_limited()
             response = api_request(
                 "GET",
@@ -686,7 +686,7 @@ def build_agent_tree(auth):
             if response.status_code != 429:
                 break
             note_rate_limit(response, attempt)
-            if attempt == hierarchy_retry_limit - 1:
+            if attempt == rate_limit_retry_limit - 1:
                 logger.warning(
                     "AccessHigh kept rate limiting hierarchy node %s", parent_id
                 )
@@ -1668,12 +1668,26 @@ def save_single_limit(
         "IdLeague": 0,
     }
 
-    save_response = api_request(
-        "POST",
-        "https://aceshigh.ag/partner-api/partner/Backbone/save/",
-        json=payload,
-        timeout=30,
-    )
+    # Saving several fields on one row fires several of these back to back,
+    # which is exactly the pattern AccessHigh rate limits. A throttled save
+    # waits and retries rather than dropping the operator's change.
+    for attempt in range(rate_limit_retry_limit):
+        save_response = api_request(
+            "POST",
+            "https://aceshigh.ag/partner-api/partner/Backbone/save/",
+            json=payload,
+            timeout=30,
+        )
+        if save_response.status_code != 429:
+            break
+        if attempt == rate_limit_retry_limit - 1:
+            logger.warning(
+                "AccessHigh kept rate limiting the save of %s for account %s",
+                api_field,
+                account_id,
+            )
+            break
+        time.sleep(rate_limit_retry_delay(save_response, attempt))
     save_response.raise_for_status()
     save_data = save_response.json()
 
@@ -1976,7 +1990,7 @@ def create_schedule(request_data):
         raise ValueError("Limit must be between 0 and 1,000,000,000")
     if not recurrence_time:
         raise ValueError("Select an Eastern time")
-    if recurrence_days and not customer_support_agent:
+    if not customer_support_agent:
         raise ValueError("Enter the Customer Support Agent name")
     if len(customer_support_agent) > 100:
         raise ValueError("Customer Support Agent name must be 100 characters or fewer")
@@ -2279,7 +2293,7 @@ def schedule_status_rows(account_id):
     with database_session() as db:
         jobs = list(
             db.scalars(
-                schedule_query.order_by(ScheduledLimit.created_at)
+                schedule_query.order_by(ScheduledLimit.created_at.desc())
             )
         )
 
@@ -2408,6 +2422,22 @@ def schedule_status_rows(account_id):
             if job.last_run_at
             else None
         ),
+        "createdAt": job.created_at.replace(
+            tzinfo=timezone.utc
+        ).astimezone(schedule_timezone).strftime("%Y-%m-%d %I:%M %p %Z"),
+        "createdAtUtc": job.created_at.replace(
+            tzinfo=timezone.utc
+        ).isoformat(),
+        "completedAt": (
+            job.completed_at.replace(tzinfo=timezone.utc)
+            .astimezone(schedule_timezone)
+            .strftime("%Y-%m-%d %I:%M %p %Z")
+            if job.completed_at
+            else None
+        ),
+        # The reason a run failed is the single most useful thing the log can
+        # show, and it was being stored and then never surfaced.
+        "error": job.error,
     } for job in jobs]
 
 
