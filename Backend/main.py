@@ -1411,10 +1411,20 @@ def get_leagues(account_id, force=False):
 
 
 def display_limit_value(row, field):
-    amount_max = row.get(f"{field}.AmountMax")
-    if amount_max not in (None, ""):
-        return amount_max
-    return row.get(f"{field}.Amount")
+    """The number AccessHigh itself shows and writes for this limit.
+
+    Its own grid binds the input to `.Amount`
+    (ng-model="getAmountOrEarly(node[...]).Amount") and its save payload is
+    built from `.Amount` too. Preferring `.AmountMax` made this dashboard
+    disagree with AccessHigh on every row where the two differ, and made the
+    skip check compare against a number AccessHigh never displays.
+    `.AmountMax` remains only as a fallback for a row that carries no
+    `.Amount` at all.
+    """
+    amount = row.get(f"{field}.Amount")
+    if amount not in (None, ""):
+        return amount
+    return row.get(f"{field}.AmountMax")
 
 
 def display_early_limit_value(row, field):
