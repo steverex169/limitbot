@@ -51,6 +51,13 @@ data_lock = threading.Lock()
 hierarchy_worker_count = max(
     1, min(32, int(os.getenv("HIERARCHY_WORKERS", "4")))
 )
+# A blue limit carries this account's own value rather than an inherited one.
+# Writing any limit creates that override - AccessHigh's own UI does the same -
+# so refusing to touch blue outright would lock the bot out of every limit it
+# has ever set. Set SKIP_BLUE=off to write blue limits regardless of origin.
+skip_blue_limits = os.getenv("SKIP_BLUE", "on").strip().lower() not in {
+    "off", "false", "0", "no"
+}
 rate_limit_retry_limit = max(
     1, min(20, int(os.getenv("HIERARCHY_RETRIES", "8")))
 )
@@ -1525,6 +1532,35 @@ def limit_change_counts(account_id):
     return counts
 
 
+def limit_set_by_us(account_id, organization_id, league_id,
+                    sport_type_id, period_number, field, limit_mode):
+    """Has this bot written this exact limit before?
+
+    Distinguishes a blue limit the bot created - which it may update - from
+    one a person set deliberately, which it must leave alone. Unknown on a
+    read failure, and an unknown limit is treated as not ours, so the
+    cautious answer is the default.
+    """
+    try:
+        with database_session() as db:
+            return db.scalar(
+                select(func.count())
+                .select_from(LimitChange)
+                .where(
+                    LimitChange.account_id == int(account_id),
+                    LimitChange.organization_id == safe_int(organization_id),
+                    LimitChange.league_id == safe_int(league_id),
+                    LimitChange.sport_type_id == safe_int(sport_type_id),
+                    LimitChange.period_number == safe_int(period_number),
+                    LimitChange.field == field,
+                    LimitChange.limit_mode == limit_mode,
+                )
+            ) > 0
+    except Exception:
+        logger.warning("Could not check the limit change log", exc_info=True)
+        return False
+
+
 def limit_colour(row, field, is_early):
     """The colour AccessHigh paints this limit, from its own rules.
 
@@ -1857,10 +1893,19 @@ def save_single_limit(
         # A blue limit carries a player-level override. Writing over it would
         # silently discard that override, so leave it alone unless the caller
         # has explicitly asked to.
-        if skip_blue and limit_colour(matching_row, field, is_early) == "blue":
-            note = "Skipped, limit is blue (player override)"
+        limit_mode = "early" if is_early else "normal"
+        if (
+            skip_blue
+            and skip_blue_limits
+            and limit_colour(matching_row, field, is_early) == "blue"
+            and not limit_set_by_us(
+                account_id, org_id, league_id, sport_id,
+                period_number, field, limit_mode,
+            )
+        ):
+            note = "Skipped, this limit was set outside the bot"
             logger.info(
-                "Skipped %s for account %s: blue (player override)",
+                "Skipped %s for account %s: blue and not set by us",
                 api_field,
                 account_id,
             )

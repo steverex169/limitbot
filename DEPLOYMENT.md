@@ -47,6 +47,11 @@ the Aces High credentials used solely to renew expired automation tokens.
   immediately and refreshed in the background, so only an account's very first
   login ever waits for the walk. Set it lower where agents are added often.
 
+- `SKIP_BLUE`: whether to refuse to overwrite a blue limit that the bot did
+  not set. Defaults to `on`; set `off` to write every limit regardless. Blue
+  means the account holds its own value rather than inheriting one, and any
+  write creates that state - AccessHigh's own screen behaves identically - so
+  the guard only protects limits with no entry in `limit_changes`.
 - `LOG_FILE`: path to write logs to as well as stdout, e.g.
   `/app/logs/limitbot.log`. Container logs are destroyed with the container,
   so without this a redeploy erases the record of why a scheduled limit
