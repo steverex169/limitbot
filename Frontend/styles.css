@@ -520,7 +520,7 @@ main {
 
 /* Created, Agent, Customer Support Agent, League, Period, Limit, Value,
    Repeats, Next run, Last run, Status, Detail, Action. */
-.schedules-table th:nth-child(1) { width: 8%; }
+.schedules-table th:nth-child(1) { width: 9%; }
 .schedules-table th:nth-child(2) { width: 7%; }
 .schedules-table th:nth-child(3) { width: 8%; }
 .schedules-table th:nth-child(4) { width: 10%; }
@@ -528,18 +528,25 @@ main {
 .schedules-table th:nth-child(6) { width: 7%; }
 .schedules-table th:nth-child(7) { width: 5%; }
 .schedules-table th:nth-child(8) { width: 9%; }
-.schedules-table th:nth-child(9) { width: 8%; }
+.schedules-table th:nth-child(9) { width: 9%; }
 .schedules-table th:nth-child(10) { width: 9%; }
-.schedules-table th:nth-child(11) { width: 6%; }
-.schedules-table th:nth-child(12) { width: 12%; }
-.schedules-table th:nth-child(13) { width: 6%; }
+.schedules-table th:nth-child(11) { width: 7%; }
+.schedules-table th:nth-child(12) { width: 10%; }
+.schedules-table th:nth-child(13) { width: 5%; }
 
-.schedules-table td:nth-child(1),
-.schedules-table td:nth-child(5),
+/* Under table-layout: fixed a cell that cannot wrap prints straight over its
+   neighbour, so only genuinely short values are allowed to stay on one line.
+   Timestamps wrap at the space between date and time. */
 .schedules-table td:nth-child(7),
 .schedules-table td:nth-child(11),
 .schedules-table td:nth-child(13) {
   white-space: nowrap;
+}
+
+/* Nothing may bleed into the next column even if a value outgrows its width. */
+.schedules-table td,
+.schedules-table th {
+  overflow: hidden;
 }
 
 /* Limits line up when the digits share a width. */
