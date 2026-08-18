@@ -26,7 +26,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import case, delete, func, inspect, select, text, update
 from urllib.parse import urlparse, parse_qs
 from database import Base, database_session, engine
-from model import AgentTreeCache, LoginSession, ScheduledLimit, User
+from model import AgentTreeCache, LimitChange, LoginSession, ScheduledLimit, User
 from odds_comparison import (
     ComparisonError,
     build_league_comparison,
@@ -1426,6 +1426,83 @@ def display_early_limit_value(row, field):
         return amount_max
     return row.get(field)
 
+# Set for the duration of a scheduled run so a change can be attributed to the
+# job that made it rather than looking like someone typed it.
+current_change_source = ContextVar("current_change_source", default=None)
+
+
+def record_limit_change(
+    account_id, organization_id, league_id, sport_type_id,
+    period_number, field, limit_mode, old_value, new_value,
+):
+    """Log a limit that actually changed. Never let logging break the save."""
+    try:
+        source, schedule_id = current_change_source.get() or ("manual", None)
+        auth = current_auth.get() or {}
+        with database_session() as db:
+            db.add(LimitChange(
+                user_id=auth.get("userId"),
+                account_id=int(account_id),
+                organization_id=safe_int(organization_id),
+                league_id=safe_int(league_id),
+                sport_type_id=safe_int(sport_type_id),
+                period_number=safe_int(period_number),
+                field=field,
+                limit_mode=limit_mode,
+                old_value=None if old_value in (None, "") else safe_int(old_value),
+                new_value=int(new_value),
+                source=source,
+                schedule_id=schedule_id,
+            ))
+            db.commit()
+    except Exception:
+        logger.warning("Could not record the limit change", exc_info=True)
+
+
+def limit_change_counts(account_id):
+    """How many times each limit on this account has changed, and when last.
+
+    One grouped query for the whole account rather than a query per row.
+    """
+    counts = {}
+    try:
+        with database_session() as db:
+            rows = db.execute(
+                select(
+                    LimitChange.organization_id,
+                    LimitChange.league_id,
+                    LimitChange.sport_type_id,
+                    LimitChange.period_number,
+                    LimitChange.field,
+                    LimitChange.limit_mode,
+                    func.count().label("cycles"),
+                    func.max(LimitChange.changed_at).label("last_changed"),
+                )
+                .where(LimitChange.account_id == int(account_id))
+                .group_by(
+                    LimitChange.organization_id,
+                    LimitChange.league_id,
+                    LimitChange.sport_type_id,
+                    LimitChange.period_number,
+                    LimitChange.field,
+                    LimitChange.limit_mode,
+                )
+            )
+            for row in rows:
+                key = (
+                    safe_int(row.organization_id),
+                    safe_int(row.league_id),
+                    safe_int(row.sport_type_id),
+                    safe_int(row.period_number),
+                    row.field,
+                    row.limit_mode,
+                )
+                counts[key] = (row.cycles, row.last_changed)
+    except Exception:
+        logger.warning("Could not read limit change counts", exc_info=True)
+    return counts
+
+
 def limit_colour(row, field, is_early):
     """The colour AccessHigh paints this limit, from its own rules.
 
@@ -1464,6 +1541,7 @@ def stored_limit_value(row, field, is_early):
 
 def dashboard_rows(account_id, force=False):
     rows = []
+    cycles = limit_change_counts(account_id)
     for row in get_leagues(account_id, force=force):
         is_exotic = ".Exotics[" in row.get("JsonPath", "")
         is_game_setup = row.get("PeriodTypes.GameSetup") is True
@@ -1522,6 +1600,29 @@ def dashboard_rows(account_id, force=False):
                 },
                 "earlyColours": {
                     name: limit_colour(row, name, True)
+                    for name in allowed_limit_fields
+                },
+                # How many times each limit has actually been changed.
+                "cycles": {
+                    name: cycles.get((
+                        safe_int(row["IdOrganization"]),
+                        safe_int(row["IdLeague"]),
+                        safe_int(row["IdSportType"]),
+                        safe_int(row.get("PeriodNumber", 0)),
+                        name,
+                        "normal",
+                    ), (0, None))[0]
+                    for name in allowed_limit_fields
+                },
+                "earlyCycles": {
+                    name: cycles.get((
+                        safe_int(row["IdOrganization"]),
+                        safe_int(row["IdLeague"]),
+                        safe_int(row["IdSportType"]),
+                        safe_int(row.get("PeriodNumber", 0)),
+                        name,
+                        "early",
+                    ), (0, None))[0]
                     for name in allowed_limit_fields
                 },
                 "spread": display_limit_value(row, "Spread"),
@@ -1710,6 +1811,7 @@ def save_single_limit(
     skip_blue=True,
 ):
     """Helper function to save a single limit change"""
+    previous_value = None
     matching_row = find_limit_row(
         account_id, organization_id, league_id, sport_type_id, period_number
     )
@@ -1758,6 +1860,7 @@ def save_single_limit(
         current_value = stored_limit_value(
             matching_row, field, is_early
         )
+        previous_value = current_value
         if current_value not in (None, "") and safe_int(current_value, -1) == new_value:
             note = f"No change needed, already {new_value:,}"
             logger.info(
@@ -1860,6 +1963,19 @@ def save_single_limit(
     if updated_row:
         updated_row[f"{api_field}.Amount"] = new_value
         updated_row[f"{api_field}.AmountMax"] = new_value
+
+    # The write succeeded, so this counts as a cycle. Skips never reach here.
+    record_limit_change(
+        account_id,
+        org_id,
+        league_id,
+        sport_id,
+        period_number,
+        field,
+        "early" if api_field.startswith("Early") else "normal",
+        previous_value,
+        new_value,
+    )
 
     if return_full:
         telegram_message = build_limit_success_message(
@@ -2385,6 +2501,7 @@ def execute_scheduled_job(job_id):
         # are not rediscoverable from a fresh worker auth, so trust the job.
         auth["searchableAgentIds"] = {job.account_id}
         current_auth.set(auth)
+        current_change_source.set(("schedule", job_id))
         request_data = {
             "accountId": job.account_id,
             "idOrganization": job.organization_id,
@@ -2437,6 +2554,7 @@ def execute_scheduled_job(job_id):
         record_job_result(job_id, error=error)
     finally:
         current_auth.set(None)
+        current_change_source.set(None)
         if auth is not None:
             try:
                 auth["http"].close()

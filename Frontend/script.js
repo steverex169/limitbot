@@ -1662,6 +1662,23 @@ function createLimitCell(row, field) {
   });
 
   cell.append(input);
+
+  /*
+   * How many times this limit has actually been changed. Sits with the value
+   * rather than in its own column, so the table does not grow by four.
+   */
+  const cycles = Number(
+    (limitMode === "early" ? row.earlyCycles : row.cycles)?.[field] || 0
+  );
+
+  if (cycles > 0) {
+    const badge = document.createElement("span");
+    badge.className = "cycle-count";
+    badge.textContent = cycles;
+    badge.title = `Changed ${cycles} time${cycles === 1 ? "" : "s"}`;
+    cell.append(badge);
+  }
+
   return cell;
 }
 

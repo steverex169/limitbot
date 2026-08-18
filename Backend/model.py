@@ -70,6 +70,38 @@ class LoginSession(Base):
     user: Mapped[User] = relationship(back_populates="sessions")
 
 
+class LimitChange(Base):
+    """One row per limit that actually changed.
+
+    A log rather than a counter: it answers how many times a limit has cycled,
+    but also when, from what, to what, and whether a person or a schedule did
+    it. Skipped saves are deliberately not recorded, so the count reflects
+    real changes rather than attempts.
+    """
+
+    __tablename__ = "limit_changes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True, nullable=True
+    )
+    account_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    organization_id: Mapped[int] = mapped_column(BigInteger)
+    league_id: Mapped[int] = mapped_column(BigInteger)
+    sport_type_id: Mapped[int] = mapped_column(BigInteger)
+    period_number: Mapped[int] = mapped_column(Integer, default=0)
+    field: Mapped[str] = mapped_column(String(20))
+    limit_mode: Mapped[str] = mapped_column(String(10), default="normal")
+    old_value: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    new_value: Mapped[int] = mapped_column(BigInteger)
+    # "manual" or "schedule", so a hand edit is distinguishable from automation.
+    source: Mapped[str] = mapped_column(String(20), default="manual")
+    schedule_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
+
+
 class ScheduledLimit(Base):
     __tablename__ = "scheduled_limits"
 

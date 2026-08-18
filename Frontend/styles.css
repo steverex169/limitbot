@@ -633,6 +633,21 @@ main {
   color: var(--muted);
 }
 
+/* Change count, sized to sit beside a limit without competing with it. */
+.cycle-count {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--canvas);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  vertical-align: middle;
+}
+
 .danger-button {
   align-self: end;
   min-height: 38px;
