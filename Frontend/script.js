@@ -3152,8 +3152,12 @@ async function refreshScheduleStatuses() {
     showScheduleStatus(
       finishedSchedule.lastRunStatus ||
       finishedSchedule.status,
+      // The schedule carries its own league name; the row lookup only finds
+      // one when that league happens to be loaded, which is why this popup
+      // used to say "this league".
+      finishedSchedule.leagueName ||
       row?.leagueName ||
-      "this league",
+      `League ${finishedSchedule.idLeague}`,
       finishedSchedule.value,
       formatEasternDateTime(
         finishedSchedule.lastRunAtUtc ||
@@ -3355,15 +3359,21 @@ async function saveActiveChange() {
 
     applyFilters();
 
-    showMessage(
-      skipped
-        ? `Not changed. ${data.message}.`
-        : `${data.message}. New value: ${data.value.toLocaleString()}.`,
-      skipped ? "error" : "success"
-    );
+    const where = `${change.row.leagueName || "League"} · ${fieldLabels[change.field] || change.field}${change.mode === "early" ? " (Early)" : ""}`;
+    const previous =
+      change.oldValue == null ? "not set" : Number(change.oldValue).toLocaleString();
+    const outcome = skipped
+      ? `${where} was NOT changed. ${data.note || data.message}. It stays at ${previous}.`
+      : `${where} changed from ${previous} to ${Number(change.newValue).toLocaleString()}.`;
 
-    // Re-read from AcesHigh so the grid shows its values, not ours.
-    loadLeagues(false).catch(() => { });
+    /*
+     * loadLeagues clears the message bar as it starts, so the outcome has to
+     * be written after the re-read settles. Showing it first meant a skipped
+     * save reported nothing at all.
+     */
+    loadLeagues(false)
+      .catch(() => { })
+      .finally(() => showMessage(outcome, skipped ? "error" : "success"));
   } catch (error) {
     elements.dialog.close();
 
@@ -3481,30 +3491,32 @@ async function savePendingBatch() {
     elements.dialog.close();
     applyFilters();
 
-    // One re-read for the whole batch, so the grid shows AcesHigh's values
-    // rather than the ones we optimistically painted.
-    loadLeagues(false).catch(() => { });
-
+    const league = batch[0]?.row?.leagueName || "League";
     const skippedText = skippedSummaries.length
-      ? ` Skipped: ${skippedSummaries.join(", ")}.`
+      ? ` NOT changed: ${skippedSummaries.join(", ")}.`
       : "";
 
+    let outcome;
+    let kind;
     if (failedSummaries.length) {
-      showMessage(
-        `Saved ${savedSummaries.join(", ") || "nothing"}. Failed: ${failedSummaries.join("; ")}.${skippedText}`,
-        "error"
-      );
+      outcome = `${league}: saved ${savedSummaries.join(", ") || "nothing"}. Failed: ${failedSummaries.join("; ")}.${skippedText}`;
+      kind = "error";
     } else if (!savedSummaries.length && skippedSummaries.length) {
-      showMessage(
-        `Nothing to change.${skippedText}`,
-        "success"
-      );
+      outcome = `${league}: nothing was changed.${skippedText}`;
+      kind = "error";
     } else {
-      showMessage(
-        `Saved ${savedSummaries.length} change${savedSummaries.length === 1 ? "" : "s"}: ${savedSummaries.join(", ")}.${skippedText}`,
-        "success"
-      );
+      outcome = `${league}: changed ${savedSummaries.join(", ")}.${skippedText}`;
+      kind = skippedSummaries.length ? "error" : "success";
     }
+
+    /*
+     * One re-read for the whole batch so the grid shows AcesHigh's values
+     * rather than the ones we painted, and the outcome is written after it
+     * because loadLeagues clears the message bar as it starts.
+     */
+    loadLeagues(false)
+      .catch(() => { })
+      .finally(() => showMessage(outcome, kind));
   } catch (error) {
     elements.dialog.close();
     showMessage(
