@@ -276,12 +276,61 @@ def build_limit_success_message(
         sport_type_id,
         period_number,
     )
-    league_name = (
-        row.get("leagueName")
-        or row.get("LeagueName")
-        or row.get("name")
-        or f"League {league_id}"
-    ) if row else f"League {league_id}"
+
+    # Use the selected agent's display name in Telegram notifications.
+    auth = current_auth.get() or {}
+    if int(account_id) == int(auth.get("id", -1)):
+        agent_name = auth.get("username") or f"Agent {account_id}"
+    else:
+        agent_name = next(
+            (
+                agent.get("name")
+                for agent in (auth.get("agents") or [])
+                if int(agent.get("id", -1)) == int(account_id)
+            ),
+            None,
+        )
+        if not agent_name:
+            try:
+                agent_name = next(
+                    (
+                        agent.get("name")
+                        for agent in load_agents()
+                        if int(agent.get("id", -1)) == int(account_id)
+                    ),
+                    None,
+                )
+            except Exception:
+                agent_name = None
+        agent_name = agent_name or f"Agent {account_id}"
+
+    # The dashboard already has the operator-facing league/period labels.
+    # Prefer those over the internal parent label such as "BIG SIX".
+    if row:
+        organization_label = (
+            row.get("organizationLabel")
+            or row.get("OrganizationLabel")
+            or row.get("OrganizationLabelParent")
+            or ""
+        )
+        period_description = (
+            row.get("periodDescription")
+            or row.get("PeriodDescription")
+            or ""
+        )
+        if organization_label and period_description:
+            league_name = f"{organization_label} -- {period_description}"
+        else:
+            league_name = (
+                organization_label
+                or row.get("leagueName")
+                or row.get("LeagueName")
+                or row.get("name")
+                or f"League {league_id}"
+            )
+    else:
+        league_name = f"League {league_id}"
+
     field_label = {
         "spread": "Spread",
         "moneyLine": "Money line",
@@ -290,7 +339,8 @@ def build_limit_success_message(
     }.get(field, field)
     return (
         f"Success: {change_type} saved on AcesHigh.ag\n"
-        f"{league_name}\n"
+        f"Agent: {agent_name}\n"
+        f"League: {league_name}\n"
         f"{field_label}: {new_value}\n"
         f"Applied successfully"
     )
