@@ -2254,7 +2254,64 @@ function renderSchedules() {
       }
     );
 
-    action.append(cancel);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "schedule-cancel";
+    remove.textContent = "Delete";
+    remove.disabled = schedule.status === "running";
+    remove.style.marginLeft = "6px";
+
+    remove.addEventListener("click", async () => {
+      const leagueName =
+        schedule.leagueName || `League ${schedule.idLeague}`;
+      const fieldLabel = fieldLabels[schedule.field] || schedule.field;
+
+      if (
+        !window.confirm(
+          `Delete this schedule for ${leagueName} (${fieldLabel})? This removes only this schedule and cannot be undone.`
+        )
+      ) {
+        return;
+      }
+
+      remove.disabled = true;
+      cancel.disabled = true;
+      remove.textContent = "Deleting...";
+
+      try {
+        const response = await fetch("/api/schedules/delete", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            id: schedule.id,
+            accountId: schedule.accountId,
+          }),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || "Could not delete schedule");
+        }
+
+        state.schedules = state.schedules.filter(
+          (item) => item.id !== schedule.id
+        );
+        renderSchedules();
+        renderRows();
+        showMessage(data.message, "success");
+      } catch (error) {
+        remove.disabled = schedule.status === "running";
+        cancel.disabled =
+          !["pending", "failed"].includes(schedule.status);
+        remove.textContent = "Delete";
+        showMessage(error.message, "error");
+      }
+    });
+
+    action.append(cancel, remove);
     row.append(action);
     elements.scheduleRows.append(row);
   }
@@ -4255,4 +4312,3 @@ setInterval(() => {
     () => { }
   );
 }, 5000);
-
