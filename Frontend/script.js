@@ -27,6 +27,8 @@ const state = {
   tradingLeague: "",
   tradingLoading: false,
   tradingRequest: 0,
+  telegramChats: [],
+  editingTelegramRecipientId: null,
   partnerName: "Aces High",
 };
 
@@ -105,11 +107,26 @@ const elements = {
   activityLogsLink: document.querySelector("#activityLogsLink"),
   pinnacleComparisonLink: document.querySelector("#pinnacleComparisonLink"),
   tradingMonitorLink: document.querySelector("#tradingMonitorLink"),
+  telegramAlertsLink: document.querySelector("#telegramAlertsLink"),
   dashboardSummary: document.querySelector("#dashboardSummary"),
   limitsPanel: document.querySelector("#limitsPanel"),
   activityLogsView: document.querySelector("#activityLogsView"),
   pinnacleComparisonView: document.querySelector("#pinnacleComparisonView"),
   tradingMonitorView: document.querySelector("#tradingMonitorView"),
+  telegramAlertsView: document.querySelector("#telegramAlertsView"),
+  telegramAlertsForm: document.querySelector("#telegramAlertsForm"),
+  telegramAlertsMessage: document.querySelector("#telegramAlertsMessage"),
+  telegramAlertName: document.querySelector("#telegramAlertName"),
+  telegramAlertChatId: document.querySelector("#telegramAlertChatId"),
+  telegramAlertAdd: document.querySelector("#telegramAlertAdd"),
+  telegramAlertRows: document.querySelector("#telegramAlertRows"),
+  telegramEditDialog: document.querySelector("#telegramEditDialog"),
+  telegramEditForm: document.querySelector("#telegramEditForm"),
+  telegramEditName: document.querySelector("#telegramEditName"),
+  telegramEditChatId: document.querySelector("#telegramEditChatId"),
+  telegramEditMessage: document.querySelector("#telegramEditMessage"),
+  telegramEditCancel: document.querySelector("#telegramEditCancel"),
+  telegramEditSave: document.querySelector("#telegramEditSave"),
   comparisonLeague: document.querySelector("#comparisonLeague"),
   comparisonRefresh: document.querySelector("#comparisonRefresh"),
   comparisonMessage: document.querySelector("#comparisonMessage"),
@@ -189,11 +206,20 @@ function isTradingMonitorRoute() {
   return normalizedPath === "/trading_monitor";
 }
 
+function isTelegramAlertsRoute() {
+  const normalizedPath =
+    window.location.pathname.replace(/\/+$/, "") || "/";
+
+  return normalizedPath === "/telegram_alerts";
+}
+
 function applyDashboardRoute() {
   const activityLogsActive = isActivityLogsRoute();
   const comparisonActive = isPinnacleComparisonRoute();
   const tradingActive = isTradingMonitorRoute();
-  const dashboardActive = !activityLogsActive && !comparisonActive && !tradingActive;
+  const telegramAlertsActive = isTelegramAlertsRoute();
+  const dashboardActive =
+    !activityLogsActive && !comparisonActive && !tradingActive && !telegramAlertsActive;
 
   if (!tradingActive && tradingRefreshTimer) {
     clearTimeout(tradingRefreshTimer);
@@ -221,6 +247,14 @@ function applyDashboardRoute() {
     elements.tradingMonitorView.setAttribute(
       "aria-hidden",
       String(!tradingActive)
+    );
+  }
+
+  if (elements.telegramAlertsView) {
+    elements.telegramAlertsView.hidden = !telegramAlertsActive;
+    elements.telegramAlertsView.setAttribute(
+      "aria-hidden",
+      String(!telegramAlertsActive)
     );
   }
 
@@ -287,6 +321,15 @@ function applyDashboardRoute() {
     }
   }
 
+  if (elements.telegramAlertsLink) {
+    elements.telegramAlertsLink.classList.toggle("active", telegramAlertsActive);
+    if (telegramAlertsActive) {
+      elements.telegramAlertsLink.setAttribute("aria-current", "page");
+    } else {
+      elements.telegramAlertsLink.removeAttribute("aria-current");
+    }
+  }
+
   if (activityLogsActive) {
     renderSchedules();
     if (state.selectedAgentId) {
@@ -307,12 +350,128 @@ function applyDashboardRoute() {
       .catch(() => { });
   }
 
+  if (telegramAlertsActive) {
+    loadTelegramChats().catch(() => { });
+  }
+
   if (dashboardActive && state.selectedAgentId && !state.rows.length) {
     loadLeagues().catch((error) => {
       showMessage(error.message, "error");
     });
   }
 }
+
+
+function showTelegramAlertsMessage(message, kind = "success") {
+  if (!elements.telegramAlertsMessage) {
+    return;
+  }
+  elements.telegramAlertsMessage.textContent = message;
+  elements.telegramAlertsMessage.className = `message ${kind}`;
+  elements.telegramAlertsMessage.hidden = !message;
+}
+
+function renderTelegramChats() {
+  if (!elements.telegramAlertRows) {
+    return;
+  }
+
+  elements.telegramAlertRows.replaceChildren();
+
+  if (!state.telegramChats.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 3;
+    cell.className = "empty-state";
+    cell.textContent = "No Telegram recipients added yet.";
+    row.append(cell);
+    elements.telegramAlertRows.append(row);
+    return;
+  }
+
+  state.telegramChats.forEach((recipient) => {
+    const row = document.createElement("tr");
+
+    const nameCell = document.createElement("td");
+    nameCell.textContent = recipient.name;
+
+    const chatCell = document.createElement("td");
+    chatCell.textContent = recipient.chatId;
+
+    const actionCell = document.createElement("td");
+    const actionWrap = document.createElement("div");
+    actionWrap.className = "telegram-action-buttons";
+
+    const editButton = document.createElement("button");
+    editButton.type = "button";
+    editButton.className = "telegram-edit-button";
+    editButton.textContent = "Edit";
+
+    editButton.addEventListener("click", () => {
+      state.editingTelegramRecipientId = recipient.id;
+      elements.telegramEditName.value = recipient.name;
+      elements.telegramEditChatId.value = recipient.chatId;
+      elements.telegramEditMessage.textContent = "";
+      elements.telegramEditMessage.hidden = true;
+      elements.telegramEditDialog.showModal();
+      elements.telegramEditName.focus();
+    });
+
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "danger-button telegram-delete-button";
+    deleteButton.textContent = "Delete";
+
+    deleteButton.addEventListener("click", async () => {
+      if (!window.confirm(`Delete Telegram recipient ${recipient.name}?`)) {
+        return;
+      }
+
+      deleteButton.disabled = true;
+      try {
+        const response = await fetch("/api/telegram-chats/delete", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({id: recipient.id}),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || "Could not delete Telegram recipient");
+        }
+
+        state.telegramChats = state.telegramChats.filter(
+          (item) => item.id !== recipient.id
+        );
+        renderTelegramChats();
+        showTelegramAlertsMessage("Telegram recipient deleted.", "success");
+      } catch (error) {
+        showTelegramAlertsMessage(error.message, "error");
+      } finally {
+        deleteButton.disabled = false;
+      }
+    });
+
+    actionWrap.append(editButton, deleteButton);
+    actionCell.append(actionWrap);
+    row.append(nameCell, chatCell, actionCell);
+    elements.telegramAlertRows.append(row);
+  });
+}
+
+
+async function loadTelegramChats() {
+  const response = await fetch("/api/telegram-chats", {cache: "no-store"});
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.error || "Could not load Telegram recipients");
+  }
+
+  state.telegramChats = Array.isArray(data.recipients) ? data.recipients : [];
+  renderTelegramChats();
+  return state.telegramChats;
+}
+
 
 function comparisonText(value, fallback = "—") {
   return value === null || value === undefined || value === ""
@@ -4126,6 +4285,8 @@ async function startDashboard(sessionData = null) {
       "error"
     );
   });
+
+  loadTelegramChats().catch(() => { });
 }
 
 elements.loginForm.addEventListener(
