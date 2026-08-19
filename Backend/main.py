@@ -2444,6 +2444,51 @@ def cancel_schedule(request_data):
     return {"message": "Recurring schedule cancelled", "id": schedule_id}
 
 
+def delete_schedule(request_data):
+    """Permanently remove one schedule from Activity Logs."""
+    auth = auth_context()
+    schedule_id = str(request_data.get("id", "")).strip()
+    if len(schedule_id) != 32:
+        raise ValueError("Invalid schedule")
+
+    account_id = validate_account_id(safe_int(request_data["accountId"]))
+
+    with database_session() as db:
+        removed = db.execute(
+            delete(ScheduledLimit).where(
+                ScheduledLimit.id == schedule_id,
+                ScheduledLimit.user_id == auth["userId"],
+                ScheduledLimit.account_id == int(account_id),
+                ScheduledLimit.status != "running",
+            )
+        ).rowcount
+        db.commit()
+
+        if not removed:
+            schedule = db.scalar(
+                select(ScheduledLimit).where(
+                    ScheduledLimit.id == schedule_id,
+                    ScheduledLimit.user_id == auth["userId"],
+                    ScheduledLimit.account_id == int(account_id),
+                )
+            )
+            if schedule is None:
+                raise ValueError("Schedule not found")
+            if schedule.status == "running":
+                raise ValueError(
+                    "This schedule is currently running and cannot be deleted"
+                )
+            raise ValueError("Could not delete schedule")
+
+    logger.info(
+        "Deleted schedule %s for account %s (user %s)",
+        schedule_id,
+        account_id,
+        auth["userId"],
+    )
+    return {"message": "Schedule deleted", "id": schedule_id}
+
+
 def delete_all_schedules(request_data):
     """Remove the schedule history the operator is currently looking at.
 
@@ -3444,6 +3489,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             "/api/limits",
             "/api/schedules",
             "/api/schedules/cancel",
+            "/api/schedules/delete",
             "/api/schedules/delete-all",
             "/api/preferences",
         }:
@@ -3457,6 +3503,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             result = (
                 cancel_schedule(request_data)
                 if path == "/api/schedules/cancel"
+                else delete_schedule(request_data)
+                if path == "/api/schedules/delete"
                 else delete_all_schedules(request_data)
                 if path == "/api/schedules/delete-all"
                 else create_schedule(request_data)
