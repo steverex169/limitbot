@@ -27,6 +27,7 @@ const state = {
   tradingLeague: "",
   tradingLoading: false,
   tradingRequest: 0,
+  partnerName: "Aces High",
 };
 
 const pendingStorageKey = "aceshighPendingLimitEdits";
@@ -3386,7 +3387,7 @@ async function saveActiveChange() {
       false;
 
     elements.confirmSave.textContent =
-      "Save to Aces High";
+      `Save to ${state.partnerName || "Aces High"}`;
   }
 }
 
@@ -3527,7 +3528,7 @@ async function savePendingBatch() {
     elements.confirmSave.disabled =
       false;
     elements.confirmSave.textContent =
-      "Save to Aces High";
+      `Save to ${state.partnerName || "Aces High"}`;
   }
 }
 
@@ -4022,7 +4023,23 @@ function showLogin() {
   elements.password.value = "";
 }
 
+/*
+ * The same build runs against more than one site, so anything naming the
+ * upstream follows the deployment rather than being written into the markup.
+ */
+function applyPartnerName(name) {
+  if (!name) {
+    return;
+  }
+  state.partnerName = name;
+  for (const node of document.querySelectorAll(".partner-name")) {
+    node.textContent = name;
+  }
+  document.title = `${name} Limit Control`;
+}
+
 async function startDashboard(sessionData = null) {
+  applyPartnerName(sessionData?.partnerName);
   document.body.classList.remove(
     "app-loading"
   );

@@ -26,6 +26,23 @@ Losing or changing this key invalidates encrypted Aces High sessions already
 stored in the database. It also prevents the schedule worker from decrypting
 the Aces High credentials used solely to renew expired automation tokens.
 
+## Running more than one site
+
+betwar.ag runs the identical platform at the identical version, so the same
+image manages either. Deploy one container per site, each with its own
+database:
+
+```sh
+docker run -d --name betwar-app --restart unless-stopped -p 8001:8000 \
+  -e PARTNER_HOST=betwar.ag -e PARTNER_NAME="BetWar" \
+  -e MYSQL_DATABASE=betwardb ... aceshigh-app:<sha>
+```
+
+Never point two sites at one database. Agent ids are assigned per site, and
+`users.accesshigh_agent_id` is unique, so two different agents sharing an id
+would collide on the same row. Separate databases also mean a problem on one
+site cannot reach the other's schedules or limits.
+
 ## Runtime settings
 
 - `APP_ENV=production`
@@ -47,6 +64,10 @@ the Aces High credentials used solely to renew expired automation tokens.
   immediately and refreshed in the background, so only an account's very first
   login ever waits for the walk. Set it lower where agents are added often.
 
+- `PARTNER_HOST`: which site to manage, e.g. `aceshigh.ag` or `betwar.ag`.
+  Defaults to `aceshigh.ag`.
+- `PARTNER_NAME`: what to call that site in the interface. Defaults to
+  "Aces High" for aceshigh.ag, otherwise the host.
 - `SKIP_BLUE`: refuse to overwrite any blue limit. Defaults to `on`; set
   `off` to write every limit regardless. Blue means the account holds its own
   value rather than inheriting one. Note that writing a limit on a

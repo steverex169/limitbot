@@ -177,37 +177,43 @@ if log_file_path:
 telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
-login_url = (
-    "https://aceshigh.ag/"
-    "partner-api/partner/identity/partnerLoginRedir"
+# Which site this deployment manages. betwar.ag runs the identical platform at
+# the identical version, so only the host differs - every path, payload and
+# header below is unchanged. Run one container per site, each with its own
+# database: agent ids are assigned per site and would collide in a shared one.
+partner_host = os.getenv("PARTNER_HOST", "aceshigh.ag").strip().lower()
+# What to call the site in anything the operator reads.
+partner_name = os.getenv("PARTNER_NAME", "").strip() or (
+    "Aces High" if partner_host == "aceshigh.ag" else partner_host
 )
+partner_origin = f"https://{partner_host}"
+partner_api = f"{partner_origin}/partner-api/partner"
+
+login_url = f"{partner_api}/identity/partnerLoginRedir"
 
 login_headers = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Content-Type": "application/x-www-form-urlencoded",
-    "Origin": "https://aceshigh.ag",
-    "Referer": "https://aceshigh.ag/v2/",
+    "Origin": partner_origin,
+    "Referer": f"{partner_origin}/v2/",
     "User-Agent": "Mozilla/5.0",
 }
 
-token_url = (
-    "https://aceshigh.ag/"
-    "partner-api/partner/identity/PartnerLoginFromToken/"
-)
+token_url = f"{partner_api}/identity/PartnerLoginFromToken/"
 
 token_headers = {
     "Accept": "application/json, text/plain, */*",
     "Content-Type": "application/json;charset=UTF-8",
-    "Origin": "https://aceshigh.ag",
-    "Referer": "https://aceshigh.ag/partner/index.html",
+    "Origin": partner_origin,
+    "Referer": f"{partner_origin}/partner/index.html",
     "User-Agent": "Mozilla/5.0",
 }
 
 api_headers = {
     "Accept": "application/json, text/plain, */*",
     "Content-Type": "application/json;charset=UTF-8",
-    "Origin": "https://aceshigh.ag",
-    "Referer": "https://aceshigh.ag/partner/index.html",
+    "Origin": partner_origin,
+    "Referer": f"{partner_origin}/partner/index.html",
     "User-Agent": "Mozilla/5.0",
 }
 
@@ -725,7 +731,7 @@ def build_agent_tree(auth):
             hold_off_while_rate_limited()
             response = api_request(
                 "GET",
-                "https://aceshigh.ag/partner-api/partner/accounts/"
+                f"{partner_api}/accounts/"
                 f"hierarchy/node/{parent_id}?IdAgent={logged_in_agent_id}",
                 timeout=30,
             )
@@ -826,7 +832,7 @@ def build_agent_tree(auth):
     try:
         response = api_request(
             "GET",
-            "https://aceshigh.ag/partner-api/partner/agent/reports/"
+            f"{partner_api}/agent/reports/"
             f"management/playercount?IdAgent={logged_in_agent_id}",
             timeout=30,
         )
@@ -998,7 +1004,7 @@ def search_agents(search_value):
     auth = auth_context()
     response = api_request(
         "GET",
-        "https://aceshigh.ag/partner-api/partner/agent/search",
+        f"{partner_api}/agent/search",
         params={
             "IdAgent": auth["id"],
             "searchValue": search_value,
@@ -1243,8 +1249,7 @@ def organization_url(account_id):
     account's own value, including the skip check and the change log.
     """
     return (
-        "https://aceshigh.ag/partner-api/partner/"
-        f"Backbone/GetOrganizationAll/{account_id}/false/S"
+        f"{partner_api}/Backbone/GetOrganizationAll/{account_id}/false/S"
     )
 
 league_rows = []
@@ -1710,8 +1715,8 @@ def load_period_rows(account_id, organization_id, league_id, force=False):
 
     response = api_request(
         "GET",
-        "https://aceshigh.ag/partner-api/partner/Backbone/"
-        f"GetOrganizationPeriods/{account_id}/{organization_id}/S",
+        f"{partner_api}/Backbone/GetOrganizationPeriods/"
+        f"{account_id}/{organization_id}/S",
         timeout=30,
     )
     response.raise_for_status()
@@ -1988,7 +1993,7 @@ def save_single_limit(
     for attempt in range(rate_limit_retry_limit):
         save_response = api_request(
             "POST",
-            "https://aceshigh.ag/partner-api/partner/Backbone/save/",
+            f"{partner_api}/Backbone/save/",
             json=payload,
             timeout=30,
         )
@@ -3100,6 +3105,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     "username": auth["username"],
                     "id": auth["id"],
                     "preferences": user_preferences(auth),
+                    "partnerName": partner_name,
                 })
             return
 
@@ -3377,6 +3383,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     "username": auth["username"],
                     "id": auth["id"],
                     "preferences": preferences,
+                    "partnerName": partner_name,
                 }).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
