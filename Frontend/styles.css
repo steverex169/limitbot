@@ -501,7 +501,7 @@ main {
 .schedules-table {
   /* Thirteen columns need real width; the wrapper scrolls horizontally
      rather than crushing them into each other. */
-  min-width: 1750px;
+  min-width: 1900px;
   table-layout: fixed;
 }
 
@@ -531,8 +531,8 @@ main {
 .schedules-table th:nth-child(9) { width: 9%; }
 .schedules-table th:nth-child(10) { width: 9%; }
 .schedules-table th:nth-child(11) { width: 7%; }
-.schedules-table th:nth-child(12) { width: 10%; }
-.schedules-table th:nth-child(13) { width: 5%; }
+.schedules-table th:nth-child(12) { width: 7%; }
+.schedules-table th:nth-child(13) { width: 8%; }
 
 /* Under table-layout: fixed a cell that cannot wrap prints straight over its
    neighbour, so only genuinely short values are allowed to stay on one line.
