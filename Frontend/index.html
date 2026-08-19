@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Limit Control Bot</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/styles.css?v=20260817-monitor-verification">
+  <link rel="stylesheet" href="/styles.css?v=20260820-telegram-edit-popup">
 </head>
 
 <body class="app-loading">
@@ -84,6 +84,7 @@
       <a id="activityLogsLink" class="sidebar-nav-link" href="/activity_logs">Activity Logs</a>
       <a id="pinnacleComparisonLink" class="sidebar-nav-link" href="/pinnacle_aceshigh">Pinnacle vs AcesHigh</a>
       <a id="tradingMonitorLink" class="sidebar-nav-link" href="/trading_monitor">Trading Monitor</a>
+      <a id="telegramAlertsLink" class="sidebar-nav-link" href="/telegram_alerts">Telegram Alerts</a>
     </div>
   </aside>
   <main id="dashboardView" hidden>
@@ -302,6 +303,45 @@
       </div>
       <p class="comparison-source-note">Auto-refreshes every 30 seconds. Stale or missing Pinnacle data never triggers a takedown recommendation.</p>
     </section>
+
+    <section id="telegramAlertsView" class="panel telegram-alerts-panel" hidden aria-hidden="true">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">NOTIFICATIONS</p>
+          <h2>Telegram Alerts</h2>
+          <p>Add people who can receive scheduled limit alerts. The bot token stays on the server.</p>
+        </div>
+      </div>
+
+      <div id="telegramAlertsMessage" class="message" role="status" hidden></div>
+
+      <form id="telegramAlertsForm" class="telegram-alert-form">
+        <label>
+          <span>Name</span>
+          <input id="telegramAlertName" type="text" maxlength="100" autocomplete="off" placeholder="e.g. Swam" required>
+        </label>
+        <label>
+          <span>Telegram Chat ID</span>
+          <input id="telegramAlertChatId" type="text" maxlength="64" inputmode="numeric" autocomplete="off" placeholder="e.g. 12312312" required>
+        </label>
+        <button id="telegramAlertAdd" class="button primary" type="submit">Add Telegram recipient</button>
+      </form>
+
+      <div class="table-wrap telegram-alerts-table-wrap">
+        <table class="telegram-alerts-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Telegram Chat ID</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="telegramAlertRows">
+            <tr><td colspan="3" class="empty-state">No Telegram recipients added yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
   </main>
 
   <dialog id="confirmDialog">
@@ -356,6 +396,31 @@
     </form>
   </dialog>
 
+
+  <dialog id="telegramEditDialog" class="telegram-edit-dialog">
+    <form id="telegramEditForm">
+      <p class="eyebrow">TELEGRAM ALERT</p>
+      <h2>Edit Telegram recipient</h2>
+
+      <label class="telegram-edit-field">
+        <span>Name</span>
+        <input id="telegramEditName" type="text" maxlength="100" autocomplete="off" required>
+      </label>
+
+      <label class="telegram-edit-field">
+        <span>Telegram Chat ID</span>
+        <input id="telegramEditChatId" type="text" maxlength="64" inputmode="numeric" autocomplete="off" required>
+      </label>
+
+      <div id="telegramEditMessage" class="message error" role="alert" hidden></div>
+
+      <div class="dialog-actions">
+        <button id="telegramEditCancel" class="button secondary" type="button">Cancel</button>
+        <button id="telegramEditSave" class="button primary" type="submit">Save changes</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="scheduleStatusDialog" class="schedule-status-dialog">
     <div class="schedule-status-content">
       <p id="scheduleStatusEyebrow" class="eyebrow">SCHEDULED LIMIT</p>
@@ -368,7 +433,7 @@
     </div>
   </dialog>
 
-  <script src="/script.js?v=20260817-monitor-verification" defer></script>
+  <script src="/script.js?v=20260820-telegram-edit-popup" defer></script>
 </body>
 
 </html>
