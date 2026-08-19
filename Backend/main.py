@@ -233,30 +233,77 @@ def utc_now_naive():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def send_telegram_success_message(message):
+def send_telegram_success_message(message, chat_id=None):
     """
     Send a Telegram notification after a successful limit save.
-    Failure here must never break the main limit-save flow.
+
+    Telegram Alerts recipients are managed from the dashboard. When at least
+    one recipient is saved for this user, every saved recipient receives the
+    alert. TELEGRAM_CHAT_ID remains only as a fallback when no dashboard
+    recipients exist yet. Failure here must never break the limit-save flow.
     """
-    if not telegram_bot_token or not telegram_chat_id:
+    if not telegram_bot_token:
         return
 
-    try:
-        response = requests.post(
-            f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage",
-            json={
-                "chat_id": telegram_chat_id,
-                "text": message,
-                "disable_web_page_preview": True,
-            },
-            timeout=30,
-        )
-        response.raise_for_status()
-        data = response.json()
-        if not data.get("ok", False):
-            raise RuntimeError(data.get("description", "Telegram send failed"))
-    except Exception as error:
-        logger.warning("Telegram success message failed: %s", error)
+    target_chat_ids = []
+
+    if chat_id not in (None, ""):
+        target_chat_ids = [str(chat_id).strip()]
+    else:
+        auth = current_auth.get() or {}
+        user_id = auth.get("userId")
+        if user_id is not None:
+            try:
+                with database_session() as db:
+                    target_chat_ids = [
+                        str(row[0]).strip()
+                        for row in db.execute(
+                            text(
+                                "SELECT chat_id FROM telegram_recipients "
+                                "WHERE user_id = :user_id "
+                                "ORDER BY created_at ASC"
+                            ),
+                            {"user_id": user_id},
+                        )
+                        if row[0] not in (None, "")
+                    ]
+            except Exception:
+                logger.warning(
+                    "Could not load Telegram alert recipients",
+                    exc_info=True,
+                )
+
+        if not target_chat_ids and telegram_chat_id:
+            target_chat_ids = [telegram_chat_id]
+
+    # Preserve order while preventing duplicate sends.
+    target_chat_ids = list(dict.fromkeys(
+        chat_id_value
+        for chat_id_value in target_chat_ids
+        if chat_id_value
+    ))
+
+    for target_chat_id in target_chat_ids:
+        try:
+            response = requests.post(
+                f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage",
+                json={
+                    "chat_id": target_chat_id,
+                    "text": message,
+                    "disable_web_page_preview": True,
+                },
+                timeout=30,
+            )
+            response.raise_for_status()
+            data = response.json()
+            if not data.get("ok", False):
+                raise RuntimeError(data.get("description", "Telegram send failed"))
+        except Exception as error:
+            logger.warning(
+                "Telegram success message failed for chat %s: %s",
+                target_chat_id,
+                error,
+            )
 
 
 def build_limit_success_message(
@@ -2279,6 +2326,155 @@ def save_limit_change(request_data):
             raise ValueError(str(e)) from e
 
 
+
+def telegram_recipient_rows():
+    auth = auth_context()
+    with database_session() as db:
+        rows = db.execute(
+            text(
+                "SELECT id, name, chat_id, created_at "
+                "FROM telegram_recipients "
+                "WHERE user_id = :user_id "
+                "ORDER BY created_at DESC, name ASC"
+            ),
+            {"user_id": auth["userId"]},
+        ).mappings().all()
+
+    return [
+        {
+            "id": str(row["id"]),
+            "name": row["name"],
+            "chatId": row["chat_id"],
+            "createdAt": (
+                row["created_at"].replace(tzinfo=timezone.utc).isoformat()
+                if row["created_at"]
+                else None
+            ),
+        }
+        for row in rows
+    ]
+
+
+def add_telegram_recipient(request_data):
+    auth = auth_context()
+    name = str(request_data.get("name", "")).strip()
+    chat_id = str(request_data.get("chatId", "")).strip()
+
+    if not name:
+        raise ValueError("Enter a name for this Telegram recipient")
+    if len(name) > 100:
+        raise ValueError("Telegram recipient name must be 100 characters or fewer")
+    if not chat_id:
+        raise ValueError("Enter a Telegram Chat ID")
+    if len(chat_id) > 64 or not chat_id.lstrip("-").isdigit():
+        raise ValueError("Telegram Chat ID must be a valid numeric chat ID")
+
+    recipient_id = uuid.uuid4().hex
+    try:
+        with database_session() as db:
+            db.execute(
+                text(
+                    "INSERT INTO telegram_recipients "
+                    "(id, user_id, name, chat_id, created_at) "
+                    "VALUES (:id, :user_id, :name, :chat_id, :created_at)"
+                ),
+                {
+                    "id": recipient_id,
+                    "user_id": auth["userId"],
+                    "name": name,
+                    "chat_id": chat_id,
+                    "created_at": utc_now_naive(),
+                },
+            )
+            db.commit()
+    except Exception as error:
+        if "duplicate" in str(error).casefold():
+            raise ValueError("That Telegram Chat ID is already saved") from error
+        raise
+
+    return {
+        "message": "Telegram recipient added",
+        "recipient": {
+            "id": recipient_id,
+            "name": name,
+            "chatId": chat_id,
+        },
+    }
+
+
+def edit_telegram_recipient(request_data):
+    auth = auth_context()
+    recipient_id = str(request_data.get("id", "")).strip()
+    name = str(request_data.get("name", "")).strip()
+    chat_id = str(request_data.get("chatId", "")).strip()
+
+    if len(recipient_id) != 32:
+        raise ValueError("Invalid Telegram recipient")
+    if not name:
+        raise ValueError("Enter a name for this Telegram recipient")
+    if len(name) > 100:
+        raise ValueError("Telegram recipient name must be 100 characters or fewer")
+    if not chat_id:
+        raise ValueError("Enter a Telegram Chat ID")
+    if len(chat_id) > 64 or not chat_id.lstrip("-").isdigit():
+        raise ValueError("Telegram Chat ID must be a valid numeric chat ID")
+
+    try:
+        with database_session() as db:
+            updated = db.execute(
+                text(
+                    "UPDATE telegram_recipients "
+                    "SET name = :name, chat_id = :chat_id "
+                    "WHERE id = :id AND user_id = :user_id"
+                ),
+                {
+                    "id": recipient_id,
+                    "user_id": auth["userId"],
+                    "name": name,
+                    "chat_id": chat_id,
+                },
+            ).rowcount
+            db.commit()
+    except Exception as error:
+        if "duplicate" in str(error).casefold():
+            raise ValueError("That Telegram Chat ID is already saved") from error
+        raise
+
+    if not updated:
+        raise ValueError("Telegram recipient not found")
+
+    return {
+        "message": "Telegram recipient updated",
+        "recipient": {
+            "id": recipient_id,
+            "name": name,
+            "chatId": chat_id,
+        },
+    }
+
+
+def delete_telegram_recipient(request_data):
+    auth = auth_context()
+    recipient_id = str(request_data.get("id", "")).strip()
+    if len(recipient_id) != 32:
+        raise ValueError("Invalid Telegram recipient")
+
+    with database_session() as db:
+        removed = db.execute(
+            text(
+                "DELETE FROM telegram_recipients "
+                "WHERE id = :id AND user_id = :user_id"
+            ),
+            {"id": recipient_id, "user_id": auth["userId"]},
+        ).rowcount
+        db.commit()
+
+    if not removed:
+        raise ValueError("Telegram recipient not found")
+
+    return {"message": "Telegram recipient deleted", "id": recipient_id}
+
+
 weekday_names = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
 
@@ -3207,6 +3403,17 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if path.startswith("/api/") and not self.require_auth():
             return
 
+        if path == "/api/telegram-chats":
+            try:
+                self.send_json(200, {"recipients": telegram_recipient_rows()})
+            except Exception as error:
+                self.server_error(
+                    "Telegram recipient load failed",
+                    error,
+                    "Telegram recipients are unavailable",
+                )
+            return
+
         if path == "/api/agents":
             try:
                 auth = auth_context()
@@ -3434,6 +3641,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             "/activity_logs/",
             "/pinnacle_aceshigh",
             "/pinnacle_aceshigh/",
+            "/trading_monitor",
+            "/trading_monitor/",
+            "/telegram_alerts",
+            "/telegram_alerts/",
         }:
             self.path = "/index.html"
             super().do_GET()
@@ -3541,6 +3752,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             "/api/schedules/cancel",
             "/api/schedules/delete",
             "/api/schedules/delete-all",
+            "/api/telegram-chats",
+            "/api/telegram-chats/edit",
+            "/api/telegram-chats/delete",
             "/api/preferences",
         }:
             self.send_json(404, {"error": "Not found"})
@@ -3559,6 +3773,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 if path == "/api/schedules/delete-all"
                 else create_schedule(request_data)
                 if path == "/api/schedules"
+                else add_telegram_recipient(request_data)
+                if path == "/api/telegram-chats"
+                else edit_telegram_recipient(request_data)
+                if path == "/api/telegram-chats/edit"
+                else delete_telegram_recipient(request_data)
+                if path == "/api/telegram-chats/delete"
                 else save_user_preferences(auth_context(), request_data)
                 if path == "/api/preferences"
                 else save_limit_change(request_data)
@@ -3583,6 +3803,8 @@ def migrate_schedule_columns():
         "last_run_status": "VARCHAR(20) NULL",
         "last_run_at": "DATETIME NULL",
         "customer_support_agent": "VARCHAR(100) NULL",
+        "telegram_recipient_name": "VARCHAR(100) NULL",
+        "telegram_chat_id": "VARCHAR(64) NULL",
         "run_note": "VARCHAR(255) NULL",
     }
     with engine.begin() as connection:
@@ -3594,6 +3816,22 @@ def migrate_schedule_columns():
                         f"ADD COLUMN {column_name} {column_type}"
                     )
                 )
+
+
+def migrate_telegram_recipients():
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS telegram_recipients ("
+                "id VARCHAR(32) NOT NULL PRIMARY KEY, "
+                "user_id INTEGER NOT NULL, "
+                "name VARCHAR(100) NOT NULL, "
+                "chat_id VARCHAR(64) NOT NULL, "
+                "created_at DATETIME NOT NULL, "
+                "UNIQUE KEY uq_telegram_recipient_user_chat (user_id, chat_id)"
+                ")"
+            )
+        )
 
 
 def migrate_user_columns():
@@ -3643,6 +3881,7 @@ encryption_cipher()
 Base.metadata.create_all(bind=engine)
 migrate_user_columns()
 migrate_schedule_columns()
+migrate_telegram_recipients()
 recover_schedules_on_startup()
 logger.info("Dashboard listening on http://%s:%s", server_host, server_port)
 
