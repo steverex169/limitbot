@@ -51,10 +51,9 @@ data_lock = threading.Lock()
 hierarchy_worker_count = max(
     1, min(32, int(os.getenv("HIERARCHY_WORKERS", "4")))
 )
-# A blue limit carries this account's own value rather than an inherited one.
-# Writing any limit creates that override - AccessHigh's own UI does the same -
-# so refusing to touch blue outright would lock the bot out of every limit it
-# has ever set. Set SKIP_BLUE=off to write blue limits regardless of origin.
+# A blue limit carries this account's own value rather than an inherited one,
+# and is never overwritten regardless of who set it. Black and orange limits
+# are writable. Set SKIP_BLUE=off to disable the guard entirely.
 skip_blue_limits = os.getenv("SKIP_BLUE", "on").strip().lower() not in {
     "off", "false", "0", "no"
 }
@@ -1893,19 +1892,17 @@ def save_single_limit(
         # A blue limit carries a player-level override. Writing over it would
         # silently discard that override, so leave it alone unless the caller
         # has explicitly asked to.
-        limit_mode = "early" if is_early else "normal"
+        # A blue limit is never written, whoever set it. Black and orange are
+        # fair game. Note this means a limit the bot itself turned blue is
+        # skipped from then on, which is the intended behaviour.
         if (
             skip_blue
             and skip_blue_limits
             and limit_colour(matching_row, field, is_early) == "blue"
-            and not limit_set_by_us(
-                account_id, org_id, league_id, sport_id,
-                period_number, field, limit_mode,
-            )
         ):
-            note = "Skipped, this limit was set outside the bot"
+            note = "Skipped, limit is blue"
             logger.info(
-                "Skipped %s for account %s: blue and not set by us",
+                "Skipped %s for account %s: limit is blue",
                 api_field,
                 account_id,
             )
