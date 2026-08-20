@@ -1109,6 +1109,44 @@ const easternDateTimeFormatter = new Intl.DateTimeFormat(
   }
 );
 
+/*
+ * The schedules table prints four timestamps per row across fifteen columns.
+ * Repeating "2026" and "EST" in each of them pushed Status and Detail off the
+ * side of the screen, so here the year is two digits and the zone is named
+ * once, in the column heading.
+ */
+const easternCompactFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  year: "2-digit",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: true,
+});
+
+function formatScheduleDateTime(value) {
+  if (!value) {
+    return "";
+  }
+
+  /* A value the server already formatted: drop the zone and the century. */
+  if (typeof value === "string" && /\b(?:ET|EST|EDT)\b/.test(value)) {
+    return value
+      .replace(/\s*\b(?:ET|EST|EDT)\b/g, "")
+      .replace(/\b(\d{2})\/(\d{2})\/\d{2}(\d{2})\b/, "$1/$2/$3")
+      .trim();
+  }
+
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value);
+  }
+
+  return easternCompactFormatter.format(parsed).replace(", ", " ");
+}
+
 function formatEasternDateTime(value) {
   if (!value) {
     return "";
@@ -2225,7 +2263,7 @@ function describeScheduleLastRun(schedule) {
     return "Not run yet";
   }
 
-  const when = formatEasternDateTime(
+  const when = formatScheduleDateTime(
     schedule.lastRunAtUtc || schedule.lastRunAt
   );
   const lastStatus = String(
@@ -2311,18 +2349,22 @@ function groupSchedules(schedules) {
   return [...groups.values()];
 }
 
-function createLimitValueCell(schedule) {
+function createLimitValueCell(schedule, field) {
   const cell = document.createElement("td");
+
+  if (field === "teamTotal") {
+    cell.classList.add("col-team-total");
+  }
 
   if (!schedule) {
     /* Not part of this schedule at all — distinct from a limit of zero. */
     cell.textContent = "—";
-    cell.className = "schedule-limit-empty";
+    cell.classList.add("schedule-limit-empty");
     return cell;
   }
 
   cell.textContent = Number(schedule.value).toLocaleString();
-  cell.className = "schedule-limit-value";
+  cell.classList.add("schedule-limit-value");
   return cell;
 }
 
@@ -2451,6 +2493,19 @@ function renderSchedules() {
     return !isCancelled;
   });
 
+  /*
+   * Team total is a real limit but rarely scheduled. Showing a column of
+   * dashes cost width that Status and Detail needed, so it appears only when
+   * something actually uses it and returns on its own the moment one is set.
+   */
+  const table = elements.scheduleRows.closest("table");
+  if (table) {
+    table.classList.toggle(
+      "hide-team-total",
+      !schedules.some((schedule) => schedule.field === "teamTotal")
+    );
+  }
+
   if (!schedules.length) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
@@ -2476,7 +2531,7 @@ function renderSchedules() {
 
     row.append(
       createTextCell(
-        formatEasternDateTime(first.createdAtUtc || first.createdAt)
+        formatScheduleDateTime(first.createdAtUtc || first.createdAt)
       ),
       createTextCell(
         first.agentName ||
@@ -2493,13 +2548,13 @@ function renderSchedules() {
     );
 
     for (const field of scheduleLimitFields) {
-      row.append(createLimitValueCell(byField.get(field)));
+      row.append(createLimitValueCell(byField.get(field), field));
     }
 
     row.append(
       createTextCell(first.recurrence || "One time"),
       createTextCell(
-        formatEasternDateTime(first.scheduledForUtc || first.scheduledFor)
+        formatScheduleDateTime(first.scheduledForUtc || first.scheduledFor)
       ),
       createTextCell(describeGroupLastRun(group)),
       createGroupStatusCell(group),

@@ -499,9 +499,9 @@ main {
 }
 
 .schedules-table {
-  /* Fifteen columns need real width; the wrapper scrolls horizontally
-     rather than crushing them into each other. */
-  min-width: 2040px;
+  /* Fifteen columns still need width, but compact timestamps and a hidden
+     Team total keep Status and Detail on screen at laptop widths. */
+  min-width: 1560px;
   table-layout: fixed;
 }
 
@@ -518,22 +518,24 @@ main {
   overflow-wrap: anywhere;
 }
 
-/* Created, Agent, Customer Support Agent, League, Period, Spread, Money line,
-   Total, Team total, Repeats, Next run, Last run, Status, Detail, Action. */
-.schedules-table th:nth-child(1) { width: 9%; }
+/* Created, Agent, CS Agent, League, Period, Spread, Money line, Total,
+   Team total, Repeats, Next run, Last run, Status, Detail, Action. Hiding
+   Team total does not renumber these: nth-child counts markup position, not
+   visible position. */
+.schedules-table th:nth-child(1) { width: 7%; }
 .schedules-table th:nth-child(2) { width: 7%; }
-.schedules-table th:nth-child(3) { width: 8%; }
-.schedules-table th:nth-child(4) { width: 9%; }
+.schedules-table th:nth-child(3) { width: 6%; }
+.schedules-table th:nth-child(4) { width: 11%; }
 .schedules-table th:nth-child(5) { width: 5%; }
 .schedules-table th:nth-child(6) { width: 5%; }
 .schedules-table th:nth-child(7) { width: 5%; }
 .schedules-table th:nth-child(8) { width: 5%; }
 .schedules-table th:nth-child(9) { width: 5%; }
-.schedules-table th:nth-child(10) { width: 9%; }
-.schedules-table th:nth-child(11) { width: 8%; }
-.schedules-table th:nth-child(12) { width: 8%; }
+.schedules-table th:nth-child(10) { width: 10%; }
+.schedules-table th:nth-child(11) { width: 7%; }
+.schedules-table th:nth-child(12) { width: 9%; }
 .schedules-table th:nth-child(13) { width: 6%; }
-.schedules-table th:nth-child(14) { width: 7%; }
+.schedules-table th:nth-child(14) { width: 8%; }
 .schedules-table th:nth-child(15) { width: 4%; }
 
 /* Under table-layout: fixed a cell that cannot wrap prints straight over its
@@ -558,6 +560,12 @@ main {
 .schedule-limit-value {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
+}
+
+/* The Team total column is present in the markup but collapses out of the
+   layout while no schedule sets one. */
+.schedules-table.hide-team-total .col-team-total {
+  display: none;
 }
 
 /* A limit this schedule does not touch, distinct from a limit set to zero. */
