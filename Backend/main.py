@@ -3285,6 +3285,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         logger.error("%s: %s", context, type(error).__name__, exc_info=True)
         self.send_json(502, {"error": message})
 
+    def comparison_error(self, context, error, fallback):
+        """A ComparisonError already says which site failed and what to do
+        about it, so send that text rather than a generic 502 message."""
+        logger.error("%s: %s", context, error, exc_info=True)
+        self.send_json(502, {"error": str(error) or fallback})
+
     def session_cookie(self, session_id, delete=False):
         secure = "; Secure" if self.is_https() else ""
         expiry = "; Max-Age=0" if delete else f"; Max-Age={int(session_max_lifetime.total_seconds())}"
@@ -3465,10 +3471,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             except PermissionError as error:
                 self.send_json(401, {"error": str(error)})
             except ComparisonError as error:
-                self.server_error(
+                self.comparison_error(
                     "Comparison league discovery failed",
                     error,
-                    "AcesHigh or OddsPapi league data is unavailable",
+                    f"{partner_name} or OddsPapi league data is unavailable",
                 )
             except Exception as error:
                 self.server_error(
@@ -3510,10 +3516,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             except PermissionError as error:
                 self.send_json(401, {"error": str(error)})
             except ComparisonError as error:
-                self.server_error(
+                self.comparison_error(
                     "League comparison failed",
                     error,
-                    "Pinnacle or AcesHigh comparison data is unavailable",
+                    f"Pinnacle or {partner_name} comparison data is unavailable",
                 )
             except Exception as error:
                 self.server_error(
@@ -3553,10 +3559,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             except PermissionError as error:
                 self.send_json(401, {"error": str(error)})
             except ComparisonError as error:
-                self.server_error(
+                self.comparison_error(
                     "Trading monitor failed",
                     error,
-                    "Pinnacle or AcesHigh monitor data is unavailable",
+                    f"Pinnacle or {partner_name} monitor data is unavailable",
                 )
             except Exception as error:
                 self.server_error(

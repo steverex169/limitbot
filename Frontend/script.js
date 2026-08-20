@@ -535,7 +535,7 @@ function renderComparisonProfiles(data) {
     const card = document.createElement("article");
     card.className = "comparison-profile-card";
     const heading = document.createElement("h3");
-    heading.textContent = `AcesHigh ${period} limits`;
+    heading.textContent = `${partnerLabel()} ${period} limits`;
     card.append(heading);
 
     const list = document.createElement("dl");
@@ -577,7 +577,7 @@ function renderPinnacleComparison(data) {
     const empty = document.createElement("p");
     empty.className = "comparison-empty";
     empty.textContent =
-      `No current ${comparisonText(data.league, "league")} fixtures could be mapped between AcesHigh and Pinnacle.`;
+      `No current ${comparisonText(data.league, "league")} fixtures could be mapped between ${partnerLabel()} and Pinnacle.`;
     elements.comparisonContent.append(empty);
     return;
   }
@@ -593,12 +593,12 @@ function renderPinnacleComparison(data) {
     const meta = document.createElement("p");
     const start = new Date(section.startTimeUtc);
     meta.textContent = Number.isNaN(start.valueOf())
-      ? `AcesHigh game ${comparisonText(section.acesHighGameNumber)}`
+      ? `${partnerLabel()} game ${comparisonText(section.acesHighGameNumber)}`
       : `${start.toLocaleString([], {
           weekday: "short",
           hour: "numeric",
           minute: "2-digit",
-        })} · AcesHigh game ${comparisonText(section.acesHighGameNumber)}`;
+        })} · ${partnerLabel()} game ${comparisonText(section.acesHighGameNumber)}`;
     titleWrap.append(title, meta);
     const period = document.createElement("span");
     period.className = "comparison-period";
@@ -615,8 +615,8 @@ function renderPinnacleComparison(data) {
     [
       "Market",
       "Selection",
-      "AcesHigh line",
-      "AcesHigh odds",
+      `${partnerLabel()} line`,
+      `${partnerLabel()} odds`,
       "Our limit",
       "Pinnacle line",
       "Pinnacle odds",
@@ -711,7 +711,7 @@ async function loadComparisonLeagues(force = false) {
   if (!state.comparisonLeagues.length) {
     elements.comparisonLeague.append(new Option("No mapped leagues", ""));
     setComparisonMessage(
-      "No AcesHigh leagues for this agent overlap with the sports enabled in OddsPapi.",
+      `No ${partnerLabel()} leagues for this agent overlap with the sports enabled in OddsPapi.`,
       "error"
     );
     return;
@@ -824,7 +824,7 @@ function renderTradingMonitor(data) {
     const cell = document.createElement("td");
     cell.colSpan = 7;
     cell.className = "empty-state";
-    cell.textContent = `No current ${comparisonText(data.league, "league")} events are mapped between AcesHigh and Pinnacle.`;
+    cell.textContent = `No current ${comparisonText(data.league, "league")} events are mapped between ${partnerLabel()} and Pinnacle.`;
     row.append(cell);
     elements.tradingRows.append(row);
     return;
@@ -962,7 +962,7 @@ async function loadTradingLeagues(force = false) {
   elements.tradingLeague.replaceChildren();
   if (!state.tradingLeagues.length) {
     elements.tradingLeague.append(new Option("No mapped leagues", ""));
-    setTradingMessage("No AcesHigh leagues overlap with this OddsPapi account.", "error");
+    setTradingMessage(`No ${partnerLabel()} leagues overlap with this OddsPapi account.`, "error");
     return;
   }
   state.tradingLeagues.forEach((league) => {
@@ -4360,6 +4360,13 @@ function showLogin() {
  * The same build runs against more than one site, so anything naming the
  * upstream follows the deployment rather than being written into the markup.
  */
+
+/* The site name for text built at render time. The .partner-name spans are
+ * rewritten in place on login; strings assembled in JS need this instead. */
+function partnerLabel() {
+  return state.partnerName || "Aces High";
+}
+
 function applyPartnerName(name) {
   if (!name) {
     return;
@@ -4367,6 +4374,14 @@ function applyPartnerName(name) {
   state.partnerName = name;
   for (const node of document.querySelectorAll(".partner-name")) {
     node.textContent = name;
+  }
+  /* Labels that are attributes rather than text, so a screen reader hears
+   * the site this deployment actually manages. */
+  for (const node of document.querySelectorAll("[data-partner-aria]")) {
+    node.setAttribute(
+      "aria-label",
+      node.dataset.partnerAria.replace("{name}", name)
+    );
   }
   document.title = `${name} Limit Control`;
 }

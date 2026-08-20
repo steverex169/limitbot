@@ -82,7 +82,7 @@
     <div class="sidebar-footer">
       <a id="dashboardHomeLink" class="sidebar-nav-link" href="/">Dashboard</a>
       <a id="activityLogsLink" class="sidebar-nav-link" href="/activity_logs">Activity Logs</a>
-      <a id="pinnacleComparisonLink" class="sidebar-nav-link" href="/pinnacle_aceshigh">Pinnacle vs AcesHigh</a>
+      <a id="pinnacleComparisonLink" class="sidebar-nav-link" href="/pinnacle_aceshigh">Pinnacle vs <span class="partner-name">Aces High</span></a>
       <a id="tradingMonitorLink" class="sidebar-nav-link" href="/trading_monitor">Trading Monitor</a>
       <a id="telegramAlertsLink" class="sidebar-nav-link" href="/telegram_alerts">Telegram Alerts</a>
     </div>
@@ -211,7 +211,7 @@
       <div class="panel-head comparison-head">
         <div>
           <p class="eyebrow">MARKET COMPARISON</p>
-          <h2>Pinnacle vs AcesHigh</h2>
+          <h2>Pinnacle vs <span class="partner-name">Aces High</span></h2>
           <p>Current full-game and period lines, American odds, and available limits.</p>
         </div>
         <div class="comparison-actions">
@@ -240,11 +240,11 @@
         </article>
       </div>
 
-      <div id="comparisonProfiles" class="comparison-profiles" aria-label="AcesHigh limit profiles"></div>
+      <div id="comparisonProfiles" class="comparison-profiles" data-partner-aria="{name} limit profiles" aria-label="Aces High limit profiles"></div>
       <div id="comparisonContent" class="comparison-content">
         <p class="comparison-empty">Select an agent and league to load the comparison.</p>
       </div>
-      <p class="comparison-source-note">Pinnacle limits are supplied in USD by OddsPapi. AcesHigh limits are the selected agent's configured values.</p>
+      <p class="comparison-source-note">Pinnacle limits are supplied in USD by OddsPapi. <span class="partner-name">Aces High</span> limits are the selected agent's configured values.</p>
     </section>
 
     <section id="tradingMonitorView" class="panel trading-monitor-panel" hidden aria-hidden="true">
@@ -255,7 +255,7 @@
             <span class="dry-run-badge">Dry run — no writes</span>
           </div>
           <h2>Trading Monitor</h2>
-          <p>Mapped scores, availability, and Pinnacle suspension signals for AcesHigh.</p>
+          <p>Mapped scores, availability, and Pinnacle suspension signals for <span class="partner-name">Aces High</span>.</p>
         </div>
         <div class="comparison-actions">
           <label for="tradingLeague">League</label>
@@ -290,7 +290,7 @@
               <th>Fixture</th>
               <th>Score / clock</th>
               <th>Game status</th>
-              <th>AcesHigh</th>
+              <th class="partner-name">Aces High</th>
               <th>Pinnacle</th>
               <th>Dry-run signal</th>
               <th>Updated</th>

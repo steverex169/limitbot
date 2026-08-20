@@ -1,8 +1,9 @@
-"""Read-only league comparisons between AcesHigh and Pinnacle/OddsPapi."""
+"""Read-only league comparisons between the partner site and Pinnacle/OddsPapi."""
 
 from __future__ import annotations
 
 from datetime import datetime, time as datetime_time, timezone
+import os
 import re
 import threading
 import time
@@ -12,8 +13,23 @@ from zoneinfo import ZoneInfo
 import requests
 
 
-ACESHIGH_BASE = "https://aceshigh.ag"
-PLAYER_API = f"{ACESHIGH_BASE}/player-api"
+# The same value main.py uses, read independently so this module has no import
+# back into it. A BetWar deployment must compare Pinnacle against BetWar, and
+# querying aceshigh.ag with a BetWar token would simply be rejected.
+PARTNER_HOST = os.getenv("PARTNER_HOST", "aceshigh.ag").strip().lower()
+PARTNER_NAME = os.getenv("PARTNER_NAME", "").strip() or (
+    "Aces High" if PARTNER_HOST == "aceshigh.ag" else PARTNER_HOST
+)
+PARTNER_BASE = f"https://{PARTNER_HOST}"
+PLAYER_API = f"{PARTNER_BASE}/player-api"
+
+# The fixture schedule comes from the player site, not the partner site, and a
+# partner token is rejected there (verified: HTTP 401 on both hosts). aceshigh.ag
+# hands out an anonymous token from identity/GuestToken; betwar.ag does not serve
+# that route at all (HTTP 404) and its player bundle has no guest mode. So a site
+# without guest browsing needs a read-only player account configured here.
+PLAYER_USERNAME = os.getenv("PLAYER_USERNAME", "").strip()
+PLAYER_PASSWORD = os.getenv("PLAYER_PASSWORD", "")
 ODDSPAPI_BASE = "https://v5.oddspapi.io/en"
 BOOKMAKER = "pinnacle"
 CACHE_SECONDS = 45
@@ -22,8 +38,8 @@ FIXTURE_MATCH_TOLERANCE_SECONDS = 90 * 60
 PUBLIC_HEADERS = {
     "Accept": "application/json, text/plain, */*",
     "Content-Type": "application/json;charset=UTF-8",
-    "Origin": ACESHIGH_BASE,
-    "Referer": f"{ACESHIGH_BASE}/v2/",
+    "Origin": PARTNER_BASE,
+    "Referer": f"{PARTNER_BASE}/v2/",
     "User-Agent": "limitbot-comparison/1.0",
 }
 
@@ -132,9 +148,9 @@ def _load_aceshigh_limits(
     data = _partner_get(
         session,
         headers,
-        f"{ACESHIGH_BASE}/partner-api/partner/Backbone/"
-        f"GetOrganizationAll/{account_id}/true/S",
-        "AcesHigh limit lookup",
+        f"{PARTNER_BASE}/partner-api/partner/Backbone/"
+        f"GetOrganizationAll/{account_id}/false/S",
+        f"{PARTNER_NAME} limit lookup",
     )
     limit_row: dict[str, Any] | None = None
 
@@ -160,7 +176,7 @@ def _load_aceshigh_limits(
     walk((data or {}).get("Payload") if isinstance(data, dict) else None)
     if limit_row is None:
         raise ComparisonError(
-            f"AcesHigh {config['name']} limits are unavailable for this agent"
+            f"{PARTNER_NAME} {config['name']} limits are unavailable for this agent"
         )
 
     result = {"Full Game": _limit_values(limit_row)}
@@ -169,9 +185,9 @@ def _load_aceshigh_limits(
         periods = _partner_get(
             session,
             headers,
-            f"{ACESHIGH_BASE}/partner-api/partner/Backbone/"
+            f"{PARTNER_BASE}/partner-api/partner/Backbone/"
             f"GetOrganizationPeriods/{account_id}/{organization_id}/S",
-            "AcesHigh period limit lookup",
+            f"{PARTNER_NAME} period limit lookup",
         )
         for period in (periods or {}).get("Payload") or []:
             if not isinstance(period, dict):
@@ -216,24 +232,71 @@ def _schedule_requests(menu: dict[str, Any], league: str) -> list[dict[str, int]
     return list(requests_by_key.values())
 
 
-def _guest_schedule(league: str) -> list[dict[str, Any]]:
-    session = requests.Session()
-    try:
+def _player_token(session: requests.Session) -> str:
+    """A token for the player API, which is where the fixture schedule lives.
+
+    Prefers a configured player account, since a site may not offer guest
+    browsing at all. Falls back to the anonymous token where it exists.
+    """
+    if PLAYER_USERNAME:
+        label = f"{PARTNER_NAME} player login"
         try:
-            token_response = session.post(
-                f"{PLAYER_API}/identity/GuestToken",
+            response = session.post(
+                f"{PLAYER_API}/identity/customerLogin/",
                 headers=PUBLIC_HEADERS,
-                data="null",
+                json={
+                    "userName": PLAYER_USERNAME,
+                    "password": PLAYER_PASSWORD,
+                    # Their own login screen sends the site's domain here.
+                    "website": PARTNER_HOST,
+                    "version": "2.2.20",
+                },
                 timeout=30,
             )
         except requests.RequestException as error:
-            raise ComparisonError(
-                f"AcesHigh guest login failed: {type(error).__name__}"
-            ) from None
-        token_data = _json(token_response, "AcesHigh guest login")
-        token = token_data.get("AccessToken") if isinstance(token_data, dict) else None
+            raise ComparisonError(f"{label} failed: {type(error).__name__}") from None
+        data = _json(response, label)
+        errors = data.get("Errors") if isinstance(data, dict) else None
+        if errors:
+            raise ComparisonError(f"{label} was rejected: {', '.join(errors)}")
+        payload = data.get("Payload") if isinstance(data, dict) else None
+        token = None
+        for source in (payload, data):
+            if isinstance(source, dict) and source.get("AccessToken"):
+                token = source["AccessToken"]
+                break
         if not token:
-            raise ComparisonError("AcesHigh guest login did not return a token")
+            raise ComparisonError(f"{label} did not return a token")
+        return token
+
+    label = f"{PARTNER_NAME} guest login"
+    try:
+        response = session.post(
+            f"{PLAYER_API}/identity/GuestToken",
+            headers=PUBLIC_HEADERS,
+            data="null",
+            timeout=30,
+        )
+    except requests.RequestException as error:
+        raise ComparisonError(f"{label} failed: {type(error).__name__}") from None
+    if response.status_code == 404:
+        # Not a fault to debug: this site simply has no anonymous browsing.
+        raise ComparisonError(
+            f"{PARTNER_NAME} does not offer guest browsing, so fixtures cannot "
+            "be read anonymously. Set PLAYER_USERNAME and PLAYER_PASSWORD to a "
+            f"read-only {PARTNER_NAME} player account to enable this page."
+        )
+    token_data = _json(response, label)
+    token = token_data.get("AccessToken") if isinstance(token_data, dict) else None
+    if not token:
+        raise ComparisonError(f"{label} did not return a token")
+    return token
+
+
+def _guest_schedule(league: str) -> list[dict[str, Any]]:
+    session = requests.Session()
+    try:
+        token = _player_token(session)
         headers = {**PUBLIC_HEADERS, "Authorization": f"Bearer {token}"}
         try:
             menu_response = session.get(
@@ -242,7 +305,7 @@ def _guest_schedule(league: str) -> list[dict[str, Any]]:
                 headers=headers,
                 timeout=30,
             )
-            menu = _json(menu_response, "AcesHigh sports lookup")
+            menu = _json(menu_response, f"{PARTNER_NAME} sports lookup")
             request_body = _schedule_requests(menu, league)
             if not request_body:
                 return []
@@ -254,9 +317,9 @@ def _guest_schedule(league: str) -> list[dict[str, Any]]:
             )
         except requests.RequestException as error:
             raise ComparisonError(
-                f"AcesHigh schedule failed: {type(error).__name__}"
+                f"{PARTNER_NAME} schedule failed: {type(error).__name__}"
             ) from None
-        data = _json(response, "AcesHigh schedule")
+        data = _json(response, f"{PARTNER_NAME} schedule")
         return data if isinstance(data, list) else []
     finally:
         session.close()
@@ -851,9 +914,9 @@ def comparison_leagues(
     data = _partner_get(
         partner_session,
         partner_headers,
-        f"{ACESHIGH_BASE}/partner-api/partner/Backbone/"
-        f"GetOrganizationAll/{account_id}/true/S",
-        "AcesHigh league lookup",
+        f"{PARTNER_BASE}/partner-api/partner/Backbone/"
+        f"GetOrganizationAll/{account_id}/false/S",
+        f"{PARTNER_NAME} league lookup",
     )
     labels: set[str] = set()
 
@@ -934,7 +997,7 @@ def _monitor_signal(
         return "hold", "Feed stale — no automatic action"
     if bookmaker.get("suspended") is True:
         return (
-            ("would-suspend", "Would suspend AcesHigh")
+            ("would-suspend", f"Would suspend {PARTNER_NAME}")
             if aces_open
             else ("aligned-closed", "Both books closed")
         )
@@ -942,7 +1005,7 @@ def _monitor_signal(
         return "hold", "Pinnacle has no odds — verify manually"
     if quote_count and active_quote_count == 0:
         return (
-            ("would-suspend", "Would suspend AcesHigh")
+            ("would-suspend", f"Would suspend {PARTNER_NAME}")
             if aces_open
             else ("aligned-closed", "Both books closed")
         )
