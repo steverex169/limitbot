@@ -2269,6 +2269,168 @@ function createStatusCell(status) {
   return cell;
 }
 
+/*
+ * Saving Spread, Money line and Total together writes three rows in
+ * scheduled_limits, but it was one decision by one person. The table used to
+ * show it as three near-identical lines. Grouping puts it back on one line the
+ * way a sportsbook prints a game: the key is every column the rows share, so
+ * anything genuinely separate still gets its own line.
+ */
+const scheduleLimitFields = ["spread", "moneyLine", "total", "teamTotal"];
+
+function scheduleGroupKey(schedule) {
+  return JSON.stringify([
+    schedule.accountId,
+    schedule.idOrganization,
+    schedule.idLeague,
+    schedule.idSportType,
+    schedule.periodNumber || 0,
+    schedule.limitMode || "normal",
+    schedule.recurrence || "",
+    schedule.scheduledForUtc || schedule.scheduledFor || "",
+    schedule.createdAtUtc || schedule.createdAt || "",
+    schedule.customerSupportAgent || "",
+  ]);
+}
+
+function groupSchedules(schedules) {
+  /* A Map keeps insertion order, so the existing sort survives grouping. */
+  const groups = new Map();
+
+  for (const schedule of schedules) {
+    const key = scheduleGroupKey(schedule);
+    const existing = groups.get(key);
+
+    if (existing) {
+      existing.push(schedule);
+    } else {
+      groups.set(key, [schedule]);
+    }
+  }
+
+  return [...groups.values()];
+}
+
+function createLimitValueCell(schedule) {
+  const cell = document.createElement("td");
+
+  if (!schedule) {
+    /* Not part of this schedule at all — distinct from a limit of zero. */
+    cell.textContent = "—";
+    cell.className = "schedule-limit-empty";
+    return cell;
+  }
+
+  cell.textContent = Number(schedule.value).toLocaleString();
+  cell.className = "schedule-limit-value";
+  return cell;
+}
+
+/*
+ * One badge when the whole group agrees, otherwise one per distinct state so a
+ * single failed limit is never hidden behind two successful ones.
+ */
+function createGroupStatusCell(group) {
+  const cell = document.createElement("td");
+  const statuses = [
+    ...new Set(group.map((item) => String(item.status || "").toLowerCase())),
+  ];
+
+  for (const status of statuses) {
+    const badge = document.createElement("span");
+    badge.className = `schedule-status schedule-status-${status || "unknown"}`;
+    badge.textContent = status
+      ? status.charAt(0).toUpperCase() + status.slice(1)
+      : "—";
+
+    if (statuses.length > 1) {
+      badge.title = group
+        .filter(
+          (item) => String(item.status || "").toLowerCase() === status
+        )
+        .map((item) => fieldLabels[item.field] || item.field)
+        .join(", ");
+    }
+
+    cell.append(badge);
+  }
+
+  return cell;
+}
+
+function createGroupDetailCell(group) {
+  const cell = document.createElement("td");
+  const notes = group
+    .map((item) => ({
+      label: fieldLabels[item.field] || item.field,
+      text: describeScheduleDetail(item),
+    }))
+    .filter((note) => note.text);
+
+  if (!notes.length) {
+    return cell;
+  }
+
+  const distinct = [...new Set(notes.map((note) => note.text))];
+
+  /* The same note on every limit is one sentence, not three. */
+  if (distinct.length === 1 && notes.length === group.length) {
+    cell.textContent = distinct[0];
+    return cell;
+  }
+
+  for (const note of notes) {
+    const line = document.createElement("div");
+    line.className = "schedule-detail-line";
+    line.textContent = `${note.label}: ${note.text}`;
+    cell.append(line);
+  }
+
+  return cell;
+}
+
+function describeGroupLastRun(group) {
+  return [
+    ...new Set(group.map((item) => describeScheduleLastRun(item))),
+  ].join(" · ");
+}
+
+async function postScheduleAction(path, body) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.error || "Could not update schedule");
+  }
+
+  return data;
+}
+
+/*
+ * Each limit is still its own job upstream, so act on them one at a time and
+ * report honestly: a group where one delete fails must not claim it removed
+ * everything.
+ */
+async function applyToGroup(group, path, extra = () => ({})) {
+  const removed = [];
+  let failure = null;
+
+  for (const schedule of group) {
+    try {
+      await postScheduleAction(path, { id: schedule.id, ...extra(schedule) });
+      removed.push(schedule.id);
+    } catch (error) {
+      failure = failure || error;
+    }
+  }
+
+  return { removed, failure };
+}
+
 function renderSchedules() {
   elements.scheduleRows.replaceChildren();
 
@@ -2293,7 +2455,7 @@ function renderSchedules() {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
 
-    cell.colSpan = 13;
+    cell.colSpan = 15;
     cell.className = "empty-state";
     cell.textContent =
       statusFilter === "cancelled"
@@ -2305,129 +2467,106 @@ function renderSchedules() {
     return;
   }
 
-  for (const schedule of schedules) {
+  for (const group of groupSchedules(schedules)) {
+    const first = group[0];
     const row = document.createElement("tr");
+    const byField = new Map(
+      group.map((schedule) => [schedule.field, schedule])
+    );
 
     row.append(
       createTextCell(
-        formatEasternDateTime(
-          schedule.createdAtUtc || schedule.createdAt
-        )
+        formatEasternDateTime(first.createdAtUtc || first.createdAt)
       ),
       createTextCell(
-        schedule.agentName ||
+        first.agentName ||
         state.agents.find(
-          (agent) =>
-            Number(agent.id) ===
-            Number(schedule.accountId)
+          (agent) => Number(agent.id) === Number(first.accountId)
         )?.name ||
-        `Agent ${schedule.accountId}`
+        `Agent ${first.accountId}`
       ),
-      createTextCell(schedule.customerSupportAgent),
+      createTextCell(first.customerSupportAgent),
+      createTextCell(first.leagueName || `League ${first.idLeague}`),
       createTextCell(
-        schedule.leagueName ||
-        `League ${schedule.idLeague}`
-      ),
-      createTextCell(describeSchedulePeriod(schedule)),
-      createTextCell(
-        `${fieldLabels[schedule.field] || schedule.field}${schedule.limitMode === "early" ? " (Early)" : ""}`
-      ),
-      createTextCell(Number(schedule.value).toLocaleString()),
-      createTextCell(schedule.recurrence || "One time"),
-      createTextCell(
-        formatEasternDateTime(
-          schedule.scheduledForUtc ||
-          schedule.scheduledFor
-        )
-      ),
-      createTextCell(describeScheduleLastRun(schedule)),
-      createStatusCell(schedule.status)
+        `${describeSchedulePeriod(first)}${first.limitMode === "early" ? " (Early)" : ""}`
+      )
     );
 
-    // The failure reason and the completion time are recorded on every job
-    // and were never shown, which is what made a failed run unexplainable.
-    row.append(createTextCell(describeScheduleDetail(schedule)));
+    for (const field of scheduleLimitFields) {
+      row.append(createLimitValueCell(byField.get(field)));
+    }
 
-    const action =
-      document.createElement("td");
+    row.append(
+      createTextCell(first.recurrence || "One time"),
+      createTextCell(
+        formatEasternDateTime(first.scheduledForUtc || first.scheduledFor)
+      ),
+      createTextCell(describeGroupLastRun(group)),
+      createGroupStatusCell(group),
+      createGroupDetailCell(group)
+    );
 
-    const cancel =
-      document.createElement("button");
+    const action = document.createElement("td");
+    const cancellable = group.filter((schedule) =>
+      ["pending", "failed"].includes(schedule.status)
+    );
+    const deletable = group.filter(
+      (schedule) => schedule.status !== "running"
+    );
 
+    const cancel = document.createElement("button");
     cancel.type = "button";
     cancel.className = "schedule-cancel";
     cancel.textContent = "Cancel";
-    cancel.disabled =
-      !["pending", "failed"].includes(schedule.status);
+    cancel.disabled = !cancellable.length;
 
-    cancel.addEventListener(
-      "click",
-      async () => {
-        cancel.disabled = true;
+    cancel.addEventListener("click", async () => {
+      cancel.disabled = true;
 
-        try {
-          const response = await fetch(
-            "/api/schedules/cancel",
-            {
-              method: "POST",
-              headers: {
-                "Content-Type":
-                  "application/json",
-              },
-              body: JSON.stringify({
-                id: schedule.id,
-              }),
-            }
-          );
+      const { removed, failure } = await applyToGroup(
+        cancellable,
+        "/api/schedules/cancel"
+      );
 
-          const data = await response.json();
-
-          if (!response.ok) {
-            throw new Error(
-              data.error ||
-              "Could not cancel schedule"
-            );
+      if (removed.length) {
+        const cancelledIds = new Set(removed);
+        for (const schedule of state.schedules) {
+          if (cancelledIds.has(schedule.id)) {
+            schedule.status = "cancelled";
           }
-
-          state.schedules =
-            state.schedules.filter(
-              (item) =>
-                item.id !== schedule.id
-            );
-
-          renderSchedules();
-          renderRows();
-
-          showMessage(
-            data.message,
-            "success"
-          );
-        } catch (error) {
-          cancel.disabled = false;
-
-          showMessage(
-            error.message,
-            "error"
-          );
         }
+        renderSchedules();
+        renderRows();
       }
-    );
+
+      if (failure) {
+        cancel.disabled = false;
+        showMessage(failure.message, "error");
+        return;
+      }
+
+      showMessage(
+        `Cancelled ${removed.length} scheduled ${removed.length === 1 ? "limit" : "limits"}`,
+        "success"
+      );
+    });
 
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "schedule-cancel";
     remove.textContent = "Delete";
-    remove.disabled = schedule.status === "running";
+    remove.disabled = !deletable.length;
     remove.style.marginLeft = "6px";
 
     remove.addEventListener("click", async () => {
-      const leagueName =
-        schedule.leagueName || `League ${schedule.idLeague}`;
-      const fieldLabel = fieldLabels[schedule.field] || schedule.field;
+      const leagueName = first.leagueName || `League ${first.idLeague}`;
+      const limitNames = deletable
+        .map((schedule) => fieldLabels[schedule.field] || schedule.field)
+        .join(", ");
 
       if (
         !window.confirm(
-          `Delete this schedule for ${leagueName} (${fieldLabel})? This removes only this schedule and cannot be undone.`
+          `Delete this schedule for ${leagueName} (${limitNames})? This removes ${deletable.length === 1 ? "it" : `all ${deletable.length}`} and cannot be undone.`
         )
       ) {
         return;
@@ -2437,37 +2576,35 @@ function renderSchedules() {
       cancel.disabled = true;
       remove.textContent = "Deleting...";
 
-      try {
-        const response = await fetch("/api/schedules/delete", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            id: schedule.id,
-            accountId: schedule.accountId,
-          }),
-        });
+      const { removed, failure } = await applyToGroup(
+        deletable,
+        "/api/schedules/delete",
+        (schedule) => ({ accountId: schedule.accountId })
+      );
 
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(data.error || "Could not delete schedule");
-        }
-
+      if (removed.length) {
+        const deletedIds = new Set(removed);
         state.schedules = state.schedules.filter(
-          (item) => item.id !== schedule.id
+          (schedule) => !deletedIds.has(schedule.id)
         );
+      }
+
+      if (failure) {
+        remove.disabled = false;
+        cancel.disabled = !cancellable.length;
+        remove.textContent = "Delete";
         renderSchedules();
         renderRows();
-        showMessage(data.message, "success");
-      } catch (error) {
-        remove.disabled = schedule.status === "running";
-        cancel.disabled =
-          !["pending", "failed"].includes(schedule.status);
-        remove.textContent = "Delete";
-        showMessage(error.message, "error");
+        showMessage(failure.message, "error");
+        return;
       }
+
+      renderSchedules();
+      renderRows();
+      showMessage(
+        `Deleted ${removed.length} scheduled ${removed.length === 1 ? "limit" : "limits"}`,
+        "success"
+      );
     });
 
     action.append(cancel, remove);
