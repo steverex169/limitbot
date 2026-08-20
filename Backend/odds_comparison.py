@@ -143,7 +143,7 @@ def _load_aceshigh_limits(
     headers: dict[str, str],
     account_id: int,
     league: str,
-) -> dict[str, dict[str, float | int | None]]:
+) -> tuple[dict[str, dict[str, float | int | None]], dict[str, dict[str, int]]]:
     config = LEAGUE_CONFIGS[league]
     data = _partner_get(
         session,
@@ -181,6 +181,19 @@ def _load_aceshigh_limits(
 
     result = {"Full Game": _limit_values(limit_row)}
     organization_id = limit_row.get("IdOrganization") or limit_row.get("Id")
+    league_id = limit_row.get("IdLeague")
+    sport_type_id = limit_row.get("IdSportType") or 0
+    # Where a limit for this period is written. Derived exactly as the
+    # dashboard derives it (IdOrganization falling back to Id), so a write
+    # from this page lands on the same row the dashboard would edit.
+    targets: dict[str, dict[str, int]] = {
+        "Full Game": {
+            "idOrganization": organization_id,
+            "idLeague": league_id,
+            "idSportType": sport_type_id,
+            "periodNumber": 0,
+        }
+    }
     if isinstance(organization_id, int):
         periods = _partner_get(
             session,
@@ -195,7 +208,15 @@ def _load_aceshigh_limits(
             description = str(period.get("PeriodDescription") or "").strip()
             if description:
                 result[description] = _limit_values(period)
-    return result
+                # A period row carries IdLeague 0, so the league comes from
+                # its parent - the same way load_period_rows does it.
+                targets[description] = {
+                    "idOrganization": period.get("Id") or organization_id,
+                    "idLeague": league_id,
+                    "idSportType": period.get("IdSportType") or 0,
+                    "periodNumber": period.get("PeriodNumber") or 0,
+                }
+    return result, targets
 
 
 def _league_from_text(group_name: object, subtype: object = "") -> str | None:
@@ -435,6 +456,7 @@ def _parse_aces_games(
     schedule: list[dict[str, Any]],
     limits: dict[str, dict[str, float | int | None]],
     league: str,
+    targets: dict[str, dict[str, int]] | None = None,
 ) -> list[dict[str, Any]]:
     games: list[dict[str, Any]] = []
     for envelope in schedule:
@@ -449,6 +471,7 @@ def _parse_aces_games(
         if odds_period is None:
             continue
         period_limits = _period_limits(limits, period)
+        period_target = _period_limits(targets or {}, period) or None
         for day in sc.get("schl") or []:
             for game in day.get("g") or []:
                 teams = game.get("ts") if isinstance(game, dict) else None
@@ -507,6 +530,7 @@ def _parse_aces_games(
                         "period": period,
                         "oddsPeriod": odds_period,
                         "teamKeys": {_normalize_team(name) for name in names},
+                        "writeTarget": period_target,
                         "entries": entries,
                     }
                 )
@@ -731,6 +755,17 @@ def _entry_key(entry: dict[str, Any]) -> tuple[str, str]:
     return str(entry.get("marketKey")), str(entry.get("selectionKey"))
 
 
+def _limit_field(market_key: object) -> str | None:
+    """The limit a market row writes to. Over and Under share one limit."""
+    base = str(market_key or "").split("-", 1)[0]
+    return {
+        "moneyline": "moneyLine",
+        "spread": "spread",
+        "total": "total",
+        "teamtotal": "teamTotal",
+    }.get(base)
+
+
 def _market_label(key: str) -> str:
     return {
         "moneyline": "Moneyline",
@@ -764,6 +799,7 @@ def _comparison_section(
         rows.append(
             {
                 "market": _market_label(aces["marketKey"]),
+                "field": _limit_field(aces["marketKey"]),
                 "selection": aces["selection"],
                 "acesHigh": {
                     "line": aces["line"],
@@ -787,6 +823,7 @@ def _comparison_section(
             f"{participants.get('participant2Name')}"
         ),
         "period": aces_game["period"],
+        "writeTarget": aces_game.get("writeTarget"),
         "startTimeUtc": (
             datetime.fromtimestamp(start_time, timezone.utc).isoformat()
             if isinstance(start_time, (int, float))
@@ -804,13 +841,15 @@ def _build_uncached(
     league: str,
 ) -> dict[str, Any]:
     config = LEAGUE_CONFIGS[league]
-    limits = _load_aceshigh_limits(
+    limits, targets = _load_aceshigh_limits(
         partner_session,
         partner_headers,
         account_id,
         league,
     )
-    aces_games = _parse_aces_games(_guest_schedule(league), limits, league)
+    aces_games = _parse_aces_games(
+        _guest_schedule(league), limits, league, targets
+    )
     odds_session = requests.Session()
     odds_session.headers.update(
         {"Accept": "application/json", "User-Agent": "limitbot-comparison/1.0"}

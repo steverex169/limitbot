@@ -553,6 +553,120 @@ function renderComparisonProfiles(data) {
   });
 }
 
+/*
+ * Pinnacle reports limits to the dollar, e.g. 7,878. Writing that verbatim
+ * fills the limits table with numbers nobody chose, so the button offers the
+ * nearest hundred instead.
+ */
+function roundPushValue(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) {
+    return null;
+  }
+  return Math.max(100, Math.round(number / 100) * 100);
+}
+
+/*
+ * A row is per selection, but the limit behind it belongs to the whole
+ * league and period - both teams' moneyline rows write the same field. The
+ * confirmation says so, because the button's position next to one team reads
+ * like it only affects that fixture.
+ */
+function describePushTarget(data, section, row, target) {
+  const league = comparisonText(data.league, "this league");
+  const period = comparisonText(section.period, "Full Game");
+  const field = fieldLabels[row.field] || row.field;
+  const current = formatComparisonLimit(row.acesHigh?.limit);
+  const next = Number(target).toLocaleString();
+
+  return (
+    `Set the ${field} limit for ${league} ${period} to ${next}?\n\n` +
+    `Currently ${current}.\n\n` +
+    `This is the league's limit, so it applies to every ${league} ` +
+    `${period} fixture — not only ${comparisonText(section.fixture, "this game")}.`
+  );
+}
+
+function createPushLimitCell(data, section, row) {
+  const cell = document.createElement("td");
+  cell.className = "comparison-push-cell";
+
+  const target = roundPushValue(row.pinnacle?.limit);
+  const writeTarget = section.writeTarget;
+
+  /* No field, no target or no usable number means nothing to write. */
+  if (!row.field || !writeTarget || target === null) {
+    return cell;
+  }
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "comparison-push";
+  button.textContent = `Use ${target.toLocaleString()}`;
+  button.title = `Set the ${fieldLabels[row.field] || row.field} limit to ${target.toLocaleString()}`;
+
+  const current = Number(row.acesHigh?.limit);
+  if (Number.isFinite(current) && current === target) {
+    button.disabled = true;
+    button.textContent = "Matches";
+    button.title = "This limit already matches Pinnacle's, rounded";
+    cell.append(button);
+    return cell;
+  }
+
+  button.addEventListener("click", async () => {
+    if (!window.confirm(describePushTarget(data, section, row, target))) {
+      return;
+    }
+
+    const original = button.textContent;
+    button.disabled = true;
+    button.textContent = "Saving...";
+
+    try {
+      const response = await fetch("/api/limits", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: data.accountId,
+          idOrganization: writeTarget.idOrganization,
+          idLeague: writeTarget.idLeague,
+          idSportType: writeTarget.idSportType,
+          periodNumber: writeTarget.periodNumber || 0,
+          field: row.field,
+          value: target,
+          limitMode: "normal",
+        }),
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Could not set the limit");
+      }
+
+      /*
+       * A blue limit is skipped rather than written, so report what the
+       * server actually did instead of assuming the value changed.
+       */
+      const skipped = result.changed === false;
+      await loadPinnacleComparison(true).catch(() => {});
+      setComparisonMessage(
+        skipped
+          ? result.note || "Skipped, the limit was not changed"
+          : `${fieldLabels[row.field] || row.field} limit set to ${target.toLocaleString()}`,
+        skipped ? "error" : "success"
+      );
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = original;
+      setComparisonMessage(error.message, "error");
+    }
+  });
+
+  cell.append(button);
+  return cell;
+}
+
 function renderPinnacleComparison(data) {
   state.comparison = data;
   elements.comparisonFixtureCount.textContent =
@@ -621,6 +735,7 @@ function renderPinnacleComparison(data) {
       "Pinnacle line",
       "Pinnacle odds",
       "Pinnacle limit",
+      "",
     ].forEach((label) => {
       const th = document.createElement("th");
       th.textContent = label;
@@ -657,7 +772,8 @@ function renderPinnacleComparison(data) {
             data.pinnacleLimitCurrency || "USD"
           ),
           pinnacleLimitClass
-        )
+        ),
+        createPushLimitCell(data, section, row)
       );
       body.append(tr);
     });
