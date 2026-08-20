@@ -4127,6 +4127,116 @@ document.addEventListener(
   }
 );
 
+elements.telegramEditCancel?.addEventListener("click", () => {
+  state.editingTelegramRecipientId = null;
+  elements.telegramEditDialog?.close();
+});
+
+elements.telegramEditForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  const recipientId = state.editingTelegramRecipientId;
+  const name = elements.telegramEditName?.value.trim() || "";
+  const chatId = elements.telegramEditChatId?.value.trim() || "";
+
+  if (!recipientId) {
+    return;
+  }
+
+  if (!name || !chatId) {
+    elements.telegramEditMessage.textContent =
+      "Name and Telegram Chat ID are required.";
+    elements.telegramEditMessage.hidden = false;
+    return;
+  }
+
+  elements.telegramEditSave.disabled = true;
+  elements.telegramEditSave.textContent = "Saving...";
+
+  try {
+    const response = await fetch("/api/telegram-chats/edit", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        id: recipientId,
+        name,
+        chatId,
+      }),
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "Could not update Telegram recipient");
+    }
+
+    await loadTelegramChats();
+    state.editingTelegramRecipientId = null;
+    elements.telegramEditDialog.close();
+    showTelegramAlertsMessage(
+      `${data.recipient?.name || name} updated.`,
+      "success"
+    );
+  } catch (error) {
+    elements.telegramEditMessage.textContent = error.message;
+    elements.telegramEditMessage.hidden = false;
+  } finally {
+    elements.telegramEditSave.disabled = false;
+    elements.telegramEditSave.textContent = "Save changes";
+  }
+});
+
+elements.telegramEditDialog?.addEventListener("close", () => {
+  state.editingTelegramRecipientId = null;
+  if (elements.telegramEditMessage) {
+    elements.telegramEditMessage.textContent = "";
+    elements.telegramEditMessage.hidden = true;
+  }
+});
+
+elements.telegramAlertsForm?.addEventListener(
+  "submit",
+  async (event) => {
+    event.preventDefault();
+
+    const name = elements.telegramAlertName?.value.trim() || "";
+    const chatId = elements.telegramAlertChatId?.value.trim() || "";
+
+    if (!name || !chatId) {
+      showTelegramAlertsMessage("Enter both a name and Telegram Chat ID.", "error");
+      return;
+    }
+
+    elements.telegramAlertAdd.disabled = true;
+    elements.telegramAlertAdd.textContent = "Adding...";
+
+    try {
+      const response = await fetch("/api/telegram-chats", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({name, chatId}),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Could not add Telegram recipient");
+      }
+
+      elements.telegramAlertName.value = "";
+      elements.telegramAlertChatId.value = "";
+      await loadTelegramChats();
+      showTelegramAlertsMessage(
+        `${data.recipient?.name || name} added for Telegram alerts.`,
+        "success"
+      );
+    } catch (error) {
+      showTelegramAlertsMessage(error.message, "error");
+    } finally {
+      elements.telegramAlertAdd.disabled = false;
+      elements.telegramAlertAdd.textContent = "Add Telegram recipient";
+    }
+  }
+);
+
 elements.confirmSchedule.addEventListener(
   "click",
   (event) => {
