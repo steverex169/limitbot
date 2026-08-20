@@ -2762,7 +2762,14 @@ async function loadAgents() {
     loadLeagues(false).catch((error) => {
       showMessage(error.message, "error");
     });
+    await loadComparisonLeagues();
     await loadPinnacleComparison().catch(() => { });
+  } else if (isTradingMonitorRoute()) {
+    loadLeagues(false).catch((error) => {
+      showMessage(error.message, "error");
+    });
+    await loadTradingLeagues();
+    await loadTradingMonitor().catch(() => { });
   } else {
     await loadLeagues();
   }
