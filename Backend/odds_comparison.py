@@ -777,6 +777,11 @@ def _market_label(key: str) -> str:
     }.get(key, key)
 
 
+# The curve is read across these distances from kick-off, so a cycle always
+# sees both the quiet early market and the busy one near the start.
+TIME_BUCKETS = ((0.0, 3.0), (3.0, 8.0), (8.0, 24.0), (24.0, 1e9))
+
+
 class RateLimited(ComparisonError):
     """OddsPapi refused because we asked too often."""
 
@@ -784,7 +789,7 @@ class RateLimited(ComparisonError):
 def sample_pinnacle_limits(
     api_key: str,
     league: str,
-    max_fixtures: int = 6,
+    max_fixtures: int = 8,
 ) -> list[dict[str, Any]]:
     """Pinnacle's current limits for one league, with time to kick-off.
 
@@ -802,9 +807,11 @@ def sample_pinnacle_limits(
     now = time.time()
     try:
         # OddsPapi's quota is shared with the comparison page, which a person
-        # is waiting on. Sample only the fixtures nearest kick-off - they are
-        # the ones whose limits are still moving - and never more than a
-        # handful, so a background reading cannot starve a page load.
+        # is waiting on, so only a handful of fixtures are read per cycle.
+        # Which handful matters: taking the nearest ones meant every MLB
+        # reading came from games under three hours out, and the early end of
+        # the curve - the part a morning limit is set from - was never seen.
+        # Spread the budget across the distance instead.
         upcoming = []
         for fixture in _league_fixtures(session, api_key, league):
             try:
@@ -816,7 +823,35 @@ def sample_pinnacle_limits(
             upcoming.append((hours, fixture))
         upcoming.sort(key=lambda item: item[0])
 
-        for hours_to_start, fixture in upcoming[:max_fixtures]:
+        chosen: list[tuple[float, dict[str, Any]]] = []
+        seen_ids: set[str] = set()
+        for low, high in TIME_BUCKETS:
+            for hours, fixture in upcoming:
+                if len(chosen) >= max_fixtures:
+                    break
+                if not low <= hours < high:
+                    continue
+                fixture_id = str(fixture.get("fixtureId"))
+                if fixture_id in seen_ids:
+                    continue
+                seen_ids.add(fixture_id)
+                chosen.append((hours, fixture))
+                # Two per bucket is enough to see the level without spending
+                # the whole budget on one part of the curve.
+                if sum(1 for h, _ in chosen if low <= h < high) >= 2:
+                    break
+        # Whatever budget the buckets left over goes to the nearest games,
+        # which are the ones still moving.
+        for hours, fixture in upcoming:
+            if len(chosen) >= max_fixtures:
+                break
+            fixture_id = str(fixture.get("fixtureId"))
+            if fixture_id in seen_ids:
+                continue
+            seen_ids.add(fixture_id)
+            chosen.append((hours, fixture))
+
+        for hours_to_start, fixture in chosen:
             try:
                 payload = _odds_get(
                     session,

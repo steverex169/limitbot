@@ -24,7 +24,7 @@ import time  # Added for retry delays
 
 import requests
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import case, delete, func, inspect, select, text, update
+from sqlalchemy import bindparam, case, delete, func, inspect, select, text, update
 from urllib.parse import urlparse, parse_qs
 from database import Base, database_session, engine
 from model import (
@@ -2784,6 +2784,104 @@ limit_field_labels = {
 }
 
 
+# Which recorded distance-from-kick-off each ramp position is read from. The
+# first step of a day is the quiet market, the last is the busy one.
+ramp_curve_windows = {
+    "start": (6.0, 1e9),
+    "mid": (3.0, 6.0),
+    "end": (0.0, 3.0),
+}
+
+
+def pinnacle_curve(league_slug=None):
+    """Pinnacle's recorded limits by league, market and distance from start.
+
+    This is the measured curve the ramp is built from. Only the shape carries
+    over to a smaller book, so the caller scales it; what is returned here is
+    Pinnacle's own numbers, unmodified.
+    """
+    rows = []
+    with database_session() as db:
+        query = select(
+            PinnacleLimitSample.league,
+            PinnacleLimitSample.period,
+            PinnacleLimitSample.field,
+            PinnacleLimitSample.hours_to_start,
+            PinnacleLimitSample.limit_value,
+        )
+        if league_slug:
+            query = query.where(PinnacleLimitSample.league == league_slug)
+        rows = db.execute(query).all()
+
+    buckets = {}
+    for league, period, field, hours, value in rows:
+        for name, (low, high) in ramp_curve_windows.items():
+            if low <= float(hours) < high:
+                buckets.setdefault((league, period, field), {}).setdefault(
+                    name, []
+                ).append(float(value))
+
+    curve = {}
+    for (league, period, field), by_window in buckets.items():
+        entry = {}
+        for name, values in by_window.items():
+            values.sort()
+            middle = len(values) // 2
+            entry[name] = {
+                "median": (
+                    values[middle]
+                    if len(values) % 2
+                    else (values[middle - 1] + values[middle]) / 2
+                ),
+                "lowest": values[0],
+                "samples": len(values),
+            }
+        curve[f"{league}|{period}|{field}"] = entry
+    return {
+        "windows": {
+            name: {"fromHours": low, "toHours": None if high > 1e8 else high}
+            for name, (low, high) in ramp_curve_windows.items()
+        },
+        "curve": curve,
+    }
+
+
+def league_slug_for_row(league_name):
+    """The OddsPapi league a limit row belongs to, or None.
+
+    LEAGUE_CONFIGS carries AccessHigh's own label for each league, so this is
+    an exact match rather than a guess.
+    """
+    label = str(league_name or "").strip().casefold()
+    if not label:
+        return None
+    for slug, config in LEAGUE_CONFIGS.items():
+        if str(config.get("limitRow", "")).strip().casefold() == label:
+            return slug
+    return None
+
+
+def pinnacle_ramp_value(curve, slug, period, field, window, scale_percent):
+    """One step's limit, read from the recorded curve and scaled.
+
+    Pinnacle's level reflects their volume, not a three-hundred-customer
+    book's, so it is never used raw: the percentage is the operator's own risk
+    appetite and the shape is all that is borrowed. Rounded to the nearest
+    hundred so the result reads as a number somebody chose.
+    """
+    entry = (curve or {}).get(f"{slug}|{period}|{field}")
+    if not entry:
+        return None
+    window_entry = entry.get(window)
+    median = (window_entry or {}).get("median")
+    if not median:
+        return None
+    value = float(median) * (float(scale_percent) / 100.0)
+    if value <= 0:
+        return None
+    return max(100, int(round(value / 100.0)) * 100)
+
+
 def create_schedule_ramp(request_data):
     """Create a whole limit ramp in one action.
 
@@ -2791,7 +2889,14 @@ def create_schedule_ramp(request_data):
     a game has taken no money, higher near the start once it has. Each step is
     an ordinary recurring schedule; there is no new machinery here, only a way
     to create a few hundred of them without a few hundred clicks.
+
+    Written as one transaction rather than a call to `create_schedule` per
+    row. A three-step ramp over fifty leagues and four markets is six hundred
+    schedules, and six hundred separate commits against RDS took long enough
+    that the request could time out with the ramp half created.
     """
+    auth = auth_context()
+
     steps = request_data.get("steps") or []
     targets = request_data.get("targets") or []
     fields = [
@@ -2806,16 +2911,87 @@ def create_schedule_ramp(request_data):
     if not fields:
         raise ValueError("Select at least one limit type")
 
+    try:
+        account_id = validate_account_id(int(request_data["accountId"]))
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("Select an agent before building a ramp") from error
+
+    limit_mode = str(request_data.get("limitMode", "normal")).strip().lower()
+    if limit_mode not in limit_mode_prefixes:
+        raise ValueError("Unsupported limit mode")
+    is_early_limit = limit_mode == "early"
+
+    telegram_audience = normalize_telegram_audience(
+        request_data.get("telegramAudience", "all")
+    )
+
+    customer_support_agent = str(
+        request_data.get("customerSupportAgent", "")
+    ).strip()
+    if not customer_support_agent:
+        raise ValueError("Enter the Customer Support Agent name")
+    if len(customer_support_agent) > 100:
+        raise ValueError("Customer Support Agent name must be 100 characters or fewer")
+
+    try:
+        recurrence_days = sorted(
+            {int(day) for day in request_data.get("recurrenceDays", [])}
+        )
+    except (TypeError, ValueError) as error:
+        raise ValueError("Select valid weekdays") from error
+    if any(day < 0 or day > 6 for day in recurrence_days):
+        raise ValueError("Select valid weekdays")
+
+    # A ramp can take its numbers from the recorded Pinnacle curve instead of
+    # by hand. Each step then names a part of the day rather than an amount,
+    # and every league and market gets its own value - Pinnacle takes 5,600 on
+    # a baseball moneyline and 750 on a football one, so a single number
+    # across leagues would be meaningless.
+    try:
+        scale_percent = int(request_data.get("pinnacleScalePercent", 0) or 0)
+    except (TypeError, ValueError) as error:
+        raise ValueError("Enter a valid Pinnacle percentage") from error
+    from_pinnacle = scale_percent > 0
+    if from_pinnacle and not 1 <= scale_percent <= 200:
+        raise ValueError("The Pinnacle percentage must be between 1 and 200")
+
     cleaned_steps = []
+    step_times = set()
     for step in steps:
         try:
             step_time = str(step["time"]).strip()
-            step_value = int(step["value"])
-        except (KeyError, TypeError, ValueError) as error:
-            raise ValueError("Every ramp step needs a time and a limit") from error
-        if not re.fullmatch(r"[0-2]\d:[0-5]\d", step_time):
+        except (KeyError, TypeError) as error:
+            raise ValueError("Every ramp step needs a time") from error
+        if from_pinnacle:
+            step_value = str(step.get("window") or "").strip().lower()
+            if step_value not in ramp_curve_windows:
+                raise ValueError(
+                    "Every ramp step needs a part of the day to read Pinnacle from"
+                )
+        else:
+            try:
+                step_value = int(step["value"])
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError(
+                    "Every ramp step needs a time and a limit"
+                ) from error
+        # Anchored to real clock times: the old pattern also accepted 24:00
+        # through 29:59, which passed here and failed later per schedule.
+        if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", step_time):
             raise ValueError(f"'{step_time}' is not a valid Eastern time")
+        if not from_pinnacle and (
+            step_value < 0 or step_value > 1_000_000_000
+        ):
+            raise ValueError("Every ramp limit must be between 0 and 1,000,000,000")
+        # Two steps at one time are two schedules racing to write different
+        # numbers to the same limit, and which one lands is undefined.
+        if step_time in step_times:
+            raise ValueError(
+                f"Two steps are both set to {step_time}. Give each step its own time."
+            )
+        step_times.add(step_time)
         cleaned_steps.append((step_time, step_value))
+    cleaned_steps.sort()
 
     total = len(targets) * len(fields) * len(cleaned_steps)
     if total > ramp_schedule_limit:
@@ -2824,76 +3000,225 @@ def create_schedule_ramp(request_data):
             f"{ramp_schedule_limit:,} limit. Choose fewer leagues, markets or steps."
         )
 
-    created = 0
     skipped = []
-    failed = []
+    planned = []
+    plan_curve_keys = {}
+    curve = pinnacle_curve().get("curve") if from_pinnacle else None
 
     for target in targets:
         league_label = str(
             target.get("leagueName") or f"League {target.get('idLeague')}"
         )
+        try:
+            organization_id = int(target["idOrganization"])
+            league_id = int(target["idLeague"])
+            sport_type_id = int(target["idSportType"])
+            period_number = int(target.get("periodNumber", 0) or 0)
+        except (KeyError, TypeError, ValueError):
+            skipped.append(f"{league_label} is missing its league ids")
+            continue
+
+        # Looked up once per league rather than once per league, market and
+        # step, which is the same answer for a fraction of the work.
+        matching_row = find_limit_row(
+            account_id, organization_id, league_id, sport_type_id, period_number
+        )
+        if matching_row is None:
+            skipped.append(
+                f"{league_label} is no longer in this agent's editable leagues"
+            )
+            continue
+        if ".Exotics[" in matching_row.get("JsonPath", ""):
+            skipped.append(f"{league_label}: props/exotics are pending verification")
+            continue
+
+        is_game_setup = matching_row.get("PeriodTypes.GameSetup") is True
         # A league that only carries a Spread limit rejects the others; that is
         # expected for those leagues, not a fault worth failing the ramp over.
         allowed = target.get("editableFields")
         for field in fields:
+            if is_game_setup and field != "spread":
+                skipped.append(f"{league_label} uses only the Spread limit")
+                continue
             if isinstance(allowed, list) and allowed and field not in allowed:
                 skipped.append(
                     f"{league_label} does not use the "
                     f"{limit_field_labels.get(field, field)} limit"
                 )
                 continue
-            for step_time, step_value in cleaned_steps:
-                try:
-                    create_schedule({
-                        "accountId": request_data.get("accountId"),
-                        "idOrganization": target.get("idOrganization"),
-                        "idLeague": target.get("idLeague"),
-                        "idSportType": target.get("idSportType"),
-                        "periodNumber": target.get("periodNumber", 0),
-                        "field": field,
-                        "value": step_value,
-                        "limitMode": request_data.get("limitMode", "normal"),
-                        "recurrenceDays": request_data.get("recurrenceDays", []),
-                        "recurrenceTime": step_time,
-                        "customerSupportAgent": request_data.get(
-                            "customerSupportAgent", ""
-                        ),
-                        "telegramAudience": request_data.get(
-                            "telegramAudience", "all"
-                        ),
-                    })
-                    created += 1
-                except ValueError as error:
-                    skipped.append(f"{league_label} at {step_time}: {error}")
-                except Exception as error:
-                    logger.warning(
-                        "Ramp step failed for %s at %s",
-                        league_label,
-                        step_time,
-                        exc_info=True,
+            key = (organization_id, league_id, sport_type_id, period_number, field)
+            if from_pinnacle:
+                slug = league_slug_for_row(league_label)
+                if not slug:
+                    skipped.append(
+                        f"{league_label} is not a league Pinnacle data is recorded for"
                     )
-                    failed.append(f"{league_label} at {step_time}: {error}")
+                    continue
+                plan_curve_keys[key] = (
+                    slug,
+                    str(target.get("periodDescription") or "Full Game"),
+                )
+            planned.append(key)
 
-    if not created:
+    if not planned:
         raise ValueError(
-            skipped[0] if skipped
-            else failed[0] if failed
-            else "No schedules could be created"
+            skipped[0] if skipped else "No schedules could be created"
         )
 
+    # Every schedule at one step time runs at the same moment, so the next run
+    # is worked out once per step instead of once per schedule. That also
+    # stops a ramp created across a minute boundary landing on two dates.
+    if recurrence_days:
+        stored_recurrence_days = ",".join(str(day) for day in recurrence_days)
+        step_runs = {
+            step_time: next_recurring_run(recurrence_days, step_time)
+            for step_time, _ in cleaned_steps
+        }
+    else:
+        stored_recurrence_days = None
+        step_runs = {
+            step_time: next_one_time_run(step_time)
+            for step_time, _ in cleaned_steps
+        }
+
+    # Re-running the builder to correct a time or a number used to leave the
+    # first ramp in place, so both sets fired and the later write won by
+    # accident. Replacing the pending recurring schedules this ramp covers
+    # makes a second run a correction rather than a duplicate.
+    replace_existing = (
+        bool(stored_recurrence_days)
+        and request_data.get("replaceExisting", True) is not False
+    )
+
+    created_ids = []
+    replaced = 0
+
+    with database_session() as db:
+        if replace_existing:
+            for (
+                organization_id,
+                league_id,
+                sport_type_id,
+                period_number,
+                field,
+            ) in set(planned):
+                replaced += db.execute(
+                    delete(ScheduledLimit).where(
+                        ScheduledLimit.user_id == auth["userId"],
+                        ScheduledLimit.account_id == int(account_id),
+                        ScheduledLimit.organization_id == organization_id,
+                        ScheduledLimit.league_id == league_id,
+                        ScheduledLimit.sport_type_id == sport_type_id,
+                        ScheduledLimit.period_number == period_number,
+                        ScheduledLimit.field == field,
+                        ScheduledLimit.is_early_limit == is_early_limit,
+                        ScheduledLimit.status == "pending",
+                        # A job the worker has already claimed is left alone,
+                        # and a one-off scheduled by hand is not this ramp's
+                        # to remove.
+                        ScheduledLimit.recurrence_days.is_not(None),
+                    )
+                ).rowcount
+
+        for (
+            organization_id,
+            league_id,
+            sport_type_id,
+            period_number,
+            field,
+        ) in planned:
+            key = (
+                organization_id,
+                league_id,
+                sport_type_id,
+                period_number,
+                field,
+            )
+            for step_time, step_value in cleaned_steps:
+                if from_pinnacle:
+                    slug, period_description = plan_curve_keys[key]
+                    step_value = pinnacle_ramp_value(
+                        curve,
+                        slug,
+                        period_description,
+                        field,
+                        step_value,
+                        scale_percent,
+                    )
+                    if step_value is None:
+                        # Nothing recorded for this market at this part of the
+                        # day yet. Say so rather than inventing a limit.
+                        skipped.append(
+                            f"{slug.upper()} {limit_field_labels.get(field, field)}: "
+                            f"no Pinnacle readings yet for the {step_time} step"
+                        )
+                        continue
+                job_id = uuid.uuid4().hex
+                db.add(
+                    ScheduledLimit(
+                        id=job_id,
+                        user_id=auth["userId"],
+                        login_session_id=auth["dbSessionId"],
+                        account_id=account_id,
+                        organization_id=organization_id,
+                        league_id=league_id,
+                        sport_type_id=sport_type_id,
+                        period_number=period_number,
+                        field=field,
+                        value=step_value,
+                        scheduled_for=step_runs[step_time]
+                        .astimezone(timezone.utc)
+                        .replace(tzinfo=None),
+                        recurrence_days=stored_recurrence_days,
+                        recurrence_time=step_time if stored_recurrence_days else None,
+                        telegram_audience=telegram_audience,
+                        is_early_limit=is_early_limit,
+                        status="pending",
+                    )
+                )
+                created_ids.append(job_id)
+
+        db.flush()
+        # customer_support_agent has no mapped attribute on ScheduledLimit, so
+        # it is set the same way create_schedule sets it - in chunks here,
+        # because a ramp can be a thousand ids.
+        for start in range(0, len(created_ids), 500):
+            db.execute(
+                text(
+                    "UPDATE scheduled_limits "
+                    "SET customer_support_agent = :customer_support_agent "
+                    "WHERE id IN :job_ids"
+                ).bindparams(bindparam("job_ids", expanding=True)),
+                {
+                    "customer_support_agent": customer_support_agent,
+                    "job_ids": created_ids[start:start + 500],
+                },
+            )
+        db.commit()
+
+    created = len(created_ids)
+    logger.info(
+        "Created ramp of %s schedules for account %s (user %s), replacing %s",
+        created,
+        account_id,
+        auth["userId"],
+        replaced,
+    )
+
     parts = [f"Created {created:,} scheduled limit{'' if created == 1 else 's'}"]
+    if replaced:
+        parts.append(f"replacing {replaced:,} already scheduled")
     if skipped:
         parts.append(f"{len(skipped)} skipped")
-    if failed:
-        parts.append(f"{len(failed)} failed")
 
     return {
         "message": ", ".join(parts),
         "created": created,
+        "replaced": replaced,
         # Deduplicated: a league that does not use a market says so once, not
         # once per step.
         "skipped": sorted(set(skipped))[:20],
-        "failed": sorted(set(failed))[:20],
+        "failed": [],
     }
 
 

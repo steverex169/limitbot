@@ -2861,17 +2861,65 @@ dialog h2 {
 
 /* The league list can run long, so it scrolls instead of pushing the button
    off the bottom of the page. */
-/* A tidy grid rather than a wrapped run of chips: with fifty-odd leagues the
-   flowing layout clipped rows mid-height and made scanning impossible. */
+/* Grouped by the tier AccessHigh files each league under, because in its own
+   payload order the first screenful was Politics, Poker and Dog Racing while
+   the Big Six sat below the fold. */
 .ramp-leagues {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 4px 16px;
-  max-height: 320px;
+  max-height: min(56vh, 520px);
   overflow-y: auto;
-  padding: 12px;
+  padding: 0 12px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
+  background: var(--surface);
+}
+
+.ramp-league-group[hidden] {
+  display: none;
+}
+
+.ramp-league-group + .ramp-league-group {
+  margin-top: 12px;
+}
+
+/* Sticky so the tier a league belongs to is still named after scrolling past
+   its heading. Opaque, or the rows behind it show through. */
+.ramp-league-group-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 0 5px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.ramp-league-group-name {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.ramp-league-group-count {
+  margin-left: auto;
+}
+
+.ramp-league-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 4px 16px;
+  padding-top: 7px;
+}
+
+/* .ramp-check is inline-flex, which beats the browser's own [hidden] rule, so
+   filtered-out leagues need saying twice. They stay in the DOM rather than
+   being removed, which is what keeps a ticked league ticked while the filter
+   hides it. */
+.ramp-check[hidden] {
+  display: none;
 }
 
 /* Long league names truncate instead of pushing the grid sideways. */
@@ -2887,9 +2935,27 @@ dialog h2 {
 
 .ramp-leagues-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 6px 12px;
   margin-bottom: 6px;
+}
+
+.ramp-league-search {
+  width: 210px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.ramp-leagues-head .ramp-count {
+  margin-left: auto;
+}
+
+.ramp-empty {
+  padding: 14px 0;
 }
 
 .ramp-check {
@@ -2903,6 +2969,47 @@ dialog h2 {
 .ramp-count {
   color: var(--muted);
   font-size: 12px;
+}
+
+/* Leagues and steps side by side. The steps table is three narrow columns and
+   on its own row it left two thirds of the page empty beside it, which also
+   pushed Create ramp below the fold. */
+.ramp-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 20px 24px;
+  align-items: start;
+  max-width: 1100px;
+  margin-bottom: 4px;
+}
+
+@media (max-width: 1180px) {
+  .ramp-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ramp-steps-box {
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.ramp-replace {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 680px;
+  margin: 18px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ramp-replace input {
+  height: auto;
+  margin-top: 2px;
 }
 
 /* Global table styling stretches every table to 100%, which marooned Time,
@@ -3034,7 +3141,74 @@ dialog h2 {
   max-width: 1100px;
 }
 
+/* Four markets as two rows of two. Left to wrap, "Team total" dropped to a
+   line of its own whenever the column was a few pixels short. */
+.build-ramp-panel #rampFields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, auto));
+  justify-content: start;
+  gap: 6px 16px;
+}
+
+/* Inside the two columns each field fills its own column instead of stopping
+   at the full-width cap. */
+.build-ramp-panel .ramp-columns .ramp-field {
+  max-width: none;
+  margin-bottom: 0;
+}
+
 .ramp-builder .button.primary:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* Source selector and its percentage dial. */
+.ramp-select {
+  min-height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
+.ramp-scale {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ramp-scale input {
+  width: 68px;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ramp-step-window {
+  min-height: 32px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+/* Only one of the two ever shows, so the column keeps its width. */
+.ramp-steps-table th:nth-child(2),
+.ramp-steps-table td:nth-child(2) {
+  width: 190px;
 }

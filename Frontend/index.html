@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Limit Control Bot</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/styles.css?v=20260822-ramp-leagues">
+  <link rel="stylesheet" href="/styles.css?v=20260822-ramp-picker">
 </head>
 
 <body class="app-loading">
@@ -347,32 +347,57 @@
               <div id="rampDays" class="ramp-checks"></div>
             </div>
 
+            <div class="ramp-field">
+              <span class="ramp-label">Limits from</span>
+              <select id="rampSource" class="ramp-select">
+                <option value="manual">Numbers I enter</option>
+                <option value="pinnacle">Pinnacle's recorded limits</option>
+              </select>
+              <label id="rampScaleField" class="ramp-scale" hidden>
+                <span>at</span>
+                <input id="rampScale" type="number" min="1" max="200" step="5" value="60">
+                <span>% of Pinnacle</span>
+              </label>
+            </div>
+
             <label class="ramp-field">
               <span class="ramp-label">Customer Support Agent</span>
               <input id="rampAgentName" type="text" maxlength="100" autocomplete="off" placeholder="Who is setting this" required>
             </label>
           </div>
 
-          <div class="ramp-field">
-            <span class="ramp-label">Leagues</span>
-            <div class="ramp-leagues-head">
-              <button id="rampSelectAll" type="button" class="link-button">Select all</button>
-              <button id="rampSelectNone" type="button" class="link-button">Clear</button>
-              <span id="rampLeagueCount" class="ramp-count"></span>
+          <div class="ramp-columns">
+            <div class="ramp-field">
+              <span class="ramp-label">Leagues</span>
+              <div class="ramp-leagues-head">
+                <input id="rampLeagueSearch" class="ramp-league-search" type="search" placeholder="Filter leagues..." autocomplete="off" aria-label="Filter leagues">
+                <button id="rampSelectAll" type="button" class="link-button">Select all</button>
+                <button id="rampSelectNone" type="button" class="link-button">Clear</button>
+                <span id="rampLeagueCount" class="ramp-count"></span>
+              </div>
+              <div id="rampLeagues" class="ramp-leagues"></div>
             </div>
-            <div id="rampLeagues" class="ramp-checks ramp-leagues"></div>
+
+            <div class="ramp-field">
+              <span class="ramp-label">Steps through the day (Eastern)</span>
+              <div class="ramp-steps-box">
+                <table class="ramp-steps-table">
+                  <thead>
+                    <tr><th>Time</th><th id="rampStepValueHead">Limit</th><th></th></tr>
+                  </thead>
+                  <tbody id="rampSteps"></tbody>
+                </table>
+                <button id="rampAddStep" type="button" class="link-button">Add a step</button>
+              </div>
+            </div>
           </div>
 
-          <div class="ramp-field">
-            <span class="ramp-label">Steps through the day (Eastern)</span>
-            <table class="ramp-steps-table">
-              <thead>
-                <tr><th>Time</th><th>Limit</th><th></th></tr>
-              </thead>
-              <tbody id="rampSteps"></tbody>
-            </table>
-            <button id="rampAddStep" type="button" class="link-button">Add a step</button>
-          </div>
+          <label class="ramp-replace">
+            <input id="rampReplace" type="checkbox" checked>
+            <span>Replace the recurring schedules these leagues and limit types already
+              have. Leave this on so correcting a ramp replaces it instead of adding a
+              second one that fires alongside the first.</span>
+          </label>
 
           <div id="rampMessage" class="message" role="status" hidden></div>
           <p id="rampPreview" class="ramp-count"></p>
@@ -528,7 +553,7 @@
     </div>
   </dialog>
 
-  <script src="/script.js?v=20260822-ramp-leagues" defer></script>
+  <script src="/script.js?v=20260822-ramp-picker" defer></script>
 </body>
 
 </html>

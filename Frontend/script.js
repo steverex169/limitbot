@@ -168,12 +168,18 @@ const elements = {
   rampFields: document.querySelector("#rampFields"),
   rampDays: document.querySelector("#rampDays"),
   rampLeagues: document.querySelector("#rampLeagues"),
+  rampLeagueSearch: document.querySelector("#rampLeagueSearch"),
   rampLeagueCount: document.querySelector("#rampLeagueCount"),
   rampSelectAll: document.querySelector("#rampSelectAll"),
   rampSelectNone: document.querySelector("#rampSelectNone"),
   rampSteps: document.querySelector("#rampSteps"),
+  rampSource: document.querySelector("#rampSource"),
+  rampScale: document.querySelector("#rampScale"),
+  rampScaleField: document.querySelector("#rampScaleField"),
+  rampStepValueHead: document.querySelector("#rampStepValueHead"),
   rampAddStep: document.querySelector("#rampAddStep"),
   rampAgentName: document.querySelector("#rampAgentName"),
+  rampReplace: document.querySelector("#rampReplace"),
   rampMessage: document.querySelector("#rampMessage"),
   rampPreview: document.querySelector("#rampPreview"),
   rampCreate: document.querySelector("#rampCreate"),
@@ -3063,16 +3069,62 @@ function rampCheckedValues(host) {
   );
 }
 
-/* Only rows a limit can actually be written to: summary rows roll up their
+/* AccessHigh files its leagues under four Summary tiers - Big Six, Mid-Level,
+ * Minor, Novelty - and a league belongs to the last tier above it in the
+ * payload. That is the same rule the dashboard's League dropdown uses, so both
+ * agree on which league sits where.
+ *
+ * Only rows a limit can actually be written to: summary rows roll up their
  * children, and exotics are not editable at all. */
+const rampTierOrder = ["BIG SIX", "MID-LEVEL", "MINOR", "NOVELTY"];
+
+function rampTierRank(label) {
+  const rank = rampTierOrder.indexOf(normalizeLimitKey(label));
+  return rank === -1 ? rampTierOrder.length : rank;
+}
+
+function rampLeagueGroups() {
+  const groups = new Map();
+  let tier = "";
+
+  for (const row of state.rows || []) {
+    if (isParentLimitRow(row)) {
+      tier = getRowDisplayName(row);
+      continue;
+    }
+    if (isOtherLimitRow(row)) {
+      continue;
+    }
+    if (
+      row.rowType !== "League" ||
+      row.editable === false ||
+      !Array.isArray(row.editableFields) ||
+      !row.editableFields.length
+    ) {
+      continue;
+    }
+    const label = tier || "Other leagues";
+    if (!groups.has(label)) {
+      groups.set(label, []);
+    }
+    groups.get(label).push(row);
+  }
+
+  for (const rows of groups.values()) {
+    rows.sort((a, b) => rampLeagueLabel(a).localeCompare(rampLeagueLabel(b)));
+  }
+
+  /* Big Six first. In the payload's own order the first screenful was
+   * Politics, Poker and Dog Racing, and the leagues that take real money were
+   * below the fold. Array#sort is stable, so tiers this does not know about
+   * keep the order AccessHigh sent them in. */
+  return [...groups.entries()]
+    .map(([label, rows]) => ({ label, rows }))
+    .sort((a, b) => rampTierRank(a.label) - rampTierRank(b.label));
+}
+
 function rampLeagueRows() {
-  return (state.rows || []).filter(
-    (row) =>
-      row.rowType === "League" &&
-      row.editable !== false &&
-      Array.isArray(row.editableFields) &&
-      row.editableFields.length
-  );
+  return rampLeagueGroups().flatMap((group) => group.rows);
 }
 
 /*
@@ -3108,17 +3160,44 @@ function rampRowKey(row) {
   ].join(":");
 }
 
+function rampGroupHeading(label, section) {
+  const head = document.createElement("div");
+  head.className = "ramp-league-group-head";
+
+  const name = document.createElement("span");
+  name.className = "ramp-league-group-name";
+  name.textContent = label;
+
+  const all = document.createElement("button");
+  all.type = "button";
+  all.className = "link-button";
+  all.textContent = "All";
+  all.addEventListener("click", () => setRampLeagueChecks(section, true));
+
+  const none = document.createElement("button");
+  none.type = "button";
+  none.className = "link-button";
+  none.textContent = "None";
+  none.addEventListener("click", () => setRampLeagueChecks(section, false));
+
+  const count = document.createElement("span");
+  count.className = "ramp-count ramp-league-group-count";
+
+  head.append(name, all, none, count);
+  return head;
+}
+
 function renderRampLeagues() {
   if (!elements.rampLeagues) {
     return;
   }
   const previous = new Set(rampCheckedValues(elements.rampLeagues));
-  const rows = rampLeagueRows();
+  const groups = rampLeagueGroups();
   elements.rampLeagues.replaceChildren();
 
-  if (!rows.length) {
+  if (!groups.length) {
     const empty = document.createElement("p");
-    empty.className = "ramp-count";
+    empty.className = "ramp-count ramp-empty";
     empty.textContent =
       state.selectedAgentId
         ? "Loading leagues for this agent..."
@@ -3128,17 +3207,65 @@ function renderRampLeagues() {
     return;
   }
 
-  for (const row of rows) {
-    const key = rampRowKey(row);
-    elements.rampLeagues.append(
-      rampCheckbox(
-        "rampLeague",
-        key,
-        rampLeagueLabel(row),
-        previous.has(key)
-      )
-    );
+  for (const group of groups) {
+    const section = document.createElement("div");
+    section.className = "ramp-league-group";
+
+    const list = document.createElement("div");
+    list.className = "ramp-league-list";
+    for (const row of group.rows) {
+      const key = rampRowKey(row);
+      list.append(
+        rampCheckbox("rampLeague", key, rampLeagueLabel(row), previous.has(key))
+      );
+    }
+
+    section.append(rampGroupHeading(group.label, section), list);
+    elements.rampLeagues.append(section);
   }
+
+  /* Re-applies the filter box, and updates the preview on its way out. */
+  filterRampLeagues();
+}
+
+/* Ticks only what the filter is currently showing, so "Select all" after a
+ * search means the search rather than all fifty-three. */
+function setRampLeagueChecks(scope, checked) {
+  (scope || elements.rampLeagues)
+    ?.querySelectorAll(".ramp-check:not([hidden]) input")
+    .forEach((input) => {
+      input.checked = checked;
+    });
+  updateRampPreview();
+}
+
+function filterRampLeagues() {
+  const query = (elements.rampLeagueSearch?.value || "").trim().toLowerCase();
+
+  for (const group of
+    elements.rampLeagues?.querySelectorAll(".ramp-league-group") || []) {
+    /* Searching a tier name keeps the whole tier, so "big six" is one way to
+     * reach the leagues that matter. */
+    const tierMatches =
+      !query ||
+      (group.querySelector(".ramp-league-group-name")?.textContent || "")
+        .toLowerCase()
+        .includes(query);
+
+    let visible = 0;
+    for (const check of group.querySelectorAll(".ramp-check")) {
+      /* Hidden, never removed: a league ticked before the search stays ticked
+       * and is still submitted once the search is cleared. */
+      const matches =
+        tierMatches || check.textContent.toLowerCase().includes(query);
+      check.hidden = !matches;
+      if (matches) {
+        visible += 1;
+      }
+    }
+    group.hidden = !visible;
+  }
+
   updateRampPreview();
 }
 
@@ -3161,7 +3288,7 @@ function renderRampControls() {
   }
 }
 
-function addRampStep(time = "", value = "") {
+function addRampStep(time = "", value = "", windowValue = "") {
   const row = document.createElement("tr");
 
   const timeCell = document.createElement("td");
@@ -3181,7 +3308,25 @@ function addRampStep(time = "", value = "") {
   valueInput.placeholder = "e.g. 4000";
   valueInput.value = value;
   valueInput.addEventListener("input", updateRampPreview);
-  valueCell.append(valueInput);
+
+  /*
+   * In Pinnacle mode a step names a part of the day instead of an amount,
+   * because the amount differs per league and market - Pinnacle takes 5,600
+   * on a baseball moneyline and 750 on a football one.
+   */
+  const windowSelect = document.createElement("select");
+  windowSelect.className = "ramp-step-window";
+  for (const [value_, label] of [
+    ["start", "Early (6h+ before)"],
+    ["mid", "Middle (3-6h before)"],
+    ["end", "Near start (under 3h)"],
+  ]) {
+    windowSelect.append(new Option(label, value_));
+  }
+  windowSelect.value = windowValue || "start";
+  windowSelect.addEventListener("change", updateRampPreview);
+
+  valueCell.append(valueInput, windowSelect);
 
   const removeCell = document.createElement("td");
   const remove = document.createElement("button");
@@ -3199,45 +3344,142 @@ function addRampStep(time = "", value = "") {
   updateRampPreview();
 }
 
+function rampFromPinnacle() {
+  return elements.rampSource?.value === "pinnacle";
+}
+
+function rampScalePercent() {
+  const value = Number(elements.rampScale?.value);
+  return Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
+}
+
+function rampStepRows() {
+  return [...(elements.rampSteps?.querySelectorAll("tr") || [])].map((row) => ({
+    time: row.querySelector(".ramp-step-time")?.value || "",
+    value: row.querySelector(".ramp-step-value")?.value || "",
+    window: row.querySelector(".ramp-step-window")?.value || "start",
+  }));
+}
+
+/* Which column the steps table is showing, and the wording that goes with it. */
+function applyRampSource() {
+  const pinnacle = rampFromPinnacle();
+  if (elements.rampScaleField) {
+    elements.rampScaleField.hidden = !pinnacle;
+  }
+  if (elements.rampStepValueHead) {
+    elements.rampStepValueHead.textContent = pinnacle
+      ? "Read Pinnacle from"
+      : "Limit";
+  }
+  elements.rampSteps
+    ?.querySelectorAll(".ramp-step-value")
+    .forEach((input) => { input.hidden = pinnacle; });
+  elements.rampSteps
+    ?.querySelectorAll(".ramp-step-window")
+    .forEach((select) => { select.hidden = !pinnacle; });
+  updateRampPreview();
+}
+
+function rampStepComplete(step) {
+  return Boolean(step.time) && (rampFromPinnacle() || step.value !== "");
+}
+
 function rampSteps() {
-  return [...(elements.rampSteps?.querySelectorAll("tr") || [])]
-    .map((row) => ({
-      time: row.querySelector(".ramp-step-time")?.value || "",
-      value: row.querySelector(".ramp-step-value")?.value || "",
-    }))
-    .filter((step) => step.time && step.value !== "");
+  return rampStepRows().filter(rampStepComplete);
+}
+
+/* A row with a time but no limit was dropped without a word, so a ramp typed
+ * as three steps could quietly be created as two. */
+function rampIncompleteSteps() {
+  return rampStepRows().filter(
+    (step) =>
+      (step.time || step.value !== "") && !rampStepComplete(step)
+  ).length;
+}
+
+/* Two steps at one time are two schedules racing to write different numbers to
+ * the same limit, and which one lands is undefined. */
+function rampDuplicateTimes() {
+  const seen = new Set();
+  const duplicates = new Set();
+  for (const step of rampSteps()) {
+    if (seen.has(step.time)) {
+      duplicates.add(step.time);
+    }
+    seen.add(step.time);
+  }
+  return [...duplicates].sort();
+}
+
+function updateRampGroupCounts() {
+  for (const group of
+    elements.rampLeagues?.querySelectorAll(".ramp-league-group") || []) {
+    const count = group.querySelector(".ramp-league-group-count");
+    if (!count) {
+      continue;
+    }
+    const total = group.querySelectorAll(".ramp-check input").length;
+    const checked = group.querySelectorAll(".ramp-check input:checked").length;
+    count.textContent = checked ? `${checked} of ${total}` : `${total}`;
+  }
 }
 
 function updateRampPreview() {
   if (!elements.rampPreview) {
     return;
   }
+  updateRampGroupCounts();
+
   const leagues = rampCheckedValues(elements.rampLeagues).length;
   const fields = rampCheckedValues(elements.rampFields).length;
   const steps = rampSteps().length;
   const total = leagues * fields * steps;
+  const incomplete = rampIncompleteSteps();
+  const duplicates = rampDuplicateTimes();
 
   if (elements.rampLeagueCount) {
     const available = rampLeagueRows().length;
-    elements.rampLeagueCount.textContent = available
-      ? `${leagues} of ${available} selected`
+    const shown = elements.rampLeagues
+      ? elements.rampLeagues.querySelectorAll(".ramp-check:not([hidden])").length
+      : 0;
+    /* Says how many the filter is hiding, so a count that has not moved while
+     * "Select all" was pressed is explained rather than mysterious. */
+    elements.rampLeagueCount.textContent = !available
+      ? ""
+      : shown < available
+        ? `${leagues} of ${available} selected · ${shown} shown`
+        : `${leagues} of ${available} selected`;
+  }
+
+  if (elements.rampSource) {
+  elements.rampSource.addEventListener("change", applyRampSource);
+  elements.rampScale?.addEventListener("input", updateRampPreview);
+  applyRampSource();
+}
+
+if (elements.rampCreate) {
+    elements.rampCreate.disabled = !total || duplicates.length > 0;
+  }
+
+  const warning = duplicates.length
+    ? ` Two steps are set to ${duplicates.join(" and ")}. Give each step its own time.`
+    : incomplete
+      ? ` ${incomplete} step${incomplete === 1 ? " is" : "s are"} missing a time or a limit and ${incomplete === 1 ? "is" : "are"} not counted.`
       : "";
-  }
 
-  if (elements.rampCreate) {
-    elements.rampCreate.disabled = !total;
-  }
-
-  elements.rampPreview.textContent = total
-    ? `This creates ${total.toLocaleString()} recurring schedule${total === 1 ? "" : "s"}: ` +
-      `${leagues} league${leagues === 1 ? "" : "s"} x ${fields} limit type${fields === 1 ? "" : "s"} x ${steps} step${steps === 1 ? "" : "s"}. ` +
-      `Leagues that do not use a limit type are skipped.` +
-      (total > 300
-        ? ` That is a lot of jobs firing at each step; consider ramping only the leagues you take real money on.`
-        : "")
-    : leagues
-      ? "Add a time and a limit to at least one step."
-      : "Choose the leagues to ramp. Every one you tick is scheduled separately, so start with the ones you actually take money on.";
+  elements.rampPreview.textContent =
+    (total
+      ? `This creates ${total.toLocaleString()} recurring schedule${total === 1 ? "" : "s"}: ` +
+        `${leagues} league${leagues === 1 ? "" : "s"} x ${fields} limit type${fields === 1 ? "" : "s"} x ${steps} step${steps === 1 ? "" : "s"}. ` +
+        `Leagues that do not use a limit type are skipped.` +
+        (total > 300
+          ? ` That is a lot of jobs firing at each step; consider ramping only the leagues you take real money on.`
+          : "")
+      : leagues
+        ? "Add a time and a limit to at least one step."
+        : "Choose the leagues to ramp. Every one you tick is scheduled separately, so start with the ones you actually take money on.") +
+    warning;
 }
 
 function setRampMessage(message = "", type = "") {
@@ -3263,14 +3505,23 @@ async function createRamp() {
       editableFields: row.editableFields,
     }));
 
-  const steps = rampSteps().map((step) => ({
-    time: step.time,
-    value: Number(step.value),
-  }));
+  const fromPinnacle = rampFromPinnacle();
+  const steps = rampSteps().map((step) =>
+    fromPinnacle
+      ? { time: step.time, window: step.window }
+      : { time: step.time, value: Number(step.value) }
+  );
   const fields = rampCheckedValues(elements.rampFields);
   const days = rampCheckedValues(elements.rampDays).map(Number);
   const agentName = elements.rampAgentName?.value.trim() || "";
 
+  /* Without an agent the request went out with an empty accountId and came
+   * back as "Enter a valid limit, weekdays, and Eastern time", which names
+   * none of the three things that are actually fine. */
+  if (!state.selectedAgentId) {
+    setRampMessage("Select an agent on the left first.", "error");
+    return;
+  }
   if (!targets.length) {
     setRampMessage("Select at least one league.", "error");
     return;
@@ -3283,21 +3534,51 @@ async function createRamp() {
     setRampMessage("Add at least one step with a time and a limit.", "error");
     return;
   }
+  const duplicates = rampDuplicateTimes();
+  if (duplicates.length) {
+    setRampMessage(
+      `Two steps are set to ${duplicates.join(" and ")}. Give each step its own time.`,
+      "error"
+    );
+    return;
+  }
   if (!agentName) {
     setRampMessage("Enter the Customer Support Agent name.", "error");
     return;
   }
 
+  const replaceExisting = elements.rampReplace
+    ? elements.rampReplace.checked
+    : true;
   const total = targets.length * fields.length * steps.length;
   const ordered = [...steps].sort((a, b) => a.time.localeCompare(b.time));
+  const windowLabels = {
+    start: "Pinnacle's early limit",
+    mid: "Pinnacle's mid-day limit",
+    end: "Pinnacle's near-start limit",
+  };
   const shape = ordered
-    .map((step) => `${step.time} -> ${step.value.toLocaleString()}`)
+    .map((step) =>
+      fromPinnacle
+        ? `${step.time} -> ${windowLabels[step.window] || step.window} ` +
+          `at ${rampScalePercent()}%`
+        : `${step.time} -> ${step.value.toLocaleString()}`
+    )
     .join("\n");
+  const incomplete = rampIncompleteSteps();
   if (
     !window.confirm(
       `Create ${total.toLocaleString()} recurring schedules?\n\n${shape}\n\n` +
       `Across ${targets.length} league${targets.length === 1 ? "" : "s"} and ` +
-      `${fields.length} limit type${fields.length === 1 ? "" : "s"}.`
+      `${fields.length} limit type${fields.length === 1 ? "" : "s"}.` +
+      (incomplete
+        ? `\n\n${incomplete} step${incomplete === 1 ? "" : "s"} missing a time or a limit ` +
+          `will be ignored.`
+        : "") +
+      (replaceExisting
+        ? `\n\nAny recurring schedules these leagues and limit types already have ` +
+          `will be replaced.`
+        : "")
     )
   ) {
     return;
@@ -3320,6 +3601,8 @@ async function createRamp() {
         recurrenceDays: days,
         customerSupportAgent: agentName,
         limitMode: "normal",
+        pinnacleScalePercent: fromPinnacle ? rampScalePercent() : 0,
+        replaceExisting,
       }),
     });
     const data = await response.json();
@@ -3346,18 +3629,13 @@ if (elements.rampCreate) {
   renderRampControls();
   elements.rampCreate.addEventListener("click", createRamp);
   elements.rampAddStep?.addEventListener("click", () => addRampStep());
-  elements.rampSelectAll?.addEventListener("click", () => {
-    elements.rampLeagues
-      ?.querySelectorAll("input")
-      .forEach((input) => { input.checked = true; });
-    updateRampPreview();
-  });
-  elements.rampSelectNone?.addEventListener("click", () => {
-    elements.rampLeagues
-      ?.querySelectorAll("input")
-      .forEach((input) => { input.checked = false; });
-    updateRampPreview();
-  });
+  elements.rampSelectAll?.addEventListener("click", () =>
+    setRampLeagueChecks(null, true)
+  );
+  elements.rampSelectNone?.addEventListener("click", () =>
+    setRampLeagueChecks(null, false)
+  );
+  elements.rampLeagueSearch?.addEventListener("input", filterRampLeagues);
 }
 
 function renderSchedules() {
