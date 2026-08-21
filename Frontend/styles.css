@@ -918,6 +918,10 @@ tbody tr:hover {
 
 .sidebar-footer a {
   display: flex;
+  /* The site name is its own element so it can follow the deployment, and a
+     flex container drops the whitespace around it - which is what turned
+     "Pinnacle vs Aces High" into "Pinnacle vsAces High". */
+  gap: 0.3em;
   width: 100%;
   min-height: 42px;
   padding: 0 12px;
@@ -987,6 +991,9 @@ tbody tr:hover {
 
 .trading-table-wrap {
   padding: 18px 20px 20px;
+  /* Every other wide table scrolls inside its own box; without this one the
+     1120px table widens the whole page. */
+  overflow-x: auto;
 }
 
 .trading-table {
@@ -3240,4 +3247,35 @@ dialog h2 {
 .ramp-tracked-table td {
   padding: 6px 10px 6px 0;
   font-variant-numeric: tabular-nums;
+}
+
+/* Left to itself the exposure table spread seven columns across the whole
+   panel, stranding the numbers apart and pushing the buttons off the edge. */
+.exposure-table {
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.exposure-table th:nth-child(1),
+.exposure-table td:nth-child(1) { width: 13%; }
+.exposure-table th:nth-child(2),
+.exposure-table td:nth-child(2) { width: 13%; }
+.exposure-table th:nth-child(3),
+.exposure-table td:nth-child(3) { width: 12%; }
+.exposure-table th:nth-child(4),
+.exposure-table td:nth-child(4) { width: 13%; }
+.exposure-table th:nth-child(5),
+.exposure-table td:nth-child(5) { width: 13%; }
+.exposure-table th:nth-child(6),
+.exposure-table td:nth-child(6) { width: 13%; }
+.exposure-table th:nth-child(7),
+.exposure-table td:nth-child(7) { width: 11%; }
+.exposure-table th:nth-child(8),
+.exposure-table td:nth-child(8) { width: 12%; }
+
+/* The divider before the Pinnacle columns belongs to the fixture tables, not
+   this one, where column six is a Pinnacle figure like the two beside it. */
+.exposure-table th:nth-child(6),
+.exposure-table td:nth-child(6) {
+  border-left: 0;
 }

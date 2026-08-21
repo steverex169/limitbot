@@ -3987,6 +3987,7 @@ def run_tracker_cycle():
 
         if target is not None:
             try:
+                tracker["pinnacle"] = level
                 outcome = write_tracked_limit(tracker, target)
                 note = outcome["note"]
                 if outcome["changed"]:
@@ -4050,6 +4051,38 @@ def write_tracked_limit(tracker, target):
             skip_blue=False,
         )
         changed = bool(outcome.get("changed", True))
+        if changed:
+            # Only when a limit actually moves. A tracker checks every few
+            # minutes and mostly finds nothing to do; alerting on every check
+            # would bury the ones that matter.
+            try:
+                send_telegram_success_message(
+                    build_limit_success_message(
+                        tracker["accountId"],
+                        tracker["organizationId"],
+                        tracker["leagueId"],
+                        tracker["sportTypeId"],
+                        tracker["periodNumber"],
+                        tracker["field"],
+                        target,
+                        change_type=(
+                            "Early tracked limit" if tracker["isEarly"]
+                            else "Tracked limit"
+                        ),
+                        outcome_line=(
+                            f"Following Pinnacle at {tracker['scale']}%"
+                            + (
+                                f" (Pinnacle {tracker['pinnacle']:,.0f})"
+                                if tracker.get("pinnacle") else ""
+                            )
+                        ),
+                    )
+                )
+            except Exception:
+                # A notification must never turn a good write into a failure.
+                logger.warning(
+                    "Could not alert for tracker %s", tracker["id"], exc_info=True
+                )
         return {
             "changed": changed,
             "note": (
