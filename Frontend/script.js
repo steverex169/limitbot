@@ -162,6 +162,8 @@ const elements = {
   rowTypeFilter: document.querySelector("#rowTypeFilter"),
   leagueRows: document.querySelector("#leagueRows"),
   scheduleRows: document.querySelector("#scheduleRows"),
+  buildRampView: document.querySelector("#buildRampView"),
+  buildRampLink: document.querySelector("#buildRampLink"),
   rampBuilder: document.querySelector("#rampBuilder"),
   rampFields: document.querySelector("#rampFields"),
   rampDays: document.querySelector("#rampDays"),
@@ -223,6 +225,13 @@ function isTradingMonitorRoute() {
   return normalizedPath === "/trading_monitor";
 }
 
+function isBuildRampRoute() {
+  const normalizedPath =
+    window.location.pathname.replace(/\/+$/, "") || "/";
+
+  return normalizedPath === "/build_ramp";
+}
+
 function isTelegramAlertsRoute() {
   const normalizedPath =
     window.location.pathname.replace(/\/+$/, "") || "/";
@@ -235,8 +244,13 @@ function applyDashboardRoute() {
   const comparisonActive = isPinnacleComparisonRoute();
   const tradingActive = isTradingMonitorRoute();
   const telegramAlertsActive = isTelegramAlertsRoute();
+  const buildRampActive = isBuildRampRoute();
   const dashboardActive =
-    !activityLogsActive && !comparisonActive && !tradingActive && !telegramAlertsActive;
+    !activityLogsActive &&
+    !comparisonActive &&
+    !tradingActive &&
+    !telegramAlertsActive &&
+    !buildRampActive;
 
   if (!tradingActive && tradingRefreshTimer) {
     clearTimeout(tradingRefreshTimer);
@@ -265,6 +279,19 @@ function applyDashboardRoute() {
       "aria-hidden",
       String(!tradingActive)
     );
+  }
+
+  if (elements.buildRampView) {
+    elements.buildRampView.hidden = !buildRampActive;
+    elements.buildRampView.setAttribute(
+      "aria-hidden",
+      String(!buildRampActive)
+    );
+    /* The league list is built from the dashboard's rows, so refresh it each
+     * time the page is opened rather than once at startup. */
+    if (buildRampActive) {
+      renderRampLeagues();
+    }
   }
 
   if (elements.telegramAlertsView) {
@@ -338,6 +365,15 @@ function applyDashboardRoute() {
     }
   }
 
+  if (elements.buildRampLink) {
+    elements.buildRampLink.classList.toggle("active", buildRampActive);
+    if (buildRampActive) {
+      elements.buildRampLink.setAttribute("aria-current", "page");
+    } else {
+      elements.buildRampLink.removeAttribute("aria-current");
+    }
+  }
+
   if (elements.telegramAlertsLink) {
     elements.telegramAlertsLink.classList.toggle("active", telegramAlertsActive);
     if (telegramAlertsActive) {
@@ -365,6 +401,22 @@ function applyDashboardRoute() {
     loadTradingLeagues()
       .then(() => loadTradingMonitor())
       .catch(() => { });
+  }
+
+  if (buildRampActive && state.selectedAgentId) {
+    /*
+     * The league list comes from the dashboard's rows. Opening this page
+     * directly - by URL, or after a full page load - means they were never
+     * fetched, which showed an empty picker on a page whose whole job is
+     * picking leagues.
+     */
+    if (state.rows.length) {
+      renderRampLeagues();
+    } else {
+      loadLeagues(false)
+        .then(() => renderRampLeagues())
+        .catch(() => { });
+    }
   }
 
   if (telegramAlertsActive) {
@@ -3263,11 +3315,6 @@ if (elements.rampCreate) {
   renderRampControls();
   elements.rampCreate.addEventListener("click", createRamp);
   elements.rampAddStep?.addEventListener("click", () => addRampStep());
-  elements.rampBuilder?.addEventListener("toggle", () => {
-    if (elements.rampBuilder.open) {
-      renderRampLeagues();
-    }
-  });
   elements.rampSelectAll?.addEventListener("click", () => {
     elements.rampLeagues
       ?.querySelectorAll("input")
@@ -4956,6 +5003,29 @@ elements.dashboardHomeLink?.addEventListener(
     if (window.location.pathname !== "/") {
       window.history.pushState({}, "", "/");
     }
+    applyDashboardRoute();
+  }
+);
+
+elements.buildRampLink?.addEventListener(
+  "click",
+  (event) => {
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (!isBuildRampRoute()) {
+      window.history.pushState({}, "", "/build_ramp");
+    }
+
     applyDashboardRoute();
   }
 );

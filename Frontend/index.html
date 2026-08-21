@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Limit Control Bot</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/styles.css?v=20260821-ramp-builder">
+  <link rel="stylesheet" href="/styles.css?v=20260822-ramp-page">
 </head>
 
 <body class="app-loading">
@@ -84,6 +84,7 @@
       <a id="activityLogsLink" class="sidebar-nav-link" href="/activity_logs">Activity Logs</a>
       <a id="pinnacleComparisonLink" class="sidebar-nav-link" href="/pinnacle_aceshigh">Pinnacle vs <span class="partner-name">Aces High</span></a>
       <a id="tradingMonitorLink" class="sidebar-nav-link" href="/trading_monitor">Trading Monitor</a>
+      <a id="buildRampLink" class="sidebar-nav-link" href="/build_ramp">Build a Ramp</a>
       <a id="telegramAlertsLink" class="sidebar-nav-link" href="/telegram_alerts">Telegram Alerts</a>
     </div>
   </aside>
@@ -179,66 +180,6 @@
           </button>
         </div>
       </div>
-
-      <details id="rampBuilder" class="ramp-builder">
-        <summary>
-          <span class="ramp-builder-title">Build a limit ramp</span>
-          <span class="ramp-builder-hint">One limit rising through the day, across every league you pick</span>
-        </summary>
-
-        <div class="ramp-builder-body">
-          <p class="ramp-note">
-            A game takes almost no money in the morning and most of it near the start,
-            so one flat limit is either too high early or too low late. Each step below
-            becomes an ordinary recurring schedule.
-          </p>
-
-          <div class="ramp-grid">
-            <div class="ramp-field">
-              <span class="ramp-label">Limit types</span>
-              <div id="rampFields" class="ramp-checks"></div>
-            </div>
-
-            <div class="ramp-field">
-              <span class="ramp-label">Repeat on</span>
-              <div id="rampDays" class="ramp-checks"></div>
-            </div>
-
-            <label class="ramp-field">
-              <span class="ramp-label">Customer Support Agent</span>
-              <input id="rampAgentName" type="text" maxlength="100" autocomplete="off" placeholder="Who is setting this" required>
-            </label>
-          </div>
-
-          <div class="ramp-field">
-            <span class="ramp-label">Leagues</span>
-            <div class="ramp-leagues-head">
-              <button id="rampSelectAll" type="button" class="link-button">Select all</button>
-              <button id="rampSelectNone" type="button" class="link-button">Clear</button>
-              <span id="rampLeagueCount" class="ramp-count"></span>
-            </div>
-            <div id="rampLeagues" class="ramp-checks ramp-leagues"></div>
-          </div>
-
-          <div class="ramp-field">
-            <span class="ramp-label">Steps through the day (Eastern)</span>
-            <table class="ramp-steps-table">
-              <thead>
-                <tr><th>Time</th><th>Limit</th><th></th></tr>
-              </thead>
-              <tbody id="rampSteps"></tbody>
-            </table>
-            <button id="rampAddStep" type="button" class="link-button">Add a step</button>
-          </div>
-
-          <div id="rampMessage" class="message" role="status" hidden></div>
-          <p id="rampPreview" class="ramp-count"></p>
-
-          <div class="ramp-actions">
-            <button id="rampCreate" type="button" class="button primary">Create ramp</button>
-          </div>
-        </div>
-      </details>
 
       <div class="table-wrap schedules-table-wrap">
         <table class="schedules-table">
@@ -375,6 +316,72 @@
         </table>
       </div>
       <p class="comparison-source-note">Auto-refreshes every 30 seconds. Stale or missing Pinnacle data never triggers a takedown recommendation.</p>
+    </section>
+
+    <section id="buildRampView" class="panel build-ramp-panel" hidden aria-hidden="true">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">AUTOMATION</p>
+          <h2>Build a ramp</h2>
+          <p>Set one limit that rises through the day, across every league at once.</p>
+        </div>
+      </div>
+
+      <div id="rampBuilder" class="ramp-builder ramp-builder-page">
+
+        <div class="ramp-builder-body">
+          <p class="ramp-note">
+            A game takes almost no money in the morning and most of it near the start,
+            so one flat limit is either too high early or too low late. Each step below
+            becomes an ordinary recurring schedule.
+          </p>
+
+          <div class="ramp-grid">
+            <div class="ramp-field">
+              <span class="ramp-label">Limit types</span>
+              <div id="rampFields" class="ramp-checks"></div>
+            </div>
+
+            <div class="ramp-field">
+              <span class="ramp-label">Repeat on</span>
+              <div id="rampDays" class="ramp-checks"></div>
+            </div>
+
+            <label class="ramp-field">
+              <span class="ramp-label">Customer Support Agent</span>
+              <input id="rampAgentName" type="text" maxlength="100" autocomplete="off" placeholder="Who is setting this" required>
+            </label>
+          </div>
+
+          <div class="ramp-field">
+            <span class="ramp-label">Leagues</span>
+            <div class="ramp-leagues-head">
+              <button id="rampSelectAll" type="button" class="link-button">Select all</button>
+              <button id="rampSelectNone" type="button" class="link-button">Clear</button>
+              <span id="rampLeagueCount" class="ramp-count"></span>
+            </div>
+            <div id="rampLeagues" class="ramp-checks ramp-leagues"></div>
+          </div>
+
+          <div class="ramp-field">
+            <span class="ramp-label">Steps through the day (Eastern)</span>
+            <table class="ramp-steps-table">
+              <thead>
+                <tr><th>Time</th><th>Limit</th><th></th></tr>
+              </thead>
+              <tbody id="rampSteps"></tbody>
+            </table>
+            <button id="rampAddStep" type="button" class="link-button">Add a step</button>
+          </div>
+
+          <div id="rampMessage" class="message" role="status" hidden></div>
+          <p id="rampPreview" class="ramp-count"></p>
+
+          <div class="ramp-actions">
+            <button id="rampCreate" type="button" class="button primary">Create ramp</button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section id="telegramAlertsView" class="panel telegram-alerts-panel" hidden aria-hidden="true">
@@ -521,7 +528,7 @@
     </div>
   </dialog>
 
-  <script src="/script.js?v=20260821-ramp-builder" defer></script>
+  <script src="/script.js?v=20260822-ramp-page" defer></script>
 </body>
 
 </html>

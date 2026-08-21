@@ -2946,3 +2946,20 @@ dialog h2 {
   font: inherit;
   font-size: 13px;
 }
+
+/* On its own page the builder is always open, so it needs no frame of its
+   own - the panel around it already provides one. */
+.ramp-builder-page {
+  margin: 0;
+  border: 0;
+  background: none;
+}
+
+.ramp-builder-page .ramp-builder-body {
+  padding: 0;
+  border-top: 0;
+}
+
+.ramp-builder-page .ramp-note {
+  margin-top: 0;
+}

@@ -4028,6 +4028,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             "/trading_monitor/",
             "/telegram_alerts",
             "/telegram_alerts/",
+            "/build_ramp",
+            "/build_ramp/",
         }:
             self.path = "/index.html"
             super().do_GET()
