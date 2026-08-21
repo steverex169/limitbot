@@ -2773,7 +2773,7 @@ def create_schedule(request_data):
 # A ramp is one recurring schedule per league, market and step, so the count
 # grows quickly. This is a guard against a mis-click creating thousands, not a
 # considered maximum.
-ramp_schedule_limit = int(os.getenv("RAMP_SCHEDULE_LIMIT", "600") or 600)
+ramp_schedule_limit = int(os.getenv("RAMP_SCHEDULE_LIMIT", "1200") or 1200)
 
 
 limit_field_labels = {
@@ -3121,6 +3121,44 @@ def notify_schedule_outcome(job, request_data, outcome_line):
         )
 
 
+# When a ramp fires, every league and market for one account comes due in the
+# same second. Each job refreshing separately meant hundreds of identical
+# GetOrganizationAll calls in a burst, which is exactly how AccessHigh starts
+# rate limiting. One refresh serves the whole burst.
+league_refresh_times = {}
+league_refresh_guard = threading.Lock()
+league_refresh_window = int(os.getenv("LEAGUE_REFRESH_WINDOW", "60") or 60)
+
+
+def refresh_leagues_if_stale(account_id, max_age_seconds=None):
+    """Refresh this account's leagues unless another job just did.
+
+    Values cannot meaningfully change in the seconds between two jobs of the
+    same batch, so a short window keeps the decide-against-current-values
+    guarantee while collapsing a burst into a single call.
+    """
+    window = (
+        league_refresh_window if max_age_seconds is None else max_age_seconds
+    )
+    key = int(account_id)
+    now = time.monotonic()
+    with league_refresh_guard:
+        last = league_refresh_times.get(key)
+        if last is not None and now - last < window:
+            return False
+        # Claim the slot before the call so two threads cannot both refresh.
+        league_refresh_times[key] = now
+    try:
+        refresh_leagues(account_id)
+        return True
+    except Exception:
+        with league_refresh_guard:
+            # A failed refresh must not suppress the next attempt.
+            if league_refresh_times.get(key) == now:
+                league_refresh_times.pop(key, None)
+        raise
+
+
 def execute_scheduled_job(job_id):
     auth = None
     job = None
@@ -3143,7 +3181,7 @@ def execute_scheduled_job(job_id):
         # it was filled. Decide skip-or-write against AccessHigh's current
         # values, not a stale copy.
         try:
-            refresh_leagues(job.account_id)
+            refresh_leagues_if_stale(job.account_id)
         except Exception:
             logger.warning(
                 "Could not refresh leagues before job %s; using cached values",

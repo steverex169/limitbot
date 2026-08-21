@@ -3076,6 +3076,18 @@ function rampLeagueRows() {
   );
 }
 
+function rampLeagueLabel(row) {
+  const name =
+    row.leagueName || row.organizationLabel || `League ${row.idLeague}`;
+  const period = row.periodDescription || "";
+  /* organizationLabel already ends with the period on most rows, which is how
+   * "Pro Football -- Full Game" became "... -- Full Game -- Full Game". */
+  if (!period || name.endsWith(period)) {
+    return name;
+  }
+  return `${name} -- ${period}`;
+}
+
 function rampRowKey(row) {
   return [
     row.idOrganization,
@@ -3103,15 +3115,15 @@ function renderRampLeagues() {
     return;
   }
 
-  const fresh = !previous.size;
   for (const row of rows) {
     const key = rampRowKey(row);
-    const label =
-      row.organizationLabel && row.periodDescription
-        ? `${row.organizationLabel} -- ${row.periodDescription}`
-        : row.leagueName || `League ${row.idLeague}`;
     elements.rampLeagues.append(
-      rampCheckbox("rampLeague", key, label, fresh || previous.has(key))
+      rampCheckbox(
+        "rampLeague",
+        key,
+        rampLeagueLabel(row),
+        previous.has(key)
+      )
     );
   }
   updateRampPreview();
@@ -3199,11 +3211,20 @@ function updateRampPreview() {
       : "";
   }
 
+  if (elements.rampCreate) {
+    elements.rampCreate.disabled = !total;
+  }
+
   elements.rampPreview.textContent = total
     ? `This creates ${total.toLocaleString()} recurring schedule${total === 1 ? "" : "s"}: ` +
       `${leagues} league${leagues === 1 ? "" : "s"} x ${fields} limit type${fields === 1 ? "" : "s"} x ${steps} step${steps === 1 ? "" : "s"}. ` +
-      `Leagues that do not use a limit type are skipped.`
-    : "Pick leagues, limit types and at least one step.";
+      `Leagues that do not use a limit type are skipped.` +
+      (total > 300
+        ? ` That is a lot of jobs firing at each step; consider ramping only the leagues you take real money on.`
+        : "")
+    : leagues
+      ? "Add a time and a limit to at least one step."
+      : "Choose the leagues to ramp. Every one you tick is scheduled separately, so start with the ones you actually take money on.";
 }
 
 function setRampMessage(message = "", type = "") {
@@ -3225,10 +3246,7 @@ async function createRamp() {
       idLeague: row.idLeague,
       idSportType: row.idSportType,
       periodNumber: row.periodNumber || 0,
-      leagueName:
-        row.organizationLabel && row.periodDescription
-          ? `${row.organizationLabel} -- ${row.periodDescription}`
-          : row.leagueName,
+      leagueName: rampLeagueLabel(row),
       editableFields: row.editableFields,
     }));
 
