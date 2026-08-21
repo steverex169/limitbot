@@ -2010,6 +2010,26 @@ def find_limit_row(
         )
     return match
 
+# While testing, limits may only be written on named accounts. Empty means no
+# restriction, which is normal operation; a populated list is a hard stop that
+# every write passes through, whoever asked for it - a person on the dashboard,
+# a schedule, or a tracker.
+write_allowed_accounts = {
+    int(part)
+    for part in os.getenv("WRITE_ALLOWED_ACCOUNTS", "").replace(" ", "").split(",")
+    if part.strip().lstrip("-").isdigit()
+}
+
+
+def write_allowed(account_id):
+    if not write_allowed_accounts:
+        return True
+    try:
+        return int(account_id) in write_allowed_accounts
+    except (TypeError, ValueError):
+        return False
+
+
 def save_single_limit(
     account_id,
     organization_id,
@@ -2025,6 +2045,24 @@ def save_single_limit(
     skip_blue=True,
 ):
     """Helper function to save a single limit change"""
+    # Checked before anything is read or written, so a blocked account cannot
+    # even spend a request against AccessHigh.
+    if not write_allowed(account_id):
+        note = (
+            f"Blocked: limit changes are restricted to the test accounts, "
+            f"and {account_id} is not one of them"
+        )
+        logger.warning("Refused a limit write on account %s", account_id)
+        if return_full:
+            return {
+                "message": note,
+                "value": new_value,
+                "rows": dashboard_rows(account_id),
+                "changed": False,
+                "note": note,
+            }
+        return {"success": False, "value": new_value, "changed": False, "note": note}
+
     previous_value = None
     matching_row = find_limit_row(
         account_id, organization_id, league_id, sport_type_id, period_number
@@ -2679,6 +2717,12 @@ def create_schedule(request_data):
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError("Enter a valid limit, weekdays, and Eastern time") from error
 
+    if not write_allowed(account_id):
+        raise ValueError(
+            f"Limit changes are restricted to the test accounts while testing, "
+            f"so you cannot schedule one on account {account_id}"
+        )
+
     matching_row = find_limit_row(
         account_id, organization_id, league_id, sport_type_id, period_number
     )
@@ -2940,6 +2984,11 @@ def create_limit_trackers(request_data):
         account_id = validate_account_id(int(request_data["accountId"]))
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError("Select an agent before tracking limits") from error
+    if not write_allowed(account_id):
+        raise ValueError(
+            f"Limit changes are restricted to the test accounts while testing, "
+            f"so you cannot track limits on account {account_id}"
+        )
 
     try:
         scale_percent = int(request_data.get("scalePercent", 50) or 50)
@@ -3092,6 +3141,11 @@ def create_schedule_ramp(request_data):
         account_id = validate_account_id(int(request_data["accountId"]))
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError("Select an agent before building a ramp") from error
+    if not write_allowed(account_id):
+        raise ValueError(
+            f"Limit changes are restricted to the test accounts while testing, "
+            f"so you cannot build a ramp on account {account_id}"
+        )
 
     limit_mode = str(request_data.get("limitMode", "normal")).strip().lower()
     if limit_mode not in limit_mode_prefixes:

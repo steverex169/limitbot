@@ -82,6 +82,26 @@ site cannot reach the other's schedules or limits.
   a message saying so, until a player account is configured here.** No other
   page depends on this; limits, schedules and the agent tree all use the
   partner token and work without it.
+- `WRITE_ALLOWED_ACCOUNTS`: a comma-separated list of AccessHigh account ids
+  that limits may be written on. Empty means no restriction, which is normal
+  operation. A populated list is a hard stop enforced inside
+  `save_single_limit`, so it applies to every write regardless of origin - a
+  person on the dashboard, a scheduled limit, or a live tracker - and is
+  checked before any request is made upstream. Creating a schedule, a ramp or
+  a tracker on an account outside the list is refused outright rather than
+  failing later at run time. Use it while testing so automation cannot reach a
+  live downline.
+- `LIMIT_TRACKER`: set `off` to stop the live tracker thread. `TRACKER_INTERVAL_MINUTES`
+  (default 10) is how often tracked limits are compared with Pinnacle,
+  `TRACKER_WINDOW_HOURS` (default 12) how close to kick-off a fixture must be
+  to count, and `TRACKER_MIN_CHANGE_PERCENT` (default 8) how far Pinnacle must
+  move before a rewrite is worth making. Tracked limits are the one place
+  `SKIP_BLUE` does not apply: every write marks a limit blue, so a tracker
+  honouring it would move a limit once and never again.
+- `PINNACLE_SAMPLING`: set `off` on the second site. The readings describe
+  Pinnacle, not a partner, so both sites recording them stores the same
+  numbers twice. `PINNACLE_SAMPLE_MINUTES` (default 60) and
+  `PINNACLE_SAMPLE_DAYS` (default 60) control the cadence and retention.
 - `SKIP_BLUE`: refuse to overwrite any blue limit. Defaults to `on`; set
   `off` to write every limit regardless. Blue means the account holds its own
   value rather than inheriting one. Note that writing a limit on a
