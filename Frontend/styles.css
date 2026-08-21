@@ -2831,8 +2831,14 @@ dialog h2 {
 .ramp-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 16px;
-  margin-bottom: 16px;
+  gap: 18px;
+  margin-bottom: 20px;
+}
+
+/* Fields inside the grid already have the grid gap between them; their own
+   margin was doubling it and leaving a hole above Leagues. */
+.ramp-grid .ramp-field {
+  margin-bottom: 0;
 }
 
 .ramp-field {
@@ -2899,9 +2905,22 @@ dialog h2 {
   font-size: 12px;
 }
 
+/* Global table styling stretches every table to 100%, which marooned Time,
+   Limit and Remove at opposite ends of the page. Three narrow columns. */
 .ramp-steps-table {
+  width: auto;
   border-collapse: collapse;
   margin-bottom: 6px;
+}
+
+.ramp-steps-table th:first-child,
+.ramp-steps-table td:first-child {
+  width: 130px;
+}
+
+.ramp-steps-table th:nth-child(2),
+.ramp-steps-table td:nth-child(2) {
+  width: 140px;
 }
 
 .ramp-steps-table th {
@@ -2982,8 +3001,29 @@ dialog h2 {
 
 /* Form fields stop at a readable width instead of stretching across a
    full-width monitor. */
+/* The seven weekday chips need a column wide enough to hold them on one
+   line; "Sun" alone on a second row reads like a mistake. */
 .build-ramp-panel .ramp-grid {
   max-width: 1100px;
+  grid-template-columns:
+    minmax(200px, 0.8fr)
+    minmax(430px, 1.2fr)
+    minmax(240px, 1fr);
+}
+
+.build-ramp-panel .ramp-days-field .ramp-checks {
+  flex-wrap: nowrap;
+  gap: 4px 12px;
+}
+
+@media (max-width: 1180px) {
+  .build-ramp-panel .ramp-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .build-ramp-panel .ramp-days-field .ramp-checks {
+    flex-wrap: wrap;
+  }
 }
 
 .build-ramp-panel .ramp-builder input[type="text"] {
