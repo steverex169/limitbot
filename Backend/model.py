@@ -120,6 +120,7 @@ class ScheduledLimit(Base):
     scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     recurrence_days: Mapped[str | None] = mapped_column(String(20), nullable=True)
     recurrence_time: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    telegram_audience: Mapped[str] = mapped_column(String(10), default="all")
     is_early_limit: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)

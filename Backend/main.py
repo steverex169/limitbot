@@ -233,7 +233,12 @@ def utc_now_naive():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def send_telegram_success_message(message, chat_id=None):
+def normalize_telegram_audience(value):
+    audience = str(value or "all").strip().lower()
+    return audience if audience in {"all", "aceshigh", "betwar"} else "all"
+
+
+def send_telegram_success_message(message, chat_id=None, audience="all"):
     """
     Send a Telegram notification after a successful limit save.
 
@@ -246,6 +251,7 @@ def send_telegram_success_message(message, chat_id=None):
         return
 
     target_chat_ids = []
+    audience = normalize_telegram_audience(audience)
 
     if chat_id not in (None, ""):
         target_chat_ids = [str(chat_id).strip()]
@@ -254,6 +260,11 @@ def send_telegram_success_message(message, chat_id=None):
         user_id = auth.get("userId")
         if user_id is not None:
             try:
+                membership_clause = ""
+                if audience == "aceshigh":
+                    membership_clause = "AND is_aceshigh = 1 "
+                elif audience == "betwar":
+                    membership_clause = "AND is_betwar = 1 "
                 with database_session() as db:
                     target_chat_ids = [
                         str(row[0]).strip()
@@ -261,6 +272,7 @@ def send_telegram_success_message(message, chat_id=None):
                             text(
                                 "SELECT chat_id FROM telegram_recipients "
                                 "WHERE user_id = :user_id "
+                                f"{membership_clause}"
                                 "ORDER BY created_at ASC"
                             ),
                             {"user_id": user_id},
@@ -273,7 +285,7 @@ def send_telegram_success_message(message, chat_id=None):
                     exc_info=True,
                 )
 
-        if not target_chat_ids and telegram_chat_id:
+        if audience == "all" and not target_chat_ids and telegram_chat_id:
             target_chat_ids = [telegram_chat_id]
 
     # Preserve order while preventing duplicate sends.
@@ -316,6 +328,23 @@ def build_limit_success_message(
     new_value,
     change_type="Immediate limit",
 ):
+    source_type, schedule_id = current_change_source.get() or (None, None)
+    audience_label = change_type
+    if source_type == "schedule" and schedule_id:
+        try:
+            with database_session() as db:
+                stored_job = db.get(ScheduledLimit, schedule_id)
+            if stored_job and stored_job.recurrence_days and stored_job.recurrence_time:
+                audience_label = "Recurring schedule limit"
+            else:
+                audience_label = "One-time schedule limit"
+        except Exception:
+            audience_label = "Schedule limit"
+    elif change_type.lower().startswith("early"):
+        audience_label = "Early limit"
+    else:
+        audience_label = "Immediate limit"
+
     row = find_limit_row(
         account_id,
         organization_id,
@@ -385,7 +414,7 @@ def build_limit_success_message(
         "teamTotal": "Team total",
     }.get(field, field)
     return (
-        f"Success: {change_type} saved on AcesHigh.ag\n"
+        f"Success: {audience_label} saved on AcesHigh.ag\n"
         f"Agent: {agent_name}\n"
         f"League: {league_name}\n"
         f"{field_label}: {new_value}\n"
@@ -1967,6 +1996,7 @@ def save_single_limit(
     api_field,
     return_full=False,
     change_type="Immediate limit",
+    telegram_audience="all",
     skip_blue=True,
 ):
     """Helper function to save a single limit change"""
@@ -2154,7 +2184,10 @@ def save_single_limit(
             new_value,
             change_type=change_type,
         )
-        send_telegram_success_message(telegram_message)
+        send_telegram_success_message(
+            telegram_message,
+            audience=telegram_audience,
+        )
 
     if return_full:
         return {
@@ -2173,6 +2206,9 @@ def save_limit_change(request_data):
     limit_mode = str(request_data.get("limitMode", "normal")).strip().lower()
     if limit_mode not in limit_mode_prefixes:
         raise ValueError("Unsupported limit mode")
+    telegram_audience = normalize_telegram_audience(
+        request_data.get("telegramAudience", "all")
+    )
 
     try:
         account_id = validate_account_id(safe_int(request_data["accountId"]))
@@ -2229,7 +2265,8 @@ def save_limit_change(request_data):
                 new_value,
                 api_field,
                 change_type="Early limit" if limit_mode == "early" else "Immediate limit",
-                return_full=True
+                return_full=True,
+                telegram_audience=telegram_audience,
             )
 
         successful_updates = []
@@ -2249,6 +2286,7 @@ def save_limit_change(request_data):
                     new_value,
                     api_field,
                     change_type="Early limit" if limit_mode == "early" else "Immediate limit",
+                    telegram_audience=telegram_audience,
                 )
                 target = (
                     skipped_updates
@@ -2319,7 +2357,8 @@ def save_limit_change(request_data):
                 new_value,
                 api_field,
                 change_type="Early limit" if limit_mode == "early" else "Immediate limit",
-                return_full=True
+                return_full=True,
+                telegram_audience=telegram_audience,
             )
         except RuntimeError as e:
             logger.exception("RuntimeError during limit save")
@@ -2332,7 +2371,7 @@ def telegram_recipient_rows():
     with database_session() as db:
         rows = db.execute(
             text(
-                "SELECT id, name, chat_id, created_at "
+                "SELECT id, name, chat_id, is_aceshigh, is_betwar, created_at "
                 "FROM telegram_recipients "
                 "WHERE user_id = :user_id "
                 "ORDER BY created_at DESC, name ASC"
@@ -2345,6 +2384,8 @@ def telegram_recipient_rows():
             "id": str(row["id"]),
             "name": row["name"],
             "chatId": row["chat_id"],
+            "isAcesHigh": bool(row["is_aceshigh"]),
+            "isBetWar": bool(row["is_betwar"]),
             "createdAt": (
                 row["created_at"].replace(tzinfo=timezone.utc).isoformat()
                 if row["created_at"]
@@ -2359,6 +2400,8 @@ def add_telegram_recipient(request_data):
     auth = auth_context()
     name = str(request_data.get("name", "")).strip()
     chat_id = str(request_data.get("chatId", "")).strip()
+    is_aceshigh = bool(request_data.get("isAcesHigh"))
+    is_betwar = bool(request_data.get("isBetWar"))
 
     if not name:
         raise ValueError("Enter a name for this Telegram recipient")
@@ -2368,6 +2411,8 @@ def add_telegram_recipient(request_data):
         raise ValueError("Enter a Telegram Chat ID")
     if len(chat_id) > 64 or not chat_id.lstrip("-").isdigit():
         raise ValueError("Telegram Chat ID must be a valid numeric chat ID")
+    if not (is_aceshigh or is_betwar):
+        raise ValueError("Select at least one membership")
 
     recipient_id = uuid.uuid4().hex
     try:
@@ -2375,14 +2420,16 @@ def add_telegram_recipient(request_data):
             db.execute(
                 text(
                     "INSERT INTO telegram_recipients "
-                    "(id, user_id, name, chat_id, created_at) "
-                    "VALUES (:id, :user_id, :name, :chat_id, :created_at)"
+                    "(id, user_id, name, chat_id, is_aceshigh, is_betwar, created_at) "
+                    "VALUES (:id, :user_id, :name, :chat_id, :is_aceshigh, :is_betwar, :created_at)"
                 ),
                 {
                     "id": recipient_id,
                     "user_id": auth["userId"],
                     "name": name,
                     "chat_id": chat_id,
+                    "is_aceshigh": is_aceshigh,
+                    "is_betwar": is_betwar,
                     "created_at": utc_now_naive(),
                 },
             )
@@ -2398,6 +2445,8 @@ def add_telegram_recipient(request_data):
             "id": recipient_id,
             "name": name,
             "chatId": chat_id,
+            "isAcesHigh": is_aceshigh,
+            "isBetWar": is_betwar,
         },
     }
 
@@ -2407,6 +2456,8 @@ def edit_telegram_recipient(request_data):
     recipient_id = str(request_data.get("id", "")).strip()
     name = str(request_data.get("name", "")).strip()
     chat_id = str(request_data.get("chatId", "")).strip()
+    is_aceshigh = bool(request_data.get("isAcesHigh"))
+    is_betwar = bool(request_data.get("isBetWar"))
 
     if len(recipient_id) != 32:
         raise ValueError("Invalid Telegram recipient")
@@ -2418,13 +2469,16 @@ def edit_telegram_recipient(request_data):
         raise ValueError("Enter a Telegram Chat ID")
     if len(chat_id) > 64 or not chat_id.lstrip("-").isdigit():
         raise ValueError("Telegram Chat ID must be a valid numeric chat ID")
+    if not (is_aceshigh or is_betwar):
+        raise ValueError("Select at least one membership")
 
     try:
         with database_session() as db:
             updated = db.execute(
                 text(
                     "UPDATE telegram_recipients "
-                    "SET name = :name, chat_id = :chat_id "
+                    "SET name = :name, chat_id = :chat_id, "
+                    "is_aceshigh = :is_aceshigh, is_betwar = :is_betwar "
                     "WHERE id = :id AND user_id = :user_id"
                 ),
                 {
@@ -2432,6 +2486,8 @@ def edit_telegram_recipient(request_data):
                     "user_id": auth["userId"],
                     "name": name,
                     "chat_id": chat_id,
+                    "is_aceshigh": is_aceshigh,
+                    "is_betwar": is_betwar,
                 },
             ).rowcount
             db.commit()
@@ -2445,12 +2501,14 @@ def edit_telegram_recipient(request_data):
 
     return {
         "message": "Telegram recipient updated",
-        "recipient": {
-            "id": recipient_id,
-            "name": name,
-            "chatId": chat_id,
-        },
-    }
+            "recipient": {
+                "id": recipient_id,
+                "name": name,
+                "chatId": chat_id,
+                "isAcesHigh": is_aceshigh,
+                "isBetWar": is_betwar,
+            },
+        }
 
 
 def delete_telegram_recipient(request_data):
@@ -2537,36 +2595,15 @@ def next_one_time_run(recurrence_time, after=None):
     return candidate
 
 
-short_weekday_names = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-
-
-def recurring_day_text(recurrence_days):
-    """Name a set of weekdays in as few words as it takes.
-
-    Spelling every day out produced "Every Wednesday, Thursday, Friday,
-    Saturday, Sunday", which wrapped to four lines in the schedules table and
-    made one row three times taller than its neighbours.
-    """
-    days = sorted({int(day) for day in recurrence_days})
-    if not days:
-        return ""
-    if days == [0, 1, 2, 3, 4, 5, 6]:
-        return "Every day"
-    if days == [0, 1, 2, 3, 4]:
-        return "Weekdays"
-    if days == [5, 6]:
-        return "Weekends"
-    # A run of consecutive days reads as a range. Only the plain Mon..Sun
-    # order is collapsed; a set that wraps past Sunday stays a list.
-    if len(days) > 2 and days == list(range(days[0], days[-1] + 1)):
-        return f"{short_weekday_names[days[0]]}-{short_weekday_names[days[-1]]}"
-    return ", ".join(short_weekday_names[day] for day in days)
-
-
 def recurring_description(recurrence_days, recurrence_time):
-    day_text = recurring_day_text(recurrence_days)
+    days = [weekday_names[int(day)] for day in recurrence_days]
+    day_text = (
+        "Monday through Friday"
+        if recurrence_days == [0, 1, 2, 3, 4]
+        else ", ".join(days)
+    )
     display_time = datetime.strptime(recurrence_time, "%H:%M").strftime("%I:%M %p")
-    return f"{day_text} at {display_time} ET"
+    return f"Every {day_text} at {display_time} ET"
 
 
 def create_schedule(request_data):
@@ -2580,6 +2617,9 @@ def create_schedule(request_data):
         value = int(request_data["value"])
         one_time_schedule = bool(request_data.get("oneTimeSchedule"))
         limit_mode = str(request_data.get("limitMode", "normal")).strip().lower()
+        telegram_audience = normalize_telegram_audience(
+            request_data.get("telegramAudience", "all")
+        )
         recurrence_days = sorted({int(day) for day in request_data.get("recurrenceDays", [])})
         recurrence_time = str(request_data.get("recurrenceTime", ""))
         customer_support_agent = str(
@@ -2645,6 +2685,7 @@ def create_schedule(request_data):
                 scheduled_for=scheduled_utc,
                 recurrence_days=stored_recurrence_days,
                 recurrence_time=stored_recurrence_time,
+                telegram_audience=telegram_audience,
                 is_early_limit=limit_mode == "early",
                 status="pending",
             )
@@ -2669,6 +2710,7 @@ def create_schedule(request_data):
         "scheduledFor": eastern_timestamp(scheduled_for),
         "scheduledForUtc": scheduled_for_utc.isoformat(),
         "limitMode": limit_mode,
+        "telegramAudience": telegram_audience,
         "customerSupportAgent": customer_support_agent,
         "recurrence": (
             recurring_description(recurrence_days, recurrence_time)
@@ -2905,6 +2947,7 @@ def execute_scheduled_job(job_id):
             "field": job.field,
             "value": job.value,
             "limitMode": "early" if job.is_early_limit else "normal",
+            "telegramAudience": job.telegram_audience or "all",
         }
         outcome = None
         try:
@@ -3306,12 +3349,6 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         logger.error("%s: %s", context, type(error).__name__, exc_info=True)
         self.send_json(502, {"error": message})
 
-    def comparison_error(self, context, error, fallback):
-        """A ComparisonError already says which site failed and what to do
-        about it, so send that text rather than a generic 502 message."""
-        logger.error("%s: %s", context, error, exc_info=True)
-        self.send_json(502, {"error": str(error) or fallback})
-
     def session_cookie(self, session_id, delete=False):
         secure = "; Secure" if self.is_https() else ""
         expiry = "; Max-Age=0" if delete else f"; Max-Age={int(session_max_lifetime.total_seconds())}"
@@ -3492,10 +3529,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             except PermissionError as error:
                 self.send_json(401, {"error": str(error)})
             except ComparisonError as error:
-                self.comparison_error(
+                self.server_error(
                     "Comparison league discovery failed",
                     error,
-                    f"{partner_name} or OddsPapi league data is unavailable",
+                    "AcesHigh or OddsPapi league data is unavailable",
                 )
             except Exception as error:
                 self.server_error(
@@ -3537,10 +3574,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             except PermissionError as error:
                 self.send_json(401, {"error": str(error)})
             except ComparisonError as error:
-                self.comparison_error(
+                self.server_error(
                     "League comparison failed",
                     error,
-                    f"Pinnacle or {partner_name} comparison data is unavailable",
+                    "Pinnacle or AcesHigh comparison data is unavailable",
                 )
             except Exception as error:
                 self.server_error(
@@ -3580,10 +3617,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             except PermissionError as error:
                 self.send_json(401, {"error": str(error)})
             except ComparisonError as error:
-                self.comparison_error(
+                self.server_error(
                     "Trading monitor failed",
                     error,
-                    f"Pinnacle or {partner_name} monitor data is unavailable",
+                    "Pinnacle or AcesHigh monitor data is unavailable",
                 )
             except Exception as error:
                 self.server_error(
@@ -3826,6 +3863,7 @@ def migrate_schedule_columns():
     additions = {
         "recurrence_days": "VARCHAR(20) NULL",
         "recurrence_time": "VARCHAR(5) NULL",
+        "telegram_audience": "VARCHAR(10) NOT NULL DEFAULT 'all'",
         "is_early_limit": "BOOLEAN NOT NULL DEFAULT FALSE",
         "last_run_status": "VARCHAR(20) NULL",
         "last_run_at": "DATETIME NULL",
@@ -3854,11 +3892,25 @@ def migrate_telegram_recipients():
                 "user_id INTEGER NOT NULL, "
                 "name VARCHAR(100) NOT NULL, "
                 "chat_id VARCHAR(64) NOT NULL, "
+                "is_aceshigh BOOLEAN NOT NULL DEFAULT FALSE, "
+                "is_betwar BOOLEAN NOT NULL DEFAULT FALSE, "
                 "created_at DATETIME NOT NULL, "
                 "UNIQUE KEY uq_telegram_recipient_user_chat (user_id, chat_id)"
                 ")"
             )
         )
+        existing = {
+            column["name"]
+            for column in inspect(engine).get_columns("telegram_recipients")
+        }
+        for column_name in ("is_aceshigh", "is_betwar"):
+            if column_name not in existing:
+                connection.execute(
+                    text(
+                        f"ALTER TABLE telegram_recipients "
+                        f"ADD COLUMN {column_name} BOOLEAN NOT NULL DEFAULT FALSE"
+                    )
+                )
 
 
 def migrate_user_columns():

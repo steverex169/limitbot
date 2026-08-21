@@ -499,9 +499,9 @@ main {
 }
 
 .schedules-table {
-  /* Fifteen columns still need width, but compact timestamps and a hidden
-     Team total keep Status and Detail on screen at laptop widths. */
-  min-width: 1560px;
+  /* Thirteen columns need real width; the wrapper scrolls horizontally
+     rather than crushing them into each other. */
+  min-width: 1900px;
   table-layout: fixed;
 }
 
@@ -518,34 +518,28 @@ main {
   overflow-wrap: anywhere;
 }
 
-/* Created, Agent, CS Agent, League, Period, Spread, Money line, Total,
-   Team total, Repeats, Next run, Last run, Status, Detail, Action. Hiding
-   Team total does not renumber these: nth-child counts markup position, not
-   visible position. */
-.schedules-table th:nth-child(1) { width: 7%; }
+/* Created, Agent, Customer Support Agent, League, Period, Limit, Value,
+   Repeats, Next run, Last run, Status, Detail, Action. */
+.schedules-table th:nth-child(1) { width: 9%; }
 .schedules-table th:nth-child(2) { width: 7%; }
-.schedules-table th:nth-child(3) { width: 6%; }
-.schedules-table th:nth-child(4) { width: 11%; }
+.schedules-table th:nth-child(3) { width: 8%; }
+.schedules-table th:nth-child(4) { width: 10%; }
 .schedules-table th:nth-child(5) { width: 5%; }
-.schedules-table th:nth-child(6) { width: 5%; }
+.schedules-table th:nth-child(6) { width: 7%; }
 .schedules-table th:nth-child(7) { width: 5%; }
-.schedules-table th:nth-child(8) { width: 5%; }
-.schedules-table th:nth-child(9) { width: 5%; }
-.schedules-table th:nth-child(10) { width: 10%; }
+.schedules-table th:nth-child(8) { width: 9%; }
+.schedules-table th:nth-child(9) { width: 9%; }
+.schedules-table th:nth-child(10) { width: 9%; }
 .schedules-table th:nth-child(11) { width: 7%; }
-.schedules-table th:nth-child(12) { width: 9%; }
-.schedules-table th:nth-child(13) { width: 6%; }
-.schedules-table th:nth-child(14) { width: 8%; }
-.schedules-table th:nth-child(15) { width: 4%; }
+.schedules-table th:nth-child(12) { width: 7%; }
+.schedules-table th:nth-child(13) { width: 8%; }
 
 /* Under table-layout: fixed a cell that cannot wrap prints straight over its
    neighbour, so only genuinely short values are allowed to stay on one line.
    Timestamps wrap at the space between date and time. */
-.schedules-table td:nth-child(6),
 .schedules-table td:nth-child(7),
-.schedules-table td:nth-child(8),
-.schedules-table td:nth-child(9),
-.schedules-table td:nth-child(15) {
+.schedules-table td:nth-child(11),
+.schedules-table td:nth-child(13) {
   white-space: nowrap;
 }
 
@@ -555,43 +549,15 @@ main {
   overflow: hidden;
 }
 
-/* The four limit columns read as one printed line, so the digits share a
-   width and sit against the same edge. */
-.schedule-limit-value {
+/* Limits line up when the digits share a width. */
+.schedules-table td:nth-child(7) {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
 }
 
-/* The Team total column is present in the markup but collapses out of the
-   layout while no schedule sets one. */
-.schedules-table.hide-team-total .col-team-total {
-  display: none;
-}
-
-/* A limit this schedule does not touch, distinct from a limit set to zero. */
-.schedule-limit-empty {
-  color: var(--muted, #8a94a6);
-}
-
-/* A group whose limits ended in different states shows a badge each. */
-.schedules-table td:nth-child(13) .schedule-status + .schedule-status {
-  margin-top: 4px;
-}
-
-.schedules-table td:nth-child(13) .schedule-status {
-  display: inline-block;
-}
-
-/* Per-limit notes stack instead of running together on one line. */
-.schedule-detail-line + .schedule-detail-line {
-  margin-top: 4px;
-}
-
-
 /* The failure reason is the widest free text in the row and the reason the
-   column exists, so it wraps instead of being clipped. Detail is column 14
-   now that the limits occupy four columns of their own. */
-.schedules-table td:nth-child(14) {
+   column exists, so it wraps instead of being clipped. */
+.schedules-table td:nth-child(12) {
   color: var(--muted);
   font-size: 12px;
   overflow-wrap: anywhere;
@@ -1270,38 +1236,6 @@ tbody tr:hover {
 
 .comparison-limit-higher {
   color: var(--green);
-}
-
-/* The push button sits in its own column so it never crowds the number it
-   is offering. */
-.comparison-push-cell {
-  width: 1%;
-  text-align: right;
-}
-
-.comparison-push {
-  padding: 4px 10px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--card, transparent);
-  color: var(--blue);
-  font: inherit;
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.comparison-push:hover:not(:disabled) {
-  border-color: var(--blue);
-  background: var(--blue-soft);
-}
-
-/* A limit already matching Pinnacle offers nothing to click. */
-.comparison-push:disabled {
-  color: var(--muted);
-  cursor: default;
-  opacity: 0.7;
 }
 
 .comparison-empty {
@@ -2596,10 +2530,33 @@ dialog h2 {
   font: inherit;
 }
 
+.telegram-inline-field {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.telegram-inline-field input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.telegram-inline-field select {
+  flex: 0 0 180px;
+  height: 42px;
+  padding: 0 14px;
+  text-align: left;
+  text-align-last: left;
+}
+
 .telegram-alerts-table th:last-child,
 .telegram-alerts-table td:last-child {
   width: 190px;
   text-align: right;
+}
+
+.telegram-alerts-table .empty-state {
+  text-align: center;
 }
 
 .telegram-action-buttons {
@@ -2637,6 +2594,16 @@ dialog h2 {
 @media (max-width: 800px) {
   .telegram-alert-form {
     grid-template-columns: 1fr;
+  }
+
+  .telegram-inline-field {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .telegram-inline-field select {
+    flex-basis: auto;
+    width: 100%;
   }
 }
 
