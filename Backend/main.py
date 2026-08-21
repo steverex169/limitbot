@@ -423,7 +423,10 @@ def build_limit_success_message(
         "teamTotal": "Team total",
     }.get(field, field)
     return (
-        f"Success: {audience_label} saved on AcesHigh.ag\n"
+        # Both sites can share one bot, so the alert has to name the site it
+        # came from. Hardcoding AcesHigh.ag here made every BetWar alert claim
+        # to be an AcesHigh one.
+        f"Success: {audience_label} saved on {partner_host}\n"
         f"Agent: {agent_name}\n"
         f"League: {league_name}\n"
         f"{field_label}: {new_value}\n"
