@@ -3042,10 +3042,13 @@ const rampWeekdays = [
   { value: 6, label: "Sun" },
 ];
 
+/* A ramp rises, so each default step reads a later part of Pinnacle's day.
+ * Leaving them all on "early" produced three identical limits - the times
+ * changed and the numbers did not. */
 const rampDefaultSteps = [
-  { time: "09:00", value: "" },
-  { time: "13:00", value: "" },
-  { time: "17:00", value: "" },
+  { time: "09:00", value: "", window: "start" },
+  { time: "13:00", value: "", window: "mid" },
+  { time: "17:00", value: "", window: "end" },
 ];
 
 function rampCheckbox(name, value, label, checked) {
@@ -3284,7 +3287,7 @@ function renderRampControls() {
     );
   }
   for (const step of rampDefaultSteps) {
-    addRampStep(step.time, step.value);
+    addRampStep(step.time, step.value, step.window);
   }
 }
 
@@ -3323,7 +3326,11 @@ function addRampStep(time = "", value = "", windowValue = "") {
   ]) {
     windowSelect.append(new Option(label, value_));
   }
-  windowSelect.value = windowValue || "start";
+  /* An added step continues the ramp instead of dropping back to the
+   * beginning of the day. */
+  const existingSteps = elements.rampSteps?.childElementCount || 0;
+  windowSelect.value =
+    windowValue || ["start", "mid", "end"][Math.min(existingSteps, 2)];
   windowSelect.addEventListener("change", updateRampPreview);
 
   valueCell.append(valueInput, windowSelect);
@@ -3461,6 +3468,14 @@ function updateRampPreview() {
       ? ` ${incomplete} step${incomplete === 1 ? " is" : "s are"} missing a time or a limit and ${incomplete === 1 ? "is" : "are"} not counted.`
       : "";
 
+  /* Three times reading one part of the day is a flat limit wearing a ramp's
+   * clothes, and it is not obvious from the numbers until after it is made. */
+  const stepWindows = rampSteps().map((step) => step.window);
+  const flatRamp =
+    rampFromPinnacle() &&
+    stepWindows.length > 1 &&
+    new Set(stepWindows).size === 1;
+
   elements.rampPreview.textContent =
     (total
       ? `This creates ${total.toLocaleString()} recurring schedule${total === 1 ? "" : "s"}: ` +
@@ -3472,7 +3487,10 @@ function updateRampPreview() {
       : leagues
         ? "Add a time and a limit to at least one step."
         : "Choose the leagues to ramp. Every one you tick is scheduled separately, so start with the ones you actually take money on.") +
-    warning;
+    warning +
+    (flatRamp
+      ? ` Every step reads the same part of Pinnacle's day, so all ${stepWindows.length} would write the same limit. Give them different parts to make it rise.`
+      : "");
 }
 
 function setRampMessage(message = "", type = "") {
