@@ -403,16 +403,15 @@ function applyDashboardRoute() {
       .catch(() => { });
   }
 
-  if (buildRampActive && state.selectedAgentId) {
+  if (buildRampActive) {
     /*
      * The league list comes from the dashboard's rows. Opening this page
      * directly - by URL, or after a full page load - means they were never
      * fetched, which showed an empty picker on a page whose whole job is
      * picking leagues.
      */
-    if (state.rows.length) {
-      renderRampLeagues();
-    } else {
+    renderRampLeagues();
+    if (!state.rows.length && state.selectedAgentId) {
       loadLeagues(false)
         .then(() => renderRampLeagues())
         .catch(() => { });
@@ -3076,6 +3075,18 @@ function rampLeagueRows() {
   );
 }
 
+/*
+ * Leagues arrive after the route has already rendered, so the picker has to be
+ * told. Without this the page showed "no editable leagues" on a fresh load and
+ * never recovered, because applyDashboardRoute had run before the agent was
+ * even selected.
+ */
+function syncRampLeagues() {
+  if (elements.buildRampView && !elements.buildRampView.hidden) {
+    renderRampLeagues();
+  }
+}
+
 function rampLeagueLabel(row) {
   const name =
     row.leagueName || row.organizationLabel || `League ${row.idLeague}`;
@@ -3109,7 +3120,9 @@ function renderRampLeagues() {
     const empty = document.createElement("p");
     empty.className = "ramp-count";
     empty.textContent =
-      "No editable leagues loaded yet. Open the dashboard once, then come back.";
+      state.selectedAgentId
+        ? "Loading leagues for this agent..."
+        : "Select an agent on the left to load its leagues.";
     elements.rampLeagues.append(empty);
     updateRampPreview();
     return;
@@ -3691,6 +3704,7 @@ async function loadLeagues(includeSchedules = true) {
   state.rows = Array.isArray(data.rows)
     ? data.rows
     : [];
+  syncRampLeagues();
 
   if (scheduleData) {
     state.schedules = Array.isArray(scheduleData.schedules)
@@ -4362,6 +4376,7 @@ async function refreshScheduleStatuses() {
   )
     ? leagueData.rows
     : [];
+  syncRampLeagues();
 
   state.schedules = Array.isArray(
     data.schedules
