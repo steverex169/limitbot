@@ -158,3 +158,50 @@ class PinnacleLimitSample(Base):
     sampled_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), index=True
     )
+
+
+class LimitTracker(Base):
+    """One limit that follows Pinnacle live, at a chosen fraction of it.
+
+    Distinct from ScheduledLimit: a schedule writes a fixed number at a fixed
+    time, while a tracker writes whatever Pinnacle is at right now, scaled.
+    The ramp shape is not configured here - it emerges, because Pinnacle's own
+    limit climbs as a fixture takes money.
+    """
+
+    __tablename__ = "limit_trackers"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    account_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    organization_id: Mapped[int] = mapped_column(BigInteger)
+    league_id: Mapped[int] = mapped_column(BigInteger)
+    sport_type_id: Mapped[int] = mapped_column(BigInteger)
+    period_number: Mapped[int] = mapped_column(Integer, default=0)
+    field: Mapped[str] = mapped_column(String(20))
+    is_early_limit: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Where to read Pinnacle: the OddsPapi league and the period label the
+    # samples are stored under.
+    league_slug: Mapped[str] = mapped_column(String(24), index=True)
+    period_label: Mapped[str] = mapped_column(String(32), default="Full Game")
+    league_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+    scale_percent: Mapped[int] = mapped_column(Integer, default=50)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    customer_support_agent: Mapped[str | None] = mapped_column(
+        String(100), nullable=True
+    )
+
+    # What the last cycle saw and did, so the page can show it without
+    # re-reading AccessHigh.
+    last_pinnacle_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_written_value: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    last_note: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_written_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

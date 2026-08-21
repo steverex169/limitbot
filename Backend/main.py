@@ -30,6 +30,7 @@ from database import Base, database_session, engine
 from model import (
     AgentTreeCache,
     LimitChange,
+    LimitTracker,
     LoginSession,
     PinnacleLimitSample,
     ScheduledLimit,
@@ -2882,6 +2883,182 @@ def pinnacle_ramp_value(curve, slug, period, field, window, scale_percent):
     return max(100, int(round(value / 100.0)) * 100)
 
 
+def limit_tracker_rows(account_id):
+    """Every tracked limit for this account, with what the last cycle saw."""
+    auth = auth_context()
+    conditions = [LimitTracker.user_id == auth["userId"]]
+    if int(account_id) != int(auth["id"]):
+        conditions.append(LimitTracker.account_id == int(account_id))
+    with database_session() as db:
+        rows = db.execute(
+            select(LimitTracker).where(*conditions).order_by(
+                LimitTracker.league_name, LimitTracker.field
+            )
+        ).scalars().all()
+        return [{
+            "id": row.id,
+            "accountId": row.account_id,
+            "leagueName": row.league_name,
+            "leagueSlug": row.league_slug,
+            "period": row.period_label,
+            "field": row.field,
+            "scalePercent": row.scale_percent,
+            "enabled": row.enabled,
+            "pinnacle": row.last_pinnacle_value,
+            "value": row.last_written_value,
+            "note": row.last_note,
+            "checkedAt": (
+                eastern_timestamp(row.last_checked_at.replace(tzinfo=timezone.utc))
+                if row.last_checked_at else None
+            ),
+            "writtenAt": (
+                eastern_timestamp(row.last_written_at.replace(tzinfo=timezone.utc))
+                if row.last_written_at else None
+            ),
+        } for row in rows]
+
+
+def create_limit_trackers(request_data):
+    """Put a set of limits under live tracking.
+
+    One tracker per league and market. There is no ramp to configure: the
+    shape comes from Pinnacle, whose limit climbs as a fixture takes two-way
+    money, and this follows it at whatever share the operator chose.
+    """
+    auth = auth_context()
+    targets = request_data.get("targets") or []
+    fields = [
+        field for field in (request_data.get("fields") or [])
+        if field in allowed_limit_fields
+    ]
+    if not targets:
+        raise ValueError("Select at least one league")
+    if not fields:
+        raise ValueError("Select at least one limit type")
+
+    try:
+        account_id = validate_account_id(int(request_data["accountId"]))
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("Select an agent before tracking limits") from error
+
+    try:
+        scale_percent = int(request_data.get("scalePercent", 50) or 50)
+    except (TypeError, ValueError) as error:
+        raise ValueError("Enter a valid percentage") from error
+    if not 1 <= scale_percent <= 200:
+        raise ValueError("The percentage must be between 1 and 200")
+
+    limit_mode = str(request_data.get("limitMode", "normal")).strip().lower()
+    if limit_mode not in limit_mode_prefixes:
+        raise ValueError("Unsupported limit mode")
+    is_early_limit = limit_mode == "early"
+
+    customer_support_agent = str(
+        request_data.get("customerSupportAgent", "")
+    ).strip()
+    if not customer_support_agent:
+        raise ValueError("Enter the Customer Support Agent name")
+
+    created = 0
+    replaced = 0
+    skipped = []
+
+    with database_session() as db:
+        for target in targets:
+            league_label = str(
+                target.get("leagueName") or f"League {target.get('idLeague')}"
+            )
+            slug = league_slug_for_row(league_label)
+            if not slug:
+                skipped.append(
+                    f"{league_label} is not a league Pinnacle data is kept for"
+                )
+                continue
+            try:
+                organization_id = int(target["idOrganization"])
+                league_id = int(target["idLeague"])
+                sport_type_id = int(target["idSportType"])
+                period_number = int(target.get("periodNumber", 0) or 0)
+            except (KeyError, TypeError, ValueError):
+                skipped.append(f"{league_label} is missing its league ids")
+                continue
+
+            allowed = target.get("editableFields")
+            for field in fields:
+                if isinstance(allowed, list) and allowed and field not in allowed:
+                    skipped.append(
+                        f"{league_label} does not use the "
+                        f"{limit_field_labels.get(field, field)} limit"
+                    )
+                    continue
+                # Tracking the same limit twice would have two cycles writing
+                # different numbers to it, so a repeat replaces.
+                replaced += db.execute(
+                    delete(LimitTracker).where(
+                        LimitTracker.user_id == auth["userId"],
+                        LimitTracker.account_id == int(account_id),
+                        LimitTracker.organization_id == organization_id,
+                        LimitTracker.league_id == league_id,
+                        LimitTracker.sport_type_id == sport_type_id,
+                        LimitTracker.period_number == period_number,
+                        LimitTracker.field == field,
+                        LimitTracker.is_early_limit == is_early_limit,
+                    )
+                ).rowcount
+                db.add(LimitTracker(
+                    id=uuid.uuid4().hex,
+                    user_id=auth["userId"],
+                    account_id=int(account_id),
+                    organization_id=organization_id,
+                    league_id=league_id,
+                    sport_type_id=sport_type_id,
+                    period_number=period_number,
+                    field=field,
+                    is_early_limit=is_early_limit,
+                    league_slug=slug,
+                    period_label=str(target.get("periodDescription") or "Full Game"),
+                    league_name=league_label,
+                    scale_percent=scale_percent,
+                    enabled=True,
+                    customer_support_agent=customer_support_agent[:100],
+                ))
+                created += 1
+        if not created:
+            raise ValueError(
+                skipped[0] if skipped else "No limits could be tracked"
+            )
+        db.commit()
+
+    parts = [f"Tracking {created:,} limit{'' if created == 1 else 's'}"]
+    if replaced:
+        parts.append(f"replacing {replaced:,} already tracked")
+    return {
+        "message": ", ".join(parts),
+        "created": created,
+        "replaced": replaced,
+        "skipped": sorted(set(skipped))[:20],
+    }
+
+
+def delete_limit_trackers(request_data):
+    auth = auth_context()
+    tracker_id = str(request_data.get("id", "")).strip()
+    conditions = [LimitTracker.user_id == auth["userId"]]
+    if tracker_id:
+        conditions.append(LimitTracker.id == tracker_id)
+    else:
+        account_id = validate_account_id(safe_int(request_data["accountId"]))
+        if int(account_id) != int(auth["id"]):
+            conditions.append(LimitTracker.account_id == int(account_id))
+    with database_session() as db:
+        removed = db.execute(delete(LimitTracker).where(*conditions)).rowcount
+        db.commit()
+    return {
+        "message": f"Stopped tracking {removed:,} limit{'' if removed == 1 else 's'}",
+        "removed": removed,
+    }
+
+
 def create_schedule_ramp(request_data):
     """Create a whole limit ramp in one action.
 
@@ -3707,6 +3884,201 @@ def run_pinnacle_sampler():
         shutdown_event.wait(max(60, pinnacle_sample_minutes * 60))
 
 
+# How often a tracked limit is compared against Pinnacle, and how much it has
+# to have moved before a write is worth making. Rewriting for a 2% drift would
+# spend AccessHigh's rate limit to no purpose.
+tracker_interval_minutes = int(os.getenv("TRACKER_INTERVAL_MINUTES", "10") or 10)
+tracker_min_change_percent = float(os.getenv("TRACKER_MIN_CHANGE_PERCENT", "8") or 8)
+# Only fixtures this close to kick-off count towards the live number. Without
+# a window a single game three days out would hold the limit down all day, and
+# the ramp would never rise.
+tracker_window_hours = float(os.getenv("TRACKER_WINDOW_HOURS", "12") or 12)
+tracker_enabled = (
+    os.getenv("LIMIT_TRACKER", "").strip().lower()
+    not in {"off", "false", "0", "no"}
+)
+
+
+def tracker_pinnacle_levels(api_key, league_slug):
+    """Pinnacle's current limit per period and market for one league.
+
+    The median across fixtures near kick-off, not across every fixture on the
+    board: a game three days out carries a tiny limit and would hold the whole
+    league down, which is the opposite of following the market.
+    """
+    samples = sample_pinnacle_limits(api_key, league_slug)
+    grouped = {}
+    for sample in samples:
+        if sample["hoursToStart"] > tracker_window_hours:
+            continue
+        grouped.setdefault(
+            (sample["period"], sample["field"]), []
+        ).append(sample["limit"])
+
+    levels = {}
+    for key, values in grouped.items():
+        values.sort()
+        middle = len(values) // 2
+        levels[key] = (
+            values[middle]
+            if len(values) % 2
+            else (values[middle - 1] + values[middle]) / 2
+        )
+    return levels
+
+
+def run_tracker_cycle():
+    """Move every enabled tracked limit to its share of Pinnacle's current one."""
+    api_key = os.getenv("ODDSPAPI_KEY", "").strip()
+    if not api_key:
+        return 0
+
+    with database_session() as db:
+        trackers = db.execute(
+            select(LimitTracker).where(LimitTracker.enabled.is_(True))
+        ).scalars().all()
+        trackers = [
+            {
+                "id": t.id, "userId": t.user_id, "accountId": t.account_id,
+                "organizationId": t.organization_id, "leagueId": t.league_id,
+                "sportTypeId": t.sport_type_id, "periodNumber": t.period_number,
+                "field": t.field, "isEarly": t.is_early_limit,
+                "slug": t.league_slug, "period": t.period_label,
+                "scale": t.scale_percent, "lastWritten": t.last_written_value,
+            }
+            for t in trackers
+        ]
+    if not trackers:
+        return 0
+
+    levels_by_slug = {}
+    written = 0
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    for tracker in trackers:
+        if shutdown_event.is_set():
+            break
+        slug = tracker["slug"]
+        if slug not in levels_by_slug:
+            try:
+                levels_by_slug[slug] = tracker_pinnacle_levels(api_key, slug)
+            except RateLimited:
+                logger.info("Tracker cycle stopped early: OddsPapi is rate limiting")
+                break
+            except Exception:
+                logger.warning(
+                    "Could not read Pinnacle for %s", slug, exc_info=True
+                )
+                levels_by_slug[slug] = {}
+        level = levels_by_slug[slug].get((tracker["period"], tracker["field"]))
+
+        note = None
+        target = None
+        if not level:
+            note = "No Pinnacle fixtures near kick-off"
+        else:
+            target = max(100, int(round(level * tracker["scale"] / 100.0 / 100.0)) * 100)
+            previous = tracker["lastWritten"]
+            if previous and previous > 0:
+                drift = abs(target - previous) / float(previous) * 100.0
+                if drift < tracker_min_change_percent:
+                    note = f"Held at {previous:,}, Pinnacle moved {drift:.0f}%"
+                    target = None
+
+        if target is not None:
+            try:
+                outcome = write_tracked_limit(tracker, target)
+                note = outcome["note"]
+                if outcome["changed"]:
+                    written += 1
+            except Exception as error:
+                note = f"Failed: {error}"
+                logger.warning(
+                    "Tracker %s could not write", tracker["id"], exc_info=True
+                )
+
+        with database_session() as db:
+            row = db.get(LimitTracker, tracker["id"])
+            if row is not None:
+                row.last_checked_at = now
+                row.last_pinnacle_value = level
+                row.last_note = (note or "")[:255]
+                if target is not None and note and note.startswith("Set to"):
+                    row.last_written_value = target
+                    row.last_written_at = now
+                db.commit()
+
+    if written:
+        logger.info("Tracker moved %d limits", written)
+    return written
+
+
+def write_tracked_limit(tracker, target):
+    """Write one tracked limit, ignoring the blue rule for this model only.
+
+    Every write on a sub-account marks the limit blue, so a tracker that
+    honoured the blue rule would move a limit once and then skip it for ever.
+    The rule still applies everywhere else; it exists to protect a player
+    override somebody set by hand, and nothing here touches those.
+    """
+    with database_session() as db:
+        user = db.get(User, tracker["userId"])
+    if user is None:
+        return {"changed": False, "note": "Tracker owner no longer exists"}
+
+    auth = build_worker_auth(user)
+    auth["searchableAgentIds"] = {tracker["accountId"]}
+    token = current_auth.set(auth)
+    source = current_change_source.set(("tracker", tracker["id"]))
+    try:
+        refresh_leagues_if_stale(tracker["accountId"])
+        api_field = (
+            f"{limit_mode_prefixes['early' if tracker['isEarly'] else 'normal']}"
+            f"{allowed_limit_fields[tracker['field']]}"
+        )
+        outcome = save_single_limit(
+            tracker["accountId"],
+            tracker["organizationId"],
+            tracker["leagueId"],
+            tracker["sportTypeId"],
+            tracker["periodNumber"],
+            tracker["field"],
+            target,
+            api_field,
+            return_full=False,
+            change_type="Tracked limit",
+            skip_blue=False,
+        )
+        changed = bool(outcome.get("changed", True))
+        return {
+            "changed": changed,
+            "note": (
+                f"Set to {target:,}" if changed
+                else outcome.get("note") or f"Already {target:,}"
+            ),
+        }
+    finally:
+        current_change_source.reset(source)
+        current_auth.reset(token)
+        try:
+            auth["http"].close()
+        except Exception:
+            pass
+
+
+def run_limit_tracker():
+    if not tracker_enabled:
+        logger.info("Limit tracker is disabled")
+        return
+    shutdown_event.wait(45)
+    while not shutdown_event.is_set():
+        try:
+            run_tracker_cycle()
+        except Exception:
+            logger.exception("Tracker cycle failed")
+        shutdown_event.wait(max(60, tracker_interval_minutes * 60))
+
+
 def run_schedule_worker():
     # Any exception escaping this loop silently stops all scheduled limits
     # until a restart, so every iteration must survive failures.
@@ -4341,6 +4713,28 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self.server_error("League load failed", error, "League data is unavailable")
             return
 
+        if path == "/api/trackers":
+            try:
+                account_id = validate_account_id(int(query["accountId"][0]))
+                self.send_json(
+                    200,
+                    {
+                        "trackers": limit_tracker_rows(account_id),
+                        "intervalMinutes": tracker_interval_minutes,
+                        "windowHours": tracker_window_hours,
+                        "minChangePercent": tracker_min_change_percent,
+                    },
+                )
+            except (KeyError, TypeError, ValueError) as error:
+                self.send_json(400, {"error": str(error)})
+            except PermissionError as error:
+                self.send_json(401, {"error": str(error)})
+            except Exception as error:
+                self.server_error(
+                    "Tracker load failed", error, "Tracked limits are unavailable"
+                )
+            return
+
         if path == "/api/schedules":
             try:
                 account_id = validate_account_id(int(query["accountId"][0]))
@@ -4498,6 +4892,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             "/api/limits",
             "/api/schedules",
             "/api/schedules/ramp",
+            "/api/trackers",
+            "/api/trackers/delete",
             "/api/schedules/cancel",
             "/api/schedules/delete",
             "/api/schedules/delete-all",
@@ -4514,7 +4910,11 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         try:
             request_data = self.read_json()
             result = (
-                create_schedule_ramp(request_data)
+                create_limit_trackers(request_data)
+                if path == "/api/trackers"
+                else delete_limit_trackers(request_data)
+                if path == "/api/trackers/delete"
+                else create_schedule_ramp(request_data)
                 if path == "/api/schedules/ramp"
                 else cancel_schedule(request_data)
                 if path == "/api/schedules/cancel"
@@ -4671,6 +5071,8 @@ schedule_worker = threading.Thread(target=run_schedule_worker, daemon=True)
 schedule_worker.start()
 pinnacle_sampler = threading.Thread(target=run_pinnacle_sampler, daemon=True)
 pinnacle_sampler.start()
+limit_tracker = threading.Thread(target=run_limit_tracker, daemon=True)
+limit_tracker.start()
 server = ThreadingHTTPServer((server_host, server_port), DashboardHandler)
 
 def stop_server(_signum, _frame):

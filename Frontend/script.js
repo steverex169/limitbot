@@ -1,4 +1,6 @@
 const state = {
+  trackers: [],
+  trackerSettings: null,
   agents: [],
   selectedAgentId: null,
   rows: [],
@@ -166,20 +168,14 @@ const elements = {
   buildRampLink: document.querySelector("#buildRampLink"),
   rampBuilder: document.querySelector("#rampBuilder"),
   rampFields: document.querySelector("#rampFields"),
-  rampDays: document.querySelector("#rampDays"),
   rampLeagues: document.querySelector("#rampLeagues"),
   rampLeagueSearch: document.querySelector("#rampLeagueSearch"),
   rampLeagueCount: document.querySelector("#rampLeagueCount"),
   rampSelectAll: document.querySelector("#rampSelectAll"),
   rampSelectNone: document.querySelector("#rampSelectNone"),
-  rampSteps: document.querySelector("#rampSteps"),
-  rampSource: document.querySelector("#rampSource"),
+  rampTracked: document.querySelector("#rampTracked"),
   rampScale: document.querySelector("#rampScale"),
-  rampScaleField: document.querySelector("#rampScaleField"),
-  rampStepValueHead: document.querySelector("#rampStepValueHead"),
-  rampAddStep: document.querySelector("#rampAddStep"),
   rampAgentName: document.querySelector("#rampAgentName"),
-  rampReplace: document.querySelector("#rampReplace"),
   rampMessage: document.querySelector("#rampMessage"),
   rampPreview: document.querySelector("#rampPreview"),
   rampCreate: document.querySelector("#rampCreate"),
@@ -417,6 +413,7 @@ function applyDashboardRoute() {
      * picking leagues.
      */
     renderRampLeagues();
+    loadTrackedLimits().catch(() => { });
     if (!state.rows.length && state.selectedAgentId) {
       loadLeagues(false)
         .then(() => renderRampLeagues())
@@ -3045,12 +3042,6 @@ const rampWeekdays = [
 /* A ramp rises, so each default step reads a later part of Pinnacle's day.
  * Leaving them all on "early" produced three identical limits - the times
  * changed and the numbers did not. */
-const rampDefaultSteps = [
-  { time: "09:00", value: "", window: "start" },
-  { time: "13:00", value: "", window: "mid" },
-  { time: "17:00", value: "", window: "end" },
-];
-
 function rampCheckbox(name, value, label, checked) {
   const wrap = document.createElement("label");
   wrap.className = "ramp-check";
@@ -3281,78 +3272,6 @@ function renderRampControls() {
       rampCheckbox("rampField", field, label, true)
     );
   }
-  for (const day of rampWeekdays) {
-    elements.rampDays.append(
-      rampCheckbox("rampDay", day.value, day.label, true)
-    );
-  }
-  for (const step of rampDefaultSteps) {
-    addRampStep(step.time, step.value, step.window);
-  }
-}
-
-function addRampStep(time = "", value = "", windowValue = "") {
-  const row = document.createElement("tr");
-
-  const timeCell = document.createElement("td");
-  const timeInput = document.createElement("input");
-  timeInput.type = "time";
-  timeInput.className = "ramp-step-time";
-  timeInput.value = time;
-  timeInput.addEventListener("input", updateRampPreview);
-  timeCell.append(timeInput);
-
-  const valueCell = document.createElement("td");
-  const valueInput = document.createElement("input");
-  valueInput.type = "number";
-  valueInput.min = "0";
-  valueInput.step = "100";
-  valueInput.className = "ramp-step-value";
-  valueInput.placeholder = "e.g. 4000";
-  valueInput.value = value;
-  valueInput.addEventListener("input", updateRampPreview);
-
-  /*
-   * In Pinnacle mode a step names a part of the day instead of an amount,
-   * because the amount differs per league and market - Pinnacle takes 5,600
-   * on a baseball moneyline and 750 on a football one.
-   */
-  const windowSelect = document.createElement("select");
-  windowSelect.className = "ramp-step-window";
-  for (const [value_, label] of [
-    ["start", "Early (6h+ before)"],
-    ["mid", "Middle (3-6h before)"],
-    ["end", "Near start (under 3h)"],
-  ]) {
-    windowSelect.append(new Option(label, value_));
-  }
-  /* An added step continues the ramp instead of dropping back to the
-   * beginning of the day. */
-  const existingSteps = elements.rampSteps?.childElementCount || 0;
-  windowSelect.value =
-    windowValue || ["start", "mid", "end"][Math.min(existingSteps, 2)];
-  windowSelect.addEventListener("change", updateRampPreview);
-
-  valueCell.append(valueInput, windowSelect);
-
-  const removeCell = document.createElement("td");
-  const remove = document.createElement("button");
-  remove.type = "button";
-  remove.className = "link-button";
-  remove.textContent = "Remove";
-  remove.addEventListener("click", () => {
-    row.remove();
-    updateRampPreview();
-  });
-  removeCell.append(remove);
-
-  row.append(timeCell, valueCell, removeCell);
-  elements.rampSteps.append(row);
-  updateRampPreview();
-}
-
-function rampFromPinnacle() {
-  return elements.rampSource?.value === "pinnacle";
 }
 
 function rampScalePercent() {
@@ -3360,89 +3279,15 @@ function rampScalePercent() {
   return Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
 }
 
-function rampStepRows() {
-  return [...(elements.rampSteps?.querySelectorAll("tr") || [])].map((row) => ({
-    time: row.querySelector(".ramp-step-time")?.value || "",
-    value: row.querySelector(".ramp-step-value")?.value || "",
-    window: row.querySelector(".ramp-step-window")?.value || "start",
-  }));
-}
-
-/* Which column the steps table is showing, and the wording that goes with it. */
-function applyRampSource() {
-  const pinnacle = rampFromPinnacle();
-  if (elements.rampScaleField) {
-    elements.rampScaleField.hidden = !pinnacle;
-  }
-  if (elements.rampStepValueHead) {
-    elements.rampStepValueHead.textContent = pinnacle
-      ? "Read Pinnacle from"
-      : "Limit";
-  }
-  elements.rampSteps
-    ?.querySelectorAll(".ramp-step-value")
-    .forEach((input) => { input.hidden = pinnacle; });
-  elements.rampSteps
-    ?.querySelectorAll(".ramp-step-window")
-    .forEach((select) => { select.hidden = !pinnacle; });
-}
-
-function rampStepComplete(step) {
-  return Boolean(step.time) && (rampFromPinnacle() || step.value !== "");
-}
-
-function rampSteps() {
-  return rampStepRows().filter(rampStepComplete);
-}
-
-/* A row with a time but no limit was dropped without a word, so a ramp typed
- * as three steps could quietly be created as two. */
-function rampIncompleteSteps() {
-  return rampStepRows().filter(
-    (step) =>
-      (step.time || step.value !== "") && !rampStepComplete(step)
-  ).length;
-}
-
-/* Two steps at one time are two schedules racing to write different numbers to
- * the same limit, and which one lands is undefined. */
-function rampDuplicateTimes() {
-  const seen = new Set();
-  const duplicates = new Set();
-  for (const step of rampSteps()) {
-    if (seen.has(step.time)) {
-      duplicates.add(step.time);
-    }
-    seen.add(step.time);
-  }
-  return [...duplicates].sort();
-}
-
-function updateRampGroupCounts() {
-  for (const group of
-    elements.rampLeagues?.querySelectorAll(".ramp-league-group") || []) {
-    const count = group.querySelector(".ramp-league-group-count");
-    if (!count) {
-      continue;
-    }
-    const total = group.querySelectorAll(".ramp-check input").length;
-    const checked = group.querySelectorAll(".ramp-check input:checked").length;
-    count.textContent = checked ? `${checked} of ${total}` : `${total}`;
-  }
-}
-
 function updateRampPreview() {
   if (!elements.rampPreview) {
     return;
   }
-  updateRampGroupCounts();
 
   const leagues = rampCheckedValues(elements.rampLeagues).length;
   const fields = rampCheckedValues(elements.rampFields).length;
-  const steps = rampSteps().length;
-  const total = leagues * fields * steps;
-  const incomplete = rampIncompleteSteps();
-  const duplicates = rampDuplicateTimes();
+  const total = leagues * fields;
+  const scale = rampScalePercent();
 
   if (elements.rampLeagueCount) {
     const available = rampLeagueRows().length;
@@ -3454,43 +3299,21 @@ function updateRampPreview() {
     elements.rampLeagueCount.textContent = !available
       ? ""
       : shown < available
-        ? `${leagues} of ${available} selected · ${shown} shown`
+        ? `${leagues} of ${available} selected \u00b7 ${shown} shown`
         : `${leagues} of ${available} selected`;
   }
 
   if (elements.rampCreate) {
-    elements.rampCreate.disabled = !total || duplicates.length > 0;
+    elements.rampCreate.disabled = !total || !scale;
   }
 
-  const warning = duplicates.length
-    ? ` Two steps are set to ${duplicates.join(" and ")}. Give each step its own time.`
-    : incomplete
-      ? ` ${incomplete} step${incomplete === 1 ? " is" : "s are"} missing a time or a limit and ${incomplete === 1 ? "is" : "are"} not counted.`
-      : "";
-
-  /* Three times reading one part of the day is a flat limit wearing a ramp's
-   * clothes, and it is not obvious from the numbers until after it is made. */
-  const stepWindows = rampSteps().map((step) => step.window);
-  const flatRamp =
-    rampFromPinnacle() &&
-    stepWindows.length > 1 &&
-    new Set(stepWindows).size === 1;
-
-  elements.rampPreview.textContent =
-    (total
-      ? `This creates ${total.toLocaleString()} recurring schedule${total === 1 ? "" : "s"}: ` +
-        `${leagues} league${leagues === 1 ? "" : "s"} x ${fields} limit type${fields === 1 ? "" : "s"} x ${steps} step${steps === 1 ? "" : "s"}. ` +
-        `Leagues that do not use a limit type are skipped.` +
-        (total > 300
-          ? ` That is a lot of jobs firing at each step; consider ramping only the leagues you take real money on.`
-          : "")
-      : leagues
-        ? "Add a time and a limit to at least one step."
-        : "Choose the leagues to ramp. Every one you tick is scheduled separately, so start with the ones you actually take money on.") +
-    warning +
-    (flatRamp
-      ? ` Every step reads the same part of Pinnacle's day, so all ${stepWindows.length} would write the same limit. Give them different parts to make it rise.`
-      : "");
+  elements.rampPreview.textContent = !total
+    ? "Choose the leagues and limit types to track. Only leagues Pinnacle data is kept for can be tracked."
+    : !scale
+      ? "Enter the share of Pinnacle to track."
+      : `This tracks ${total.toLocaleString()} limit${total === 1 ? "" : "s"} at ${scale}% of Pinnacle: ` +
+        `${leagues} league${leagues === 1 ? "" : "s"} x ${fields} limit type${fields === 1 ? "" : "s"}. ` +
+        `Each one moves on its own as Pinnacle moves, so there is no ramp to set.`;
 }
 
 function setRampMessage(message = "", type = "") {
@@ -3500,6 +3323,119 @@ function setRampMessage(message = "", type = "") {
   elements.rampMessage.textContent = message;
   elements.rampMessage.className = `message ${type}`.trim();
   elements.rampMessage.hidden = !message;
+}
+
+async function loadTrackedLimits() {
+  if (!state.selectedAgentId || !elements.rampTracked) {
+    return;
+  }
+  try {
+    const response = await fetch(
+      `/api/trackers?${new URLSearchParams({ accountId: state.selectedAgentId })}`,
+      { cache: "no-store" }
+    );
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Could not load tracked limits");
+    }
+    state.trackers = Array.isArray(data.trackers) ? data.trackers : [];
+    state.trackerSettings = data;
+    renderTrackedLimits();
+  } catch (error) {
+    setRampMessage(error.message, "error");
+  }
+}
+
+function renderTrackedLimits() {
+  const host = elements.rampTracked;
+  if (!host) {
+    return;
+  }
+  host.replaceChildren();
+
+  const trackers = state.trackers || [];
+  if (!trackers.length) {
+    const empty = document.createElement("p");
+    empty.className = "ramp-count";
+    empty.textContent =
+      "Nothing is being tracked yet. Pick leagues and limit types, then start tracking.";
+    host.append(empty);
+    return;
+  }
+
+  const settings = state.trackerSettings || {};
+  const note = document.createElement("p");
+  note.className = "ramp-count";
+  note.textContent =
+    `Checked every ${settings.intervalMinutes || 10} minutes against fixtures ` +
+    `starting within ${settings.windowHours || 12} hours. A limit is only rewritten ` +
+    `once Pinnacle has moved more than ${settings.minChangePercent || 8}%.`;
+  host.append(note);
+
+  const table = document.createElement("table");
+  table.className = "ramp-tracked-table";
+  const head = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  ["League", "Market", "Pinnacle now", "Your limit", "Last checked", "State", ""]
+    .forEach((label) => {
+      const th = document.createElement("th");
+      th.textContent = label;
+      headRow.append(th);
+    });
+  head.append(headRow);
+  table.append(head);
+
+  const body = document.createElement("tbody");
+  for (const tracker of trackers) {
+    const row = document.createElement("tr");
+    const stop = document.createElement("button");
+    stop.type = "button";
+    stop.className = "link-button";
+    stop.textContent = "Stop";
+    stop.addEventListener("click", async () => {
+      stop.disabled = true;
+      try {
+        const response = await fetch("/api/trackers/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: tracker.id }),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || "Could not stop tracking");
+        }
+        await loadTrackedLimits();
+        setRampMessage(data.message, "success");
+      } catch (error) {
+        stop.disabled = false;
+        setRampMessage(error.message, "error");
+      }
+    });
+    const stopCell = document.createElement("td");
+    stopCell.append(stop);
+
+    row.append(
+      comparisonCell(comparisonText(tracker.leagueName)),
+      comparisonCell(
+        `${fieldLabels[tracker.field] || tracker.field}` +
+        (tracker.period && tracker.period !== "Full Game" ? ` (${tracker.period})` : "")
+      ),
+      comparisonCell(
+        tracker.pinnacle ? Number(tracker.pinnacle).toLocaleString() : "—"
+      ),
+      comparisonCell(
+        tracker.value
+          ? `${Number(tracker.value).toLocaleString()} (${tracker.scalePercent}%)`
+          : `— (${tracker.scalePercent}%)`
+      ),
+      comparisonCell(comparisonText(tracker.checkedAt, "not yet")),
+      comparisonCell(comparisonText(tracker.note, "waiting for first check")),
+      stopCell
+    );
+    body.append(row);
+  }
+  table.append(body);
+  host.append(table);
 }
 
 async function createRamp() {
@@ -3513,26 +3449,14 @@ async function createRamp() {
       idSportType: row.idSportType,
       periodNumber: row.periodNumber || 0,
       leagueName: rampLeagueLabel(row),
+      periodDescription: row.periodDescription,
       editableFields: row.editableFields,
     }));
 
-  const fromPinnacle = rampFromPinnacle();
-  const steps = rampSteps().map((step) =>
-    fromPinnacle
-      ? { time: step.time, window: step.window }
-      : { time: step.time, value: Number(step.value) }
-  );
   const fields = rampCheckedValues(elements.rampFields);
-  const days = rampCheckedValues(elements.rampDays).map(Number);
   const agentName = elements.rampAgentName?.value.trim() || "";
+  const scale = rampScalePercent();
 
-  /* Without an agent the request went out with an empty accountId and came
-   * back as "Enter a valid limit, weekdays, and Eastern time", which names
-   * none of the three things that are actually fine. */
-  if (!state.selectedAgentId) {
-    setRampMessage("Select an agent on the left first.", "error");
-    return;
-  }
   if (!targets.length) {
     setRampMessage("Select at least one league.", "error");
     return;
@@ -3541,55 +3465,24 @@ async function createRamp() {
     setRampMessage("Select at least one limit type.", "error");
     return;
   }
-  if (!steps.length) {
-    setRampMessage("Add at least one step with a time and a limit.", "error");
-    return;
-  }
-  const duplicates = rampDuplicateTimes();
-  if (duplicates.length) {
-    setRampMessage(
-      `Two steps are set to ${duplicates.join(" and ")}. Give each step its own time.`,
-      "error"
-    );
-    return;
-  }
   if (!agentName) {
     setRampMessage("Enter the Customer Support Agent name.", "error");
     return;
   }
+  if (!scale) {
+    setRampMessage("Enter the share of Pinnacle to track.", "error");
+    return;
+  }
 
-  const replaceExisting = elements.rampReplace
-    ? elements.rampReplace.checked
-    : true;
-  const total = targets.length * fields.length * steps.length;
-  const ordered = [...steps].sort((a, b) => a.time.localeCompare(b.time));
-  const windowLabels = {
-    start: "Pinnacle's early limit",
-    mid: "Pinnacle's mid-day limit",
-    end: "Pinnacle's near-start limit",
-  };
-  const shape = ordered
-    .map((step) =>
-      fromPinnacle
-        ? `${step.time} -> ${windowLabels[step.window] || step.window} ` +
-          `at ${rampScalePercent()}%`
-        : `${step.time} -> ${step.value.toLocaleString()}`
-    )
-    .join("\n");
-  const incomplete = rampIncompleteSteps();
+  const total = targets.length * fields.length;
   if (
     !window.confirm(
-      `Create ${total.toLocaleString()} recurring schedules?\n\n${shape}\n\n` +
+      `Track ${total.toLocaleString()} limit${total === 1 ? "" : "s"} at ${scale}% of Pinnacle?\n\n` +
       `Across ${targets.length} league${targets.length === 1 ? "" : "s"} and ` +
-      `${fields.length} limit type${fields.length === 1 ? "" : "s"}.` +
-      (incomplete
-        ? `\n\n${incomplete} step${incomplete === 1 ? "" : "s"} missing a time or a limit ` +
-          `will be ignored.`
-        : "") +
-      (replaceExisting
-        ? `\n\nAny recurring schedules these leagues and limit types already have ` +
-          `will be replaced.`
-        : "")
+      `${fields.length} limit type${fields.length === 1 ? "" : "s"}.\n\n` +
+      `These limits will be rewritten automatically whenever Pinnacle moves. ` +
+      `Tracked limits are the one place the blue rule does not apply, because ` +
+      `every write marks a limit blue and tracking could otherwise run once only.`
     )
   ) {
     return;
@@ -3597,37 +3490,31 @@ async function createRamp() {
 
   elements.rampCreate.disabled = true;
   const original = elements.rampCreate.textContent;
-  elements.rampCreate.textContent = "Creating...";
+  elements.rampCreate.textContent = "Starting...";
   setRampMessage("");
 
   try {
-    const response = await fetch("/api/schedules/ramp", {
+    const response = await fetch("/api/trackers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         accountId: state.selectedAgentId,
         targets,
         fields,
-        steps: ordered,
-        recurrenceDays: days,
+        scalePercent: scale,
         customerSupportAgent: agentName,
         limitMode: "normal",
-        pinnacleScalePercent: fromPinnacle ? rampScalePercent() : 0,
-        replaceExisting,
       }),
     });
     const data = await response.json();
     if (!response.ok) {
-      throw new Error(data.error || "Could not create the ramp");
+      throw new Error(data.error || "Could not start tracking");
     }
-
-    /* Force: the cached list predates the schedules just created. */
-    await loadSchedules(true).catch(() => {});
-    /* Report what was skipped rather than implying everything was created. */
+    await loadTrackedLimits();
     const detail = (data.skipped || []).length
       ? ` Skipped: ${data.skipped.slice(0, 3).join("; ")}${data.skipped.length > 3 ? "..." : ""}`
       : "";
-    setRampMessage(`${data.message}.${detail}`, (data.failed || []).length ? "error" : "success");
+    setRampMessage(`${data.message}.${detail}`, "success");
   } catch (error) {
     setRampMessage(error.message, "error");
   } finally {
@@ -3636,19 +3523,13 @@ async function createRamp() {
   }
 }
 
-if (elements.rampSource) {
-  elements.rampSource.addEventListener("change", () => {
-    applyRampSource();
-    updateRampPreview();
-  });
-  elements.rampScale?.addEventListener("input", updateRampPreview);
+if (elements.rampScale) {
+  elements.rampScale.addEventListener("input", updateRampPreview);
 }
 
 if (elements.rampCreate) {
   renderRampControls();
-  applyRampSource();
   elements.rampCreate.addEventListener("click", createRamp);
-  elements.rampAddStep?.addEventListener("click", () => addRampStep());
   elements.rampSelectAll?.addEventListener("click", () =>
     setRampLeagueChecks(null, true)
   );

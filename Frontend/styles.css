@@ -3212,3 +3212,32 @@ dialog h2 {
 .ramp-steps-table td:nth-child(2) {
   width: 190px;
 }
+
+/* The list of limits currently following Pinnacle. */
+.ramp-tracked {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.ramp-tracked-table {
+  width: 100%;
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.ramp-tracked-table th {
+  padding: 6px 10px 6px 0;
+  text-align: left;
+  font-size: 11px;
+  color: var(--muted);
+  background: none;
+  border-bottom: 1px solid var(--line);
+}
+
+.ramp-tracked-table td {
+  padding: 6px 10px 6px 0;
+  font-variant-numeric: tabular-nums;
+}

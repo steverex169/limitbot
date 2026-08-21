@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Limit Control Bot</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/styles.css?v=20260822-ramp-steps">
+  <link rel="stylesheet" href="/styles.css?v=20260822-live-tracker">
 </head>
 
 <body class="app-loading">
@@ -323,7 +323,7 @@
         <div>
           <p class="eyebrow">AUTOMATION</p>
           <h2>Build a ramp</h2>
-          <p>Set one limit that rises through the day, across every league at once.</p>
+          <p>Follow Pinnacle live at a share you choose. The ramp is not configured &mdash; it happens, because Pinnacle raises a limit as a game takes money.</p>
         </div>
       </div>
 
@@ -332,8 +332,9 @@
         <div class="ramp-builder-body">
           <p class="ramp-note">
             A game takes almost no money in the morning and most of it near the start,
-            so one flat limit is either too high early or too low late. Each step below
-            becomes an ordinary recurring schedule.
+            and Pinnacle&#39;s limit climbs with it. Each limit below is checked against
+            Pinnacle every few minutes and moved to your share of whatever it is at that
+            moment, so the ramp follows the market rather than a clock.
           </p>
 
           <div class="ramp-grid">
@@ -342,21 +343,11 @@
               <div id="rampFields" class="ramp-checks"></div>
             </div>
 
-            <div class="ramp-field ramp-days-field">
-              <span class="ramp-label">Repeat on</span>
-              <div id="rampDays" class="ramp-checks"></div>
-            </div>
-
             <div class="ramp-field">
-              <span class="ramp-label">Limits from</span>
-              <select id="rampSource" class="ramp-select">
-                <option value="manual">Numbers I enter</option>
-                <option value="pinnacle">Pinnacle's recorded limits</option>
-              </select>
-              <label id="rampScaleField" class="ramp-scale" hidden>
-                <span>at</span>
-                <input id="rampScale" type="number" min="1" max="200" step="5" value="60">
-                <span>% of Pinnacle</span>
+              <span class="ramp-label">Share of Pinnacle</span>
+              <label class="ramp-scale">
+                <input id="rampScale" type="number" min="1" max="200" step="5" value="50">
+                <span>% of whatever Pinnacle is taking</span>
               </label>
             </div>
 
@@ -379,31 +370,16 @@
             </div>
 
             <div class="ramp-field">
-              <span class="ramp-label">Steps through the day (Eastern)</span>
-              <div class="ramp-steps-box">
-                <table class="ramp-steps-table">
-                  <thead>
-                    <tr><th>Time</th><th id="rampStepValueHead">Limit</th><th></th></tr>
-                  </thead>
-                  <tbody id="rampSteps"></tbody>
-                </table>
-                <button id="rampAddStep" type="button" class="link-button">Add a step</button>
-              </div>
+              <span class="ramp-label">Currently tracked</span>
+              <div id="rampTracked" class="ramp-tracked"></div>
             </div>
           </div>
-
-          <label class="ramp-replace">
-            <input id="rampReplace" type="checkbox" checked>
-            <span>Replace the recurring schedules these leagues and limit types already
-              have. Leave this on so correcting a ramp replaces it instead of adding a
-              second one that fires alongside the first.</span>
-          </label>
 
           <div id="rampMessage" class="message" role="status" hidden></div>
           <p id="rampPreview" class="ramp-count"></p>
 
           <div class="ramp-actions">
-            <button id="rampCreate" type="button" class="button primary">Create ramp</button>
+            <button id="rampCreate" type="button" class="button primary">Start tracking</button>
           </div>
         </div>
       </div>
@@ -553,7 +529,7 @@
     </div>
   </dialog>
 
-  <script src="/script.js?v=20260822-ramp-steps" defer></script>
+  <script src="/script.js?v=20260822-live-tracker" defer></script>
 </body>
 
 </html>
