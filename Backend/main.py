@@ -9,6 +9,7 @@ import logging.handlers
 import os
 from pathlib import Path
 import random
+import re
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import uuid
@@ -2769,6 +2770,133 @@ def create_schedule(request_data):
     }
 
 
+# A ramp is one recurring schedule per league, market and step, so the count
+# grows quickly. This is a guard against a mis-click creating thousands, not a
+# considered maximum.
+ramp_schedule_limit = int(os.getenv("RAMP_SCHEDULE_LIMIT", "600") or 600)
+
+
+limit_field_labels = {
+    "spread": "Spread",
+    "moneyLine": "Money line",
+    "total": "Total",
+    "teamTotal": "Team total",
+}
+
+
+def create_schedule_ramp(request_data):
+    """Create a whole limit ramp in one action.
+
+    A ramp is the same limit rising through the day - low in the morning when
+    a game has taken no money, higher near the start once it has. Each step is
+    an ordinary recurring schedule; there is no new machinery here, only a way
+    to create a few hundred of them without a few hundred clicks.
+    """
+    steps = request_data.get("steps") or []
+    targets = request_data.get("targets") or []
+    fields = [
+        field for field in (request_data.get("fields") or [])
+        if field in allowed_limit_fields
+    ]
+
+    if not steps:
+        raise ValueError("Add at least one time and limit to the ramp")
+    if not targets:
+        raise ValueError("Select at least one league")
+    if not fields:
+        raise ValueError("Select at least one limit type")
+
+    cleaned_steps = []
+    for step in steps:
+        try:
+            step_time = str(step["time"]).strip()
+            step_value = int(step["value"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("Every ramp step needs a time and a limit") from error
+        if not re.fullmatch(r"[0-2]\d:[0-5]\d", step_time):
+            raise ValueError(f"'{step_time}' is not a valid Eastern time")
+        cleaned_steps.append((step_time, step_value))
+
+    total = len(targets) * len(fields) * len(cleaned_steps)
+    if total > ramp_schedule_limit:
+        raise ValueError(
+            f"That ramp would create {total:,} schedules, above the "
+            f"{ramp_schedule_limit:,} limit. Choose fewer leagues, markets or steps."
+        )
+
+    created = 0
+    skipped = []
+    failed = []
+
+    for target in targets:
+        league_label = str(
+            target.get("leagueName") or f"League {target.get('idLeague')}"
+        )
+        # A league that only carries a Spread limit rejects the others; that is
+        # expected for those leagues, not a fault worth failing the ramp over.
+        allowed = target.get("editableFields")
+        for field in fields:
+            if isinstance(allowed, list) and allowed and field not in allowed:
+                skipped.append(
+                    f"{league_label} does not use the "
+                    f"{limit_field_labels.get(field, field)} limit"
+                )
+                continue
+            for step_time, step_value in cleaned_steps:
+                try:
+                    create_schedule({
+                        "accountId": request_data.get("accountId"),
+                        "idOrganization": target.get("idOrganization"),
+                        "idLeague": target.get("idLeague"),
+                        "idSportType": target.get("idSportType"),
+                        "periodNumber": target.get("periodNumber", 0),
+                        "field": field,
+                        "value": step_value,
+                        "limitMode": request_data.get("limitMode", "normal"),
+                        "recurrenceDays": request_data.get("recurrenceDays", []),
+                        "recurrenceTime": step_time,
+                        "customerSupportAgent": request_data.get(
+                            "customerSupportAgent", ""
+                        ),
+                        "telegramAudience": request_data.get(
+                            "telegramAudience", "all"
+                        ),
+                    })
+                    created += 1
+                except ValueError as error:
+                    skipped.append(f"{league_label} at {step_time}: {error}")
+                except Exception as error:
+                    logger.warning(
+                        "Ramp step failed for %s at %s",
+                        league_label,
+                        step_time,
+                        exc_info=True,
+                    )
+                    failed.append(f"{league_label} at {step_time}: {error}")
+
+    if not created:
+        raise ValueError(
+            skipped[0] if skipped
+            else failed[0] if failed
+            else "No schedules could be created"
+        )
+
+    parts = [f"Created {created:,} scheduled limit{'' if created == 1 else 's'}"]
+    if skipped:
+        parts.append(f"{len(skipped)} skipped")
+    if failed:
+        parts.append(f"{len(failed)} failed")
+
+    return {
+        "message": ", ".join(parts),
+        "created": created,
+        # Deduplicated: a league that does not use a market says so once, not
+        # once per step.
+        "skipped": sorted(set(skipped))[:20],
+        "failed": sorted(set(failed))[:20],
+    }
+
+
 def cancel_schedule(request_data):
     auth = auth_context()
     schedule_id = str(request_data.get("id", "")).strip()
@@ -4004,6 +4132,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if path not in {
             "/api/limits",
             "/api/schedules",
+            "/api/schedules/ramp",
             "/api/schedules/cancel",
             "/api/schedules/delete",
             "/api/schedules/delete-all",
@@ -4020,7 +4149,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         try:
             request_data = self.read_json()
             result = (
-                cancel_schedule(request_data)
+                create_schedule_ramp(request_data)
+                if path == "/api/schedules/ramp"
+                else cancel_schedule(request_data)
                 if path == "/api/schedules/cancel"
                 else delete_schedule(request_data)
                 if path == "/api/schedules/delete"

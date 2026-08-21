@@ -2772,3 +2772,177 @@ dialog h2 {
   gap: 10px;
   margin-top: 2px;
 }
+
+/* --- Limit ramp builder ------------------------------------------------- */
+
+.ramp-builder {
+  margin: 0 0 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+}
+
+.ramp-builder > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  padding: 14px 16px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.ramp-builder > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ramp-builder > summary::before {
+  content: "\25B8";
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.ramp-builder[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.ramp-builder-title {
+  font-weight: 700;
+}
+
+.ramp-builder-hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ramp-builder-body {
+  padding: 0 16px 16px;
+  border-top: 1px solid var(--line);
+}
+
+.ramp-note {
+  margin: 14px 0 16px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  max-width: 70ch;
+}
+
+.ramp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.ramp-field {
+  display: block;
+  margin-bottom: 16px;
+}
+
+.ramp-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ramp-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+/* The league list can run long, so it scrolls instead of pushing the button
+   off the bottom of the page. */
+.ramp-leagues {
+  max-height: 190px;
+  overflow-y: auto;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.ramp-leagues-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.ramp-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ramp-count {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ramp-steps-table {
+  border-collapse: collapse;
+  margin-bottom: 6px;
+}
+
+.ramp-steps-table th {
+  padding: 0 10px 4px 0;
+  text-align: left;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.ramp-steps-table td {
+  padding: 3px 10px 3px 0;
+}
+
+.ramp-step-time,
+.ramp-step-value {
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+.ramp-step-value {
+  width: 110px;
+  font-variant-numeric: tabular-nums;
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--blue);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.link-button:hover {
+  text-decoration: underline;
+}
+
+.ramp-actions {
+  margin-top: 12px;
+}
+
+.ramp-builder input[type="text"] {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}

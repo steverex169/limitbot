@@ -162,6 +162,19 @@ const elements = {
   rowTypeFilter: document.querySelector("#rowTypeFilter"),
   leagueRows: document.querySelector("#leagueRows"),
   scheduleRows: document.querySelector("#scheduleRows"),
+  rampBuilder: document.querySelector("#rampBuilder"),
+  rampFields: document.querySelector("#rampFields"),
+  rampDays: document.querySelector("#rampDays"),
+  rampLeagues: document.querySelector("#rampLeagues"),
+  rampLeagueCount: document.querySelector("#rampLeagueCount"),
+  rampSelectAll: document.querySelector("#rampSelectAll"),
+  rampSelectNone: document.querySelector("#rampSelectNone"),
+  rampSteps: document.querySelector("#rampSteps"),
+  rampAddStep: document.querySelector("#rampAddStep"),
+  rampAgentName: document.querySelector("#rampAgentName"),
+  rampMessage: document.querySelector("#rampMessage"),
+  rampPreview: document.querySelector("#rampPreview"),
+  rampCreate: document.querySelector("#rampCreate"),
   message: document.querySelector("#message"),
   dialog: document.querySelector("#confirmDialog"),
   confirmTitle: document.querySelector("#confirmTitle"),
@@ -2952,6 +2965,321 @@ async function applyToGroup(group, path, extra = () => ({})) {
   }
 
   return { removed, failure };
+}
+
+/* ---------------------------------------------------------------------------
+ * Limit ramp builder
+ *
+ * A ramp is nothing new: it is several ordinary recurring schedules on the
+ * same league and market at different times. What this saves is the clicking -
+ * seven leagues by four markets by three steps is eighty-four schedules.
+ * ------------------------------------------------------------------------ */
+
+const rampWeekdays = [
+  { value: 0, label: "Mon" },
+  { value: 1, label: "Tue" },
+  { value: 2, label: "Wed" },
+  { value: 3, label: "Thu" },
+  { value: 4, label: "Fri" },
+  { value: 5, label: "Sat" },
+  { value: 6, label: "Sun" },
+];
+
+const rampDefaultSteps = [
+  { time: "09:00", value: "" },
+  { time: "13:00", value: "" },
+  { time: "17:00", value: "" },
+];
+
+function rampCheckbox(name, value, label, checked) {
+  const wrap = document.createElement("label");
+  wrap.className = "ramp-check";
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.name = name;
+  input.value = String(value);
+  input.checked = Boolean(checked);
+  input.addEventListener("change", updateRampPreview);
+  const text = document.createElement("span");
+  text.textContent = label;
+  wrap.append(input, text);
+  return wrap;
+}
+
+function rampCheckedValues(host) {
+  return [...(host?.querySelectorAll("input:checked") || [])].map(
+    (input) => input.value
+  );
+}
+
+/* Only rows a limit can actually be written to: summary rows roll up their
+ * children, and exotics are not editable at all. */
+function rampLeagueRows() {
+  return (state.rows || []).filter(
+    (row) =>
+      row.rowType === "League" &&
+      row.editable !== false &&
+      Array.isArray(row.editableFields) &&
+      row.editableFields.length
+  );
+}
+
+function rampRowKey(row) {
+  return [
+    row.idOrganization,
+    row.idLeague,
+    row.idSportType,
+    row.periodNumber || 0,
+  ].join(":");
+}
+
+function renderRampLeagues() {
+  if (!elements.rampLeagues) {
+    return;
+  }
+  const previous = new Set(rampCheckedValues(elements.rampLeagues));
+  const rows = rampLeagueRows();
+  elements.rampLeagues.replaceChildren();
+
+  if (!rows.length) {
+    const empty = document.createElement("p");
+    empty.className = "ramp-count";
+    empty.textContent =
+      "No editable leagues loaded yet. Open the dashboard once, then come back.";
+    elements.rampLeagues.append(empty);
+    updateRampPreview();
+    return;
+  }
+
+  const fresh = !previous.size;
+  for (const row of rows) {
+    const key = rampRowKey(row);
+    const label =
+      row.organizationLabel && row.periodDescription
+        ? `${row.organizationLabel} -- ${row.periodDescription}`
+        : row.leagueName || `League ${row.idLeague}`;
+    elements.rampLeagues.append(
+      rampCheckbox("rampLeague", key, label, fresh || previous.has(key))
+    );
+  }
+  updateRampPreview();
+}
+
+function renderRampControls() {
+  if (!elements.rampFields || elements.rampFields.childElementCount) {
+    return;
+  }
+  for (const [field, label] of Object.entries(fieldLabels)) {
+    elements.rampFields.append(
+      rampCheckbox("rampField", field, label, true)
+    );
+  }
+  for (const day of rampWeekdays) {
+    elements.rampDays.append(
+      rampCheckbox("rampDay", day.value, day.label, true)
+    );
+  }
+  for (const step of rampDefaultSteps) {
+    addRampStep(step.time, step.value);
+  }
+}
+
+function addRampStep(time = "", value = "") {
+  const row = document.createElement("tr");
+
+  const timeCell = document.createElement("td");
+  const timeInput = document.createElement("input");
+  timeInput.type = "time";
+  timeInput.className = "ramp-step-time";
+  timeInput.value = time;
+  timeInput.addEventListener("input", updateRampPreview);
+  timeCell.append(timeInput);
+
+  const valueCell = document.createElement("td");
+  const valueInput = document.createElement("input");
+  valueInput.type = "number";
+  valueInput.min = "0";
+  valueInput.step = "100";
+  valueInput.className = "ramp-step-value";
+  valueInput.placeholder = "e.g. 4000";
+  valueInput.value = value;
+  valueInput.addEventListener("input", updateRampPreview);
+  valueCell.append(valueInput);
+
+  const removeCell = document.createElement("td");
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "link-button";
+  remove.textContent = "Remove";
+  remove.addEventListener("click", () => {
+    row.remove();
+    updateRampPreview();
+  });
+  removeCell.append(remove);
+
+  row.append(timeCell, valueCell, removeCell);
+  elements.rampSteps.append(row);
+  updateRampPreview();
+}
+
+function rampSteps() {
+  return [...(elements.rampSteps?.querySelectorAll("tr") || [])]
+    .map((row) => ({
+      time: row.querySelector(".ramp-step-time")?.value || "",
+      value: row.querySelector(".ramp-step-value")?.value || "",
+    }))
+    .filter((step) => step.time && step.value !== "");
+}
+
+function updateRampPreview() {
+  if (!elements.rampPreview) {
+    return;
+  }
+  const leagues = rampCheckedValues(elements.rampLeagues).length;
+  const fields = rampCheckedValues(elements.rampFields).length;
+  const steps = rampSteps().length;
+  const total = leagues * fields * steps;
+
+  if (elements.rampLeagueCount) {
+    const available = rampLeagueRows().length;
+    elements.rampLeagueCount.textContent = available
+      ? `${leagues} of ${available} selected`
+      : "";
+  }
+
+  elements.rampPreview.textContent = total
+    ? `This creates ${total.toLocaleString()} recurring schedule${total === 1 ? "" : "s"}: ` +
+      `${leagues} league${leagues === 1 ? "" : "s"} x ${fields} limit type${fields === 1 ? "" : "s"} x ${steps} step${steps === 1 ? "" : "s"}. ` +
+      `Leagues that do not use a limit type are skipped.`
+    : "Pick leagues, limit types and at least one step.";
+}
+
+function setRampMessage(message = "", type = "") {
+  if (!elements.rampMessage) {
+    return;
+  }
+  elements.rampMessage.textContent = message;
+  elements.rampMessage.className = `message ${type}`.trim();
+  elements.rampMessage.hidden = !message;
+}
+
+async function createRamp() {
+  const rows = rampLeagueRows();
+  const selected = new Set(rampCheckedValues(elements.rampLeagues));
+  const targets = rows
+    .filter((row) => selected.has(rampRowKey(row)))
+    .map((row) => ({
+      idOrganization: row.idOrganization,
+      idLeague: row.idLeague,
+      idSportType: row.idSportType,
+      periodNumber: row.periodNumber || 0,
+      leagueName:
+        row.organizationLabel && row.periodDescription
+          ? `${row.organizationLabel} -- ${row.periodDescription}`
+          : row.leagueName,
+      editableFields: row.editableFields,
+    }));
+
+  const steps = rampSteps().map((step) => ({
+    time: step.time,
+    value: Number(step.value),
+  }));
+  const fields = rampCheckedValues(elements.rampFields);
+  const days = rampCheckedValues(elements.rampDays).map(Number);
+  const agentName = elements.rampAgentName?.value.trim() || "";
+
+  if (!targets.length) {
+    setRampMessage("Select at least one league.", "error");
+    return;
+  }
+  if (!fields.length) {
+    setRampMessage("Select at least one limit type.", "error");
+    return;
+  }
+  if (!steps.length) {
+    setRampMessage("Add at least one step with a time and a limit.", "error");
+    return;
+  }
+  if (!agentName) {
+    setRampMessage("Enter the Customer Support Agent name.", "error");
+    return;
+  }
+
+  const total = targets.length * fields.length * steps.length;
+  const ordered = [...steps].sort((a, b) => a.time.localeCompare(b.time));
+  const shape = ordered
+    .map((step) => `${step.time} -> ${step.value.toLocaleString()}`)
+    .join("\n");
+  if (
+    !window.confirm(
+      `Create ${total.toLocaleString()} recurring schedules?\n\n${shape}\n\n` +
+      `Across ${targets.length} league${targets.length === 1 ? "" : "s"} and ` +
+      `${fields.length} limit type${fields.length === 1 ? "" : "s"}.`
+    )
+  ) {
+    return;
+  }
+
+  elements.rampCreate.disabled = true;
+  const original = elements.rampCreate.textContent;
+  elements.rampCreate.textContent = "Creating...";
+  setRampMessage("");
+
+  try {
+    const response = await fetch("/api/schedules/ramp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        accountId: state.selectedAgentId,
+        targets,
+        fields,
+        steps: ordered,
+        recurrenceDays: days,
+        customerSupportAgent: agentName,
+        limitMode: "normal",
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Could not create the ramp");
+    }
+
+    /* Force: the cached list predates the schedules just created. */
+    await loadSchedules(true).catch(() => {});
+    /* Report what was skipped rather than implying everything was created. */
+    const detail = (data.skipped || []).length
+      ? ` Skipped: ${data.skipped.slice(0, 3).join("; ")}${data.skipped.length > 3 ? "..." : ""}`
+      : "";
+    setRampMessage(`${data.message}.${detail}`, (data.failed || []).length ? "error" : "success");
+  } catch (error) {
+    setRampMessage(error.message, "error");
+  } finally {
+    elements.rampCreate.disabled = false;
+    elements.rampCreate.textContent = original;
+  }
+}
+
+if (elements.rampCreate) {
+  renderRampControls();
+  elements.rampCreate.addEventListener("click", createRamp);
+  elements.rampAddStep?.addEventListener("click", () => addRampStep());
+  elements.rampBuilder?.addEventListener("toggle", () => {
+    if (elements.rampBuilder.open) {
+      renderRampLeagues();
+    }
+  });
+  elements.rampSelectAll?.addEventListener("click", () => {
+    elements.rampLeagues
+      ?.querySelectorAll("input")
+      .forEach((input) => { input.checked = true; });
+    updateRampPreview();
+  });
+  elements.rampSelectNone?.addEventListener("click", () => {
+    elements.rampLeagues
+      ?.querySelectorAll("input")
+      .forEach((input) => { input.checked = false; });
+    updateRampPreview();
+  });
 }
 
 function renderSchedules() {
