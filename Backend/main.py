@@ -363,6 +363,14 @@ def build_limit_success_message(
                 audience_label = "One-time schedule limit"
         except Exception:
             audience_label = "Schedule limit"
+    elif source_type == "tracker":
+        # Otherwise a tracker's writes are indistinguishable from somebody
+        # pressing Save, which is the one thing the alert has to make clear.
+        audience_label = (
+            "Early tracked limit"
+            if change_type.lower().startswith("early")
+            else "Tracked limit"
+        )
     elif change_type.lower().startswith("early"):
         audience_label = "Early limit"
     else:
@@ -417,8 +425,16 @@ def build_limit_success_message(
             or row.get("PeriodDescription")
             or ""
         )
-        if organization_label and period_description:
+        if (
+            organization_label
+            and period_description
+            # OrganizationLabel usually already ends with the period, which is
+            # how "Baseball -- Full Game" became "... -- Full Game -- Full Game".
+            and not organization_label.strip().endswith(period_description.strip())
+        ):
             league_name = f"{organization_label} -- {period_description}"
+        elif organization_label:
+            league_name = organization_label
         else:
             league_name = (
                 organization_label
