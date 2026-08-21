@@ -3897,6 +3897,11 @@ def migrate_schedule_columns():
         "customer_support_agent": "VARCHAR(100) NULL",
         "telegram_recipient_name": "VARCHAR(100) NULL",
         "telegram_chat_id": "VARCHAR(64) NULL",
+        # Added to the model without a migration entry, so it existed only on
+        # the database someone had altered by hand. Every ScheduledLimit query
+        # names it, so the site whose database lacked it could not read or run
+        # a single schedule.
+        "telegram_audience": "VARCHAR(10) NOT NULL DEFAULT 'all'",
         "run_note": "VARCHAR(255) NULL",
     }
     with engine.begin() as connection:
