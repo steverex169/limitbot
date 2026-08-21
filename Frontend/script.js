@@ -3378,7 +3378,6 @@ function applyRampSource() {
   elements.rampSteps
     ?.querySelectorAll(".ramp-step-window")
     .forEach((select) => { select.hidden = !pinnacle; });
-  updateRampPreview();
 }
 
 function rampStepComplete(step) {
@@ -3452,13 +3451,7 @@ function updateRampPreview() {
         : `${leagues} of ${available} selected`;
   }
 
-  if (elements.rampSource) {
-  elements.rampSource.addEventListener("change", applyRampSource);
-  elements.rampScale?.addEventListener("input", updateRampPreview);
-  applyRampSource();
-}
-
-if (elements.rampCreate) {
+  if (elements.rampCreate) {
     elements.rampCreate.disabled = !total || duplicates.length > 0;
   }
 
@@ -3625,8 +3618,17 @@ async function createRamp() {
   }
 }
 
+if (elements.rampSource) {
+  elements.rampSource.addEventListener("change", () => {
+    applyRampSource();
+    updateRampPreview();
+  });
+  elements.rampScale?.addEventListener("input", updateRampPreview);
+}
+
 if (elements.rampCreate) {
   renderRampControls();
+  applyRampSource();
   elements.rampCreate.addEventListener("click", createRamp);
   elements.rampAddStep?.addEventListener("click", () => addRampStep());
   elements.rampSelectAll?.addEventListener("click", () =>
