@@ -95,7 +95,13 @@ site cannot reach the other's schedules or limits.
   (default 10) is how often tracked limits are compared with Pinnacle,
   `TRACKER_WINDOW_HOURS` (default 12) how close to kick-off a fixture must be
   to count, and `TRACKER_MIN_CHANGE_PERCENT` (default 8) how far Pinnacle must
-  move before a rewrite is worth making. Tracked limits are the one place
+  move before a rewrite is worth making, and `TRACKER_BASIS` (`lowest` by
+  default, or `median`) which reading is taken from the fixtures that
+  qualify. Lowest is the safe choice: one limit covers every fixture in the
+  league, so the exposure is set by the game Pinnacle trusts least, and the
+  median leaves you above Pinnacle on exactly that game. Fixtures already
+  under way never count - Pinnacle's in-play limits read several times its
+  pre-game ones on the same board. Tracked limits are the one place
   `SKIP_BLUE` does not apply: every write marks a limit blue, so a tracker
   honouring it would move a limit once and never again.
 - `PINNACLE_SAMPLING`: set `off` on the second site. The readings describe

@@ -3979,6 +3979,12 @@ tracker_min_change_percent = float(os.getenv("TRACKER_MIN_CHANGE_PERCENT", "8") 
 # a window a single game three days out would hold the limit down all day, and
 # the ramp would never rise.
 tracker_window_hours = float(os.getenv("TRACKER_WINDOW_HOURS", "12") or 12)
+# "lowest" or "median". Lowest is the safe reading for a limit that covers a
+# whole league; median is available for comparison.
+tracker_basis = (
+    "median" if os.getenv("TRACKER_BASIS", "").strip().lower() == "median"
+    else "lowest"
+)
 tracker_enabled = (
     os.getenv("LIMIT_TRACKER", "").strip().lower()
     not in {"off", "false", "0", "no"}
@@ -3988,14 +3994,27 @@ tracker_enabled = (
 def tracker_pinnacle_levels(api_key, league_slug):
     """Pinnacle's current limit per period and market for one league.
 
-    The median across fixtures near kick-off, not across every fixture on the
-    board: a game three days out carries a tiny limit and would hold the whole
-    league down, which is the opposite of following the market.
+    Two rules decide which readings count, and both matter more than they look.
+
+    Only fixtures that have not started. Pinnacle's in-play limits behave
+    nothing like its pre-game ones - on one board the same market read 6,750
+    before kick-off and 29,605 once running - and a limit covering games that
+    have not started should not be set from games that have.
+
+    Only fixtures inside the window. A game three days out carries a tiny
+    limit and would hold the whole league down all day, which is the opposite
+    of following the market.
+
+    What is taken from what remains is the lowest, not the typical. One limit
+    covers every fixture in the league, so the exposure is set by the game
+    Pinnacle trusts least; the median leaves you above Pinnacle on exactly
+    that game.
     """
     samples = sample_pinnacle_limits(api_key, league_slug)
     grouped = {}
     for sample in samples:
-        if sample["hoursToStart"] > tracker_window_hours:
+        hours = sample["hoursToStart"]
+        if hours < 0 or hours > tracker_window_hours:
             continue
         grouped.setdefault(
             (sample["period"], sample["field"]), []
@@ -4004,12 +4023,15 @@ def tracker_pinnacle_levels(api_key, league_slug):
     levels = {}
     for key, values in grouped.items():
         values.sort()
-        middle = len(values) // 2
-        levels[key] = (
-            values[middle]
-            if len(values) % 2
-            else (values[middle - 1] + values[middle]) / 2
-        )
+        if tracker_basis == "median":
+            middle = len(values) // 2
+            levels[key] = (
+                values[middle]
+                if len(values) % 2
+                else (values[middle - 1] + values[middle]) / 2
+            )
+        else:
+            levels[key] = values[0]
     return levels
 
 
@@ -4842,6 +4864,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                         "intervalMinutes": tracker_interval_minutes,
                         "windowHours": tracker_window_hours,
                         "minChangePercent": tracker_min_change_percent,
+                        "basis": tracker_basis,
                     },
                 )
             except (KeyError, TypeError, ValueError) as error:

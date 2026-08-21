@@ -3371,9 +3371,12 @@ function renderTrackedLimits() {
   const note = document.createElement("p");
   note.className = "ramp-count";
   note.textContent =
-    `Checked every ${settings.intervalMinutes || 10} minutes against fixtures ` +
-    `starting within ${settings.windowHours || 12} hours. A limit is only rewritten ` +
-    `once Pinnacle has moved more than ${settings.minChangePercent || 8}%.`;
+    `Checked every ${settings.intervalMinutes || 10} minutes against the ` +
+    `${settings.basis === "median" ? "typical" : "lowest"} Pinnacle limit across ` +
+    `fixtures starting within ${settings.windowHours || 12} hours. Games already ` +
+    `under way are excluded, since Pinnacle's in-play limits are not comparable. ` +
+    `A limit is only rewritten once Pinnacle has moved more than ` +
+    `${settings.minChangePercent || 8}%.`;
   host.append(note);
 
   const table = document.createElement("table");
