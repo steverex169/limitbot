@@ -523,20 +523,20 @@ main {
    Team total does not renumber these: nth-child counts markup position, not
    visible position. */
 .schedules-table th:nth-child(1) { width: 7%; }
-.schedules-table th:nth-child(2) { width: 7%; }
-.schedules-table th:nth-child(3) { width: 6%; }
-.schedules-table th:nth-child(4) { width: 11%; }
+.schedules-table th:nth-child(2) { width: 6%; }
+.schedules-table th:nth-child(3) { width: 5%; }
+.schedules-table th:nth-child(4) { width: 9%; }
 .schedules-table th:nth-child(5) { width: 5%; }
 .schedules-table th:nth-child(6) { width: 5%; }
 .schedules-table th:nth-child(7) { width: 5%; }
 .schedules-table th:nth-child(8) { width: 5%; }
 .schedules-table th:nth-child(9) { width: 5%; }
-.schedules-table th:nth-child(10) { width: 10%; }
+.schedules-table th:nth-child(10) { width: 9%; }
 .schedules-table th:nth-child(11) { width: 7%; }
-.schedules-table th:nth-child(12) { width: 9%; }
+.schedules-table th:nth-child(12) { width: 8%; }
 .schedules-table th:nth-child(13) { width: 6%; }
 .schedules-table th:nth-child(14) { width: 8%; }
-.schedules-table th:nth-child(15) { width: 4%; }
+.schedules-table th:nth-child(15) { width: 10%; }
 
 /* Under table-layout: fixed a cell that cannot wrap prints straight over its
    neighbour, so only genuinely short values are allowed to stay on one line.
@@ -560,6 +560,26 @@ main {
 .schedule-limit-value {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
+}
+
+/* Two buttons need to sit side by side without the header word breaking in
+   half, which is what "ACTIO N" was. */
+.schedules-table th:nth-child(15),
+.schedules-table td:nth-child(15) {
+  white-space: nowrap;
+  text-align: right;
+}
+
+/* Two buttons in one narrow cell: tighter padding, and they wrap onto a
+   second line rather than being clipped by the edge of the table. */
+.schedules-table td:nth-child(15) {
+  white-space: normal;
+}
+
+.schedules-table td:nth-child(15) .schedule-cancel {
+  display: inline-block;
+  padding: 0 8px;
+  white-space: nowrap;
 }
 
 /* The Team total column is present in the markup but collapses out of the

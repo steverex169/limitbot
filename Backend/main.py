@@ -336,6 +336,7 @@ def build_limit_success_message(
     field,
     new_value,
     change_type="Immediate limit",
+    outcome_line="Applied successfully",
 ):
     source_type, schedule_id = current_change_source.get() or (None, None)
     audience_label = change_type
@@ -430,7 +431,7 @@ def build_limit_success_message(
         f"Agent: {agent_name}\n"
         f"League: {league_name}\n"
         f"{field_label}: {new_value}\n"
-        f"Applied successfully"
+        f"{outcome_line}"
     )
 
 
@@ -2185,7 +2186,12 @@ def save_single_limit(
         new_value,
     )
 
-    if return_full:
+    source_type, _ = current_change_source.get() or (None, None)
+    # A scheduled run is announced once by the worker, which is the only place
+    # that knows the whole outcome: a summary row updates its children through
+    # calls that never reach here, and a run that changed nothing returns
+    # before this point. Announcing here too would both duplicate and mislead.
+    if return_full and source_type != "schedule":
         telegram_message = build_limit_success_message(
             account_id,
             organization_id,
@@ -2943,8 +2949,44 @@ def record_job_result(job_id, error, note=None):
         logger.exception("Could not record result for job %s", job_id)
 
 
+def notify_schedule_outcome(job, request_data, outcome_line):
+    """Announce a scheduled run, whatever it did.
+
+    A schedule that changes nothing still ran, and the person who set it up
+    wants to know that. Alerting only on a real change meant a recurring job
+    that found its limit already correct - or skipped a blue one - went silent
+    and looked broken.
+    """
+    try:
+        message = build_limit_success_message(
+            request_data["accountId"],
+            request_data["idOrganization"],
+            request_data["idLeague"],
+            request_data["idSportType"],
+            request_data["periodNumber"],
+            request_data["field"],
+            request_data["value"],
+            change_type=(
+                "Early limit" if request_data.get("limitMode") == "early"
+                else "Immediate limit"
+            ),
+            outcome_line=outcome_line,
+        )
+        send_telegram_success_message(
+            message,
+            audience=job.telegram_audience or "all",
+        )
+    except Exception:
+        # A notification must never turn a completed run into a failed one.
+        logger.warning(
+            "Could not send the Telegram alert for job %s", job.id, exc_info=True
+        )
+
+
 def execute_scheduled_job(job_id):
     auth = None
+    job = None
+    request_data = None
     try:
         with database_session() as db:
             job = db.get(ScheduledLimit, job_id)
@@ -3019,9 +3061,13 @@ def execute_scheduled_job(job_id):
         logger.info(
             "Scheduled limit completed: %s%s", job_id, f" ({note})" if note else ""
         )
+        notify_schedule_outcome(job, request_data, note or "Applied successfully")
     except Exception as error:
         logger.exception("Scheduled limit failed: %s", job_id)
         record_job_result(job_id, error=error)
+        # A schedule that failed is the case most worth hearing about.
+        if job is not None and request_data is not None:
+            notify_schedule_outcome(job, request_data, f"Failed: {error}")
     finally:
         current_auth.set(None)
         current_change_source.set(None)
