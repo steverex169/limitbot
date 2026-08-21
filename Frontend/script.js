@@ -353,7 +353,17 @@ function applyDashboardRoute() {
   }
 
   if (telegramAlertsActive) {
-    loadTelegramChats().catch(() => { });
+    /*
+     * The list is fetched once at login and kept in state, and every add,
+     * edit and delete refreshes it. Re-fetching on each visit made the page
+     * flash empty and rebuild itself every time it was opened, so render what
+     * is already loaded and only go to the network when there is nothing.
+     */
+    if (state.telegramChats.length) {
+      renderTelegramChats();
+    } else {
+      loadTelegramChats().catch(() => { });
+    }
   }
 
   if (dashboardActive && state.selectedAgentId && !state.rows.length) {

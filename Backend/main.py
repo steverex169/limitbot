@@ -238,6 +238,12 @@ def normalize_telegram_audience(value):
     return audience if audience in {"all", "aceshigh", "betwar"} else "all"
 
 
+# Each site runs its own bot against its own database, so an alert from this
+# deployment may only reach the recipients marked for this site. "All" sets
+# both columns, which is how one person receives alerts from both bots.
+telegram_site_column = "is_betwar" if partner_host == "betwar.ag" else "is_aceshigh"
+
+
 def send_telegram_success_message(message, chat_id=None, audience="all"):
     """
     Send a Telegram notification after a successful limit save.
@@ -260,11 +266,14 @@ def send_telegram_success_message(message, chat_id=None, audience="all"):
         user_id = auth.get("userId")
         if user_id is not None:
             try:
-                membership_clause = ""
-                if audience == "aceshigh":
-                    membership_clause = "AND is_aceshigh = 1 "
-                elif audience == "betwar":
-                    membership_clause = "AND is_betwar = 1 "
+                # Always restricted to this site's recipients. A schedule
+                # may narrow it further, but never widen it to the other
+                # site - that site has its own bot and its own list.
+                membership_clause = f"AND {telegram_site_column} = 1 "
+                if audience == "aceshigh" and telegram_site_column != "is_aceshigh":
+                    membership_clause = "AND 0 = 1 "
+                elif audience == "betwar" and telegram_site_column != "is_betwar":
+                    membership_clause = "AND 0 = 1 "
                 with database_session() as db:
                     target_chat_ids = [
                         str(row[0]).strip()
@@ -3943,6 +3952,17 @@ def migrate_telegram_recipients():
                         f"ADD COLUMN {column_name} BOOLEAN NOT NULL DEFAULT FALSE"
                     )
                 )
+        # Recipients saved before the columns existed default to false on both,
+        # which now means "send this person nothing". They were added when every
+        # recipient got every alert, so restore that rather than silently
+        # muting them. The form always sets at least one column, so a row with
+        # neither can only be one of these.
+        connection.execute(
+            text(
+                "UPDATE telegram_recipients SET is_aceshigh = 1, is_betwar = 1 "
+                "WHERE is_aceshigh = 0 AND is_betwar = 0"
+            )
+        )
 
 
 def migrate_user_columns():
