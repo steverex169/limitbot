@@ -3130,6 +3130,9 @@ function rampLeagueRows() {
 function syncRampLeagues() {
   if (elements.buildRampView && !elements.buildRampView.hidden) {
     renderRampLeagues();
+    /* The tracked list needs an agent, which is not known when the route
+     * first renders. Leagues arriving means one now is. */
+    loadTrackedLimits().catch(() => { });
   }
 }
 
@@ -3357,8 +3360,9 @@ function renderTrackedLimits() {
   if (!trackers.length) {
     const empty = document.createElement("p");
     empty.className = "ramp-count";
-    empty.textContent =
-      "Nothing is being tracked yet. Pick leagues and limit types, then start tracking.";
+    empty.textContent = state.selectedAgentId
+      ? "Nothing is being tracked for this agent yet. Pick leagues and limit types, then start tracking."
+      : "Select an agent on the left to see what it is tracking.";
     host.append(empty);
     return;
   }
