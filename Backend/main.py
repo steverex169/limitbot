@@ -2595,15 +2595,36 @@ def next_one_time_run(recurrence_time, after=None):
     return candidate
 
 
+short_weekday_names = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def recurring_day_text(recurrence_days):
+    """Name a set of weekdays in as few words as it takes.
+
+    Spelling every day out produced "Every Wednesday, Thursday, Friday,
+    Saturday, Sunday", which wrapped to four lines in the schedules table and
+    made one row three times taller than its neighbours.
+    """
+    days = sorted({int(day) for day in recurrence_days})
+    if not days:
+        return ""
+    if days == [0, 1, 2, 3, 4, 5, 6]:
+        return "Every day"
+    if days == [0, 1, 2, 3, 4]:
+        return "Weekdays"
+    if days == [5, 6]:
+        return "Weekends"
+    # A run of consecutive days reads as a range. Only the plain Mon..Sun
+    # order is collapsed; a set that wraps past Sunday stays a list.
+    if len(days) > 2 and days == list(range(days[0], days[-1] + 1)):
+        return f"{short_weekday_names[days[0]]}-{short_weekday_names[days[-1]]}"
+    return ", ".join(short_weekday_names[day] for day in days)
+
+
 def recurring_description(recurrence_days, recurrence_time):
-    days = [weekday_names[int(day)] for day in recurrence_days]
-    day_text = (
-        "Monday through Friday"
-        if recurrence_days == [0, 1, 2, 3, 4]
-        else ", ".join(days)
-    )
+    day_text = recurring_day_text(recurrence_days)
     display_time = datetime.strptime(recurrence_time, "%H:%M").strftime("%I:%M %p")
-    return f"Every {day_text} at {display_time} ET"
+    return f"{day_text} at {display_time} ET"
 
 
 def create_schedule(request_data):
@@ -3349,6 +3370,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         logger.error("%s: %s", context, type(error).__name__, exc_info=True)
         self.send_json(502, {"error": message})
 
+    def comparison_error(self, context, error, fallback):
+        """A ComparisonError already says which site failed and what to do
+        about it, so send that text rather than a generic 502 message."""
+        logger.error("%s: %s", context, error, exc_info=True)
+        self.send_json(502, {"error": str(error) or fallback})
+
     def session_cookie(self, session_id, delete=False):
         secure = "; Secure" if self.is_https() else ""
         expiry = "; Max-Age=0" if delete else f"; Max-Age={int(session_max_lifetime.total_seconds())}"
@@ -3529,10 +3556,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             except PermissionError as error:
                 self.send_json(401, {"error": str(error)})
             except ComparisonError as error:
-                self.server_error(
+                self.comparison_error(
                     "Comparison league discovery failed",
                     error,
-                    "AcesHigh or OddsPapi league data is unavailable",
+                    f"{partner_name} or OddsPapi league data is unavailable",
                 )
             except Exception as error:
                 self.server_error(
@@ -3574,10 +3601,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             except PermissionError as error:
                 self.send_json(401, {"error": str(error)})
             except ComparisonError as error:
-                self.server_error(
+                self.comparison_error(
                     "League comparison failed",
                     error,
-                    "Pinnacle or AcesHigh comparison data is unavailable",
+                    f"Pinnacle or {partner_name} comparison data is unavailable",
                 )
             except Exception as error:
                 self.server_error(
@@ -3617,10 +3644,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             except PermissionError as error:
                 self.send_json(401, {"error": str(error)})
             except ComparisonError as error:
-                self.server_error(
+                self.comparison_error(
                     "Trading monitor failed",
                     error,
-                    "Pinnacle or AcesHigh monitor data is unavailable",
+                    f"Pinnacle or {partner_name} monitor data is unavailable",
                 )
             except Exception as error:
                 self.server_error(

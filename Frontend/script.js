@@ -577,7 +577,7 @@ function renderComparisonProfiles(data) {
     const card = document.createElement("article");
     card.className = "comparison-profile-card";
     const heading = document.createElement("h3");
-    heading.textContent = `AcesHigh ${period} limits`;
+    heading.textContent = `${partnerLabel()} ${period} limits`;
     card.append(heading);
 
     const list = document.createElement("dl");
@@ -593,6 +593,120 @@ function renderComparisonProfiles(data) {
     card.append(list);
     elements.comparisonProfiles.append(card);
   });
+}
+
+/*
+ * Pinnacle reports limits to the dollar, e.g. 7,878. Writing that verbatim
+ * fills the limits table with numbers nobody chose, so the button offers the
+ * nearest hundred instead.
+ */
+function roundPushValue(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) {
+    return null;
+  }
+  return Math.max(100, Math.round(number / 100) * 100);
+}
+
+/*
+ * A row is per selection, but the limit behind it belongs to the whole
+ * league and period - both teams' moneyline rows write the same field. The
+ * confirmation says so, because the button's position next to one team reads
+ * like it only affects that fixture.
+ */
+function describePushTarget(data, section, row, target) {
+  const league = comparisonText(data.league, "this league");
+  const period = comparisonText(section.period, "Full Game");
+  const field = fieldLabels[row.field] || row.field;
+  const current = formatComparisonLimit(row.acesHigh?.limit);
+  const next = Number(target).toLocaleString();
+
+  return (
+    `Set the ${field} limit for ${league} ${period} to ${next}?\n\n` +
+    `Currently ${current}.\n\n` +
+    `This is the league's limit, so it applies to every ${league} ` +
+    `${period} fixture — not only ${comparisonText(section.fixture, "this game")}.`
+  );
+}
+
+function createPushLimitCell(data, section, row) {
+  const cell = document.createElement("td");
+  cell.className = "comparison-push-cell";
+
+  const target = roundPushValue(row.pinnacle?.limit);
+  const writeTarget = section.writeTarget;
+
+  /* No field, no target or no usable number means nothing to write. */
+  if (!row.field || !writeTarget || target === null) {
+    return cell;
+  }
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "comparison-push";
+  button.textContent = `Use ${target.toLocaleString()}`;
+  button.title = `Set the ${fieldLabels[row.field] || row.field} limit to ${target.toLocaleString()}`;
+
+  const current = Number(row.acesHigh?.limit);
+  if (Number.isFinite(current) && current === target) {
+    button.disabled = true;
+    button.textContent = "Matches";
+    button.title = "This limit already matches Pinnacle's, rounded";
+    cell.append(button);
+    return cell;
+  }
+
+  button.addEventListener("click", async () => {
+    if (!window.confirm(describePushTarget(data, section, row, target))) {
+      return;
+    }
+
+    const original = button.textContent;
+    button.disabled = true;
+    button.textContent = "Saving...";
+
+    try {
+      const response = await fetch("/api/limits", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: data.accountId,
+          idOrganization: writeTarget.idOrganization,
+          idLeague: writeTarget.idLeague,
+          idSportType: writeTarget.idSportType,
+          periodNumber: writeTarget.periodNumber || 0,
+          field: row.field,
+          value: target,
+          limitMode: "normal",
+        }),
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Could not set the limit");
+      }
+
+      /*
+       * A blue limit is skipped rather than written, so report what the
+       * server actually did instead of assuming the value changed.
+       */
+      const skipped = result.changed === false;
+      await loadPinnacleComparison(true).catch(() => {});
+      setComparisonMessage(
+        skipped
+          ? result.note || "Skipped, the limit was not changed"
+          : `${fieldLabels[row.field] || row.field} limit set to ${target.toLocaleString()}`,
+        skipped ? "error" : "success"
+      );
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = original;
+      setComparisonMessage(error.message, "error");
+    }
+  });
+
+  cell.append(button);
+  return cell;
 }
 
 function renderPinnacleComparison(data) {
@@ -619,7 +733,7 @@ function renderPinnacleComparison(data) {
     const empty = document.createElement("p");
     empty.className = "comparison-empty";
     empty.textContent =
-      `No current ${comparisonText(data.league, "league")} fixtures could be mapped between AcesHigh and Pinnacle.`;
+      `No current ${comparisonText(data.league, "league")} fixtures could be mapped between ${partnerLabel()} and Pinnacle.`;
     elements.comparisonContent.append(empty);
     return;
   }
@@ -635,12 +749,12 @@ function renderPinnacleComparison(data) {
     const meta = document.createElement("p");
     const start = new Date(section.startTimeUtc);
     meta.textContent = Number.isNaN(start.valueOf())
-      ? `AcesHigh game ${comparisonText(section.acesHighGameNumber)}`
+      ? `${partnerLabel()} game ${comparisonText(section.acesHighGameNumber)}`
       : `${start.toLocaleString([], {
           weekday: "short",
           hour: "numeric",
           minute: "2-digit",
-        })} · AcesHigh game ${comparisonText(section.acesHighGameNumber)}`;
+        })} · ${partnerLabel()} game ${comparisonText(section.acesHighGameNumber)}`;
     titleWrap.append(title, meta);
     const period = document.createElement("span");
     period.className = "comparison-period";
@@ -657,12 +771,13 @@ function renderPinnacleComparison(data) {
     [
       "Market",
       "Selection",
-      "AcesHigh line",
-      "AcesHigh odds",
+      `${partnerLabel()} line`,
+      `${partnerLabel()} odds`,
       "Our limit",
       "Pinnacle line",
       "Pinnacle odds",
       "Pinnacle limit",
+      "",
     ].forEach((label) => {
       const th = document.createElement("th");
       th.textContent = label;
@@ -699,7 +814,8 @@ function renderPinnacleComparison(data) {
             data.pinnacleLimitCurrency || "USD"
           ),
           pinnacleLimitClass
-        )
+        ),
+        createPushLimitCell(data, section, row)
       );
       body.append(tr);
     });
@@ -753,7 +869,7 @@ async function loadComparisonLeagues(force = false) {
   if (!state.comparisonLeagues.length) {
     elements.comparisonLeague.append(new Option("No mapped leagues", ""));
     setComparisonMessage(
-      "No AcesHigh leagues for this agent overlap with the sports enabled in OddsPapi.",
+      `No ${partnerLabel()} leagues for this agent overlap with the sports enabled in OddsPapi.`,
       "error"
     );
     return;
@@ -866,7 +982,7 @@ function renderTradingMonitor(data) {
     const cell = document.createElement("td");
     cell.colSpan = 7;
     cell.className = "empty-state";
-    cell.textContent = `No current ${comparisonText(data.league, "league")} events are mapped between AcesHigh and Pinnacle.`;
+    cell.textContent = `No current ${comparisonText(data.league, "league")} events are mapped between ${partnerLabel()} and Pinnacle.`;
     row.append(cell);
     elements.tradingRows.append(row);
     return;
@@ -1004,7 +1120,7 @@ async function loadTradingLeagues(force = false) {
   elements.tradingLeague.replaceChildren();
   if (!state.tradingLeagues.length) {
     elements.tradingLeague.append(new Option("No mapped leagues", ""));
-    setTradingMessage("No AcesHigh leagues overlap with this OddsPapi account.", "error");
+    setTradingMessage(`No ${partnerLabel()} leagues overlap with this OddsPapi account.`, "error");
     return;
   }
   state.tradingLeagues.forEach((league) => {
@@ -1150,6 +1266,44 @@ const easternDateTimeFormatter = new Intl.DateTimeFormat(
     timeZoneName: "short",
   }
 );
+
+/*
+ * The schedules table prints four timestamps per row across fifteen columns.
+ * Repeating "2026" and "EST" in each of them pushed Status and Detail off the
+ * side of the screen, so here the year is two digits and the zone is named
+ * once, in the column heading.
+ */
+const easternCompactFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  year: "2-digit",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: true,
+});
+
+function formatScheduleDateTime(value) {
+  if (!value) {
+    return "";
+  }
+
+  /* A value the server already formatted: drop the zone and the century. */
+  if (typeof value === "string" && /\b(?:ET|EST|EDT)\b/.test(value)) {
+    return value
+      .replace(/\s*\b(?:ET|EST|EDT)\b/g, "")
+      .replace(/\b(\d{2})\/(\d{2})\/\d{2}(\d{2})\b/, "$1/$2/$3")
+      .trim();
+  }
+
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value);
+  }
+
+  return easternCompactFormatter.format(parsed).replace(", ", " ");
+}
 
 function formatEasternDateTime(value) {
   if (!value) {
@@ -2267,7 +2421,7 @@ function describeScheduleLastRun(schedule) {
     return "Not run yet";
   }
 
-  const when = formatEasternDateTime(
+  const when = formatScheduleDateTime(
     schedule.lastRunAtUtc || schedule.lastRunAt
   );
   const lastStatus = String(
@@ -2311,6 +2465,172 @@ function createStatusCell(status) {
   return cell;
 }
 
+/*
+ * Saving Spread, Money line and Total together writes three rows in
+ * scheduled_limits, but it was one decision by one person. The table used to
+ * show it as three near-identical lines. Grouping puts it back on one line the
+ * way a sportsbook prints a game: the key is every column the rows share, so
+ * anything genuinely separate still gets its own line.
+ */
+const scheduleLimitFields = ["spread", "moneyLine", "total", "teamTotal"];
+
+function scheduleGroupKey(schedule) {
+  return JSON.stringify([
+    schedule.accountId,
+    schedule.idOrganization,
+    schedule.idLeague,
+    schedule.idSportType,
+    schedule.periodNumber || 0,
+    schedule.limitMode || "normal",
+    schedule.recurrence || "",
+    schedule.scheduledForUtc || schedule.scheduledFor || "",
+    schedule.createdAtUtc || schedule.createdAt || "",
+    schedule.customerSupportAgent || "",
+  ]);
+}
+
+function groupSchedules(schedules) {
+  /* A Map keeps insertion order, so the existing sort survives grouping. */
+  const groups = new Map();
+
+  for (const schedule of schedules) {
+    const key = scheduleGroupKey(schedule);
+    const existing = groups.get(key);
+
+    if (existing) {
+      existing.push(schedule);
+    } else {
+      groups.set(key, [schedule]);
+    }
+  }
+
+  return [...groups.values()];
+}
+
+function createLimitValueCell(schedule, field) {
+  const cell = document.createElement("td");
+
+  if (field === "teamTotal") {
+    cell.classList.add("col-team-total");
+  }
+
+  if (!schedule) {
+    /* Not part of this schedule at all — distinct from a limit of zero. */
+    cell.textContent = "—";
+    cell.classList.add("schedule-limit-empty");
+    return cell;
+  }
+
+  cell.textContent = Number(schedule.value).toLocaleString();
+  cell.classList.add("schedule-limit-value");
+  return cell;
+}
+
+/*
+ * One badge when the whole group agrees, otherwise one per distinct state so a
+ * single failed limit is never hidden behind two successful ones.
+ */
+function createGroupStatusCell(group) {
+  const cell = document.createElement("td");
+  const statuses = [
+    ...new Set(group.map((item) => String(item.status || "").toLowerCase())),
+  ];
+
+  for (const status of statuses) {
+    const badge = document.createElement("span");
+    badge.className = `schedule-status schedule-status-${status || "unknown"}`;
+    badge.textContent = status
+      ? status.charAt(0).toUpperCase() + status.slice(1)
+      : "—";
+
+    if (statuses.length > 1) {
+      badge.title = group
+        .filter(
+          (item) => String(item.status || "").toLowerCase() === status
+        )
+        .map((item) => fieldLabels[item.field] || item.field)
+        .join(", ");
+    }
+
+    cell.append(badge);
+  }
+
+  return cell;
+}
+
+function createGroupDetailCell(group) {
+  const cell = document.createElement("td");
+  const notes = group
+    .map((item) => ({
+      label: fieldLabels[item.field] || item.field,
+      text: describeScheduleDetail(item),
+    }))
+    .filter((note) => note.text);
+
+  if (!notes.length) {
+    return cell;
+  }
+
+  const distinct = [...new Set(notes.map((note) => note.text))];
+
+  /* The same note on every limit is one sentence, not three. */
+  if (distinct.length === 1 && notes.length === group.length) {
+    cell.textContent = distinct[0];
+    return cell;
+  }
+
+  for (const note of notes) {
+    const line = document.createElement("div");
+    line.className = "schedule-detail-line";
+    line.textContent = `${note.label}: ${note.text}`;
+    cell.append(line);
+  }
+
+  return cell;
+}
+
+function describeGroupLastRun(group) {
+  return [
+    ...new Set(group.map((item) => describeScheduleLastRun(item))),
+  ].join(" · ");
+}
+
+async function postScheduleAction(path, body) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.error || "Could not update schedule");
+  }
+
+  return data;
+}
+
+/*
+ * Each limit is still its own job upstream, so act on them one at a time and
+ * report honestly: a group where one delete fails must not claim it removed
+ * everything.
+ */
+async function applyToGroup(group, path, extra = () => ({})) {
+  const removed = [];
+  let failure = null;
+
+  for (const schedule of group) {
+    try {
+      await postScheduleAction(path, { id: schedule.id, ...extra(schedule) });
+      removed.push(schedule.id);
+    } catch (error) {
+      failure = failure || error;
+    }
+  }
+
+  return { removed, failure };
+}
+
 function renderSchedules() {
   elements.scheduleRows.replaceChildren();
 
@@ -2331,11 +2651,24 @@ function renderSchedules() {
     return !isCancelled;
   });
 
+  /*
+   * Team total is a real limit but rarely scheduled. Showing a column of
+   * dashes cost width that Status and Detail needed, so it appears only when
+   * something actually uses it and returns on its own the moment one is set.
+   */
+  const table = elements.scheduleRows.closest("table");
+  if (table) {
+    table.classList.toggle(
+      "hide-team-total",
+      !schedules.some((schedule) => schedule.field === "teamTotal")
+    );
+  }
+
   if (!schedules.length) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
 
-    cell.colSpan = 13;
+    cell.colSpan = 15;
     cell.className = "empty-state";
     cell.textContent =
       statusFilter === "cancelled"
@@ -2347,129 +2680,106 @@ function renderSchedules() {
     return;
   }
 
-  for (const schedule of schedules) {
+  for (const group of groupSchedules(schedules)) {
+    const first = group[0];
     const row = document.createElement("tr");
+    const byField = new Map(
+      group.map((schedule) => [schedule.field, schedule])
+    );
 
     row.append(
       createTextCell(
-        formatEasternDateTime(
-          schedule.createdAtUtc || schedule.createdAt
-        )
+        formatScheduleDateTime(first.createdAtUtc || first.createdAt)
       ),
       createTextCell(
-        schedule.agentName ||
+        first.agentName ||
         state.agents.find(
-          (agent) =>
-            Number(agent.id) ===
-            Number(schedule.accountId)
+          (agent) => Number(agent.id) === Number(first.accountId)
         )?.name ||
-        `Agent ${schedule.accountId}`
+        `Agent ${first.accountId}`
       ),
-      createTextCell(schedule.customerSupportAgent),
+      createTextCell(first.customerSupportAgent),
+      createTextCell(first.leagueName || `League ${first.idLeague}`),
       createTextCell(
-        schedule.leagueName ||
-        `League ${schedule.idLeague}`
-      ),
-      createTextCell(describeSchedulePeriod(schedule)),
-      createTextCell(
-        `${fieldLabels[schedule.field] || schedule.field}${schedule.limitMode === "early" ? " (Early)" : ""}`
-      ),
-      createTextCell(Number(schedule.value).toLocaleString()),
-      createTextCell(schedule.recurrence || "One time"),
-      createTextCell(
-        formatEasternDateTime(
-          schedule.scheduledForUtc ||
-          schedule.scheduledFor
-        )
-      ),
-      createTextCell(describeScheduleLastRun(schedule)),
-      createStatusCell(schedule.status)
+        `${describeSchedulePeriod(first)}${first.limitMode === "early" ? " (Early)" : ""}`
+      )
     );
 
-    // The failure reason and the completion time are recorded on every job
-    // and were never shown, which is what made a failed run unexplainable.
-    row.append(createTextCell(describeScheduleDetail(schedule)));
+    for (const field of scheduleLimitFields) {
+      row.append(createLimitValueCell(byField.get(field), field));
+    }
 
-    const action =
-      document.createElement("td");
+    row.append(
+      createTextCell(first.recurrence || "One time"),
+      createTextCell(
+        formatScheduleDateTime(first.scheduledForUtc || first.scheduledFor)
+      ),
+      createTextCell(describeGroupLastRun(group)),
+      createGroupStatusCell(group),
+      createGroupDetailCell(group)
+    );
 
-    const cancel =
-      document.createElement("button");
+    const action = document.createElement("td");
+    const cancellable = group.filter((schedule) =>
+      ["pending", "failed"].includes(schedule.status)
+    );
+    const deletable = group.filter(
+      (schedule) => schedule.status !== "running"
+    );
 
+    const cancel = document.createElement("button");
     cancel.type = "button";
     cancel.className = "schedule-cancel";
     cancel.textContent = "Cancel";
-    cancel.disabled =
-      !["pending", "failed"].includes(schedule.status);
+    cancel.disabled = !cancellable.length;
 
-    cancel.addEventListener(
-      "click",
-      async () => {
-        cancel.disabled = true;
+    cancel.addEventListener("click", async () => {
+      cancel.disabled = true;
 
-        try {
-          const response = await fetch(
-            "/api/schedules/cancel",
-            {
-              method: "POST",
-              headers: {
-                "Content-Type":
-                  "application/json",
-              },
-              body: JSON.stringify({
-                id: schedule.id,
-              }),
-            }
-          );
+      const { removed, failure } = await applyToGroup(
+        cancellable,
+        "/api/schedules/cancel"
+      );
 
-          const data = await response.json();
-
-          if (!response.ok) {
-            throw new Error(
-              data.error ||
-              "Could not cancel schedule"
-            );
+      if (removed.length) {
+        const cancelledIds = new Set(removed);
+        for (const schedule of state.schedules) {
+          if (cancelledIds.has(schedule.id)) {
+            schedule.status = "cancelled";
           }
-
-          state.schedules =
-            state.schedules.filter(
-              (item) =>
-                item.id !== schedule.id
-            );
-
-          renderSchedules();
-          renderRows();
-
-          showMessage(
-            data.message,
-            "success"
-          );
-        } catch (error) {
-          cancel.disabled = false;
-
-          showMessage(
-            error.message,
-            "error"
-          );
         }
+        renderSchedules();
+        renderRows();
       }
-    );
+
+      if (failure) {
+        cancel.disabled = false;
+        showMessage(failure.message, "error");
+        return;
+      }
+
+      showMessage(
+        `Cancelled ${removed.length} scheduled ${removed.length === 1 ? "limit" : "limits"}`,
+        "success"
+      );
+    });
 
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "schedule-cancel";
     remove.textContent = "Delete";
-    remove.disabled = schedule.status === "running";
+    remove.disabled = !deletable.length;
     remove.style.marginLeft = "6px";
 
     remove.addEventListener("click", async () => {
-      const leagueName =
-        schedule.leagueName || `League ${schedule.idLeague}`;
-      const fieldLabel = fieldLabels[schedule.field] || schedule.field;
+      const leagueName = first.leagueName || `League ${first.idLeague}`;
+      const limitNames = deletable
+        .map((schedule) => fieldLabels[schedule.field] || schedule.field)
+        .join(", ");
 
       if (
         !window.confirm(
-          `Delete this schedule for ${leagueName} (${fieldLabel})? This removes only this schedule and cannot be undone.`
+          `Delete this schedule for ${leagueName} (${limitNames})? This removes ${deletable.length === 1 ? "it" : `all ${deletable.length}`} and cannot be undone.`
         )
       ) {
         return;
@@ -2479,37 +2789,35 @@ function renderSchedules() {
       cancel.disabled = true;
       remove.textContent = "Deleting...";
 
-      try {
-        const response = await fetch("/api/schedules/delete", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            id: schedule.id,
-            accountId: schedule.accountId,
-          }),
-        });
+      const { removed, failure } = await applyToGroup(
+        deletable,
+        "/api/schedules/delete",
+        (schedule) => ({ accountId: schedule.accountId })
+      );
 
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(data.error || "Could not delete schedule");
-        }
-
+      if (removed.length) {
+        const deletedIds = new Set(removed);
         state.schedules = state.schedules.filter(
-          (item) => item.id !== schedule.id
+          (schedule) => !deletedIds.has(schedule.id)
         );
+      }
+
+      if (failure) {
+        remove.disabled = false;
+        cancel.disabled = !cancellable.length;
+        remove.textContent = "Delete";
         renderSchedules();
         renderRows();
-        showMessage(data.message, "success");
-      } catch (error) {
-        remove.disabled = schedule.status === "running";
-        cancel.disabled =
-          !["pending", "failed"].includes(schedule.status);
-        remove.textContent = "Delete";
-        showMessage(error.message, "error");
+        showMessage(failure.message, "error");
+        return;
       }
+
+      renderSchedules();
+      renderRows();
+      showMessage(
+        `Deleted ${removed.length} scheduled ${removed.length === 1 ? "limit" : "limits"}`,
+        "success"
+      );
     });
 
     action.append(cancel, remove);
@@ -4410,6 +4718,13 @@ function showLogin() {
  * The same build runs against more than one site, so anything naming the
  * upstream follows the deployment rather than being written into the markup.
  */
+
+/* The site name for text built at render time. The .partner-name spans are
+ * rewritten in place on login; strings assembled in JS need this instead. */
+function partnerLabel() {
+  return state.partnerName || "Aces High";
+}
+
 function applyPartnerName(name) {
   if (!name) {
     return;
@@ -4417,6 +4732,14 @@ function applyPartnerName(name) {
   state.partnerName = name;
   for (const node of document.querySelectorAll(".partner-name")) {
     node.textContent = name;
+  }
+  /* Labels that are attributes rather than text, so a screen reader hears
+   * the site this deployment actually manages. */
+  for (const node of document.querySelectorAll("[data-partner-aria]")) {
+    node.setAttribute(
+      "aria-label",
+      node.dataset.partnerAria.replace("{name}", name)
+    );
   }
   document.title = `${name} Limit Control`;
 }
