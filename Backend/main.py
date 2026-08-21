@@ -281,22 +281,23 @@ def send_telegram_success_message(message, chat_id=None, audience="all"):
                 # Always restricted to this site's recipients. A schedule
                 # may narrow it further, but never widen it to the other
                 # site - that site has its own bot and its own list.
-                membership_clause = f"AND {telegram_site_column} = 1 "
+                # Recipients belong to the site, not to whoever typed them
+                # in: two people logging into the same deployment are running
+                # the same book and expect the same alerts.
+                membership_clause = f"WHERE {telegram_site_column} = 1 "
                 if audience == "aceshigh" and telegram_site_column != "is_aceshigh":
-                    membership_clause = "AND 0 = 1 "
+                    membership_clause = "WHERE 0 = 1 "
                 elif audience == "betwar" and telegram_site_column != "is_betwar":
-                    membership_clause = "AND 0 = 1 "
+                    membership_clause = "WHERE 0 = 1 "
                 with database_session() as db:
                     target_chat_ids = [
                         str(row[0]).strip()
                         for row in db.execute(
                             text(
                                 "SELECT chat_id FROM telegram_recipients "
-                                "WHERE user_id = :user_id "
                                 f"{membership_clause}"
                                 "ORDER BY created_at ASC"
-                            ),
-                            {"user_id": user_id},
+                            )
                         )
                         if row[0] not in (None, "")
                     ]
@@ -2435,16 +2436,20 @@ def save_limit_change(request_data):
 
 
 def telegram_recipient_rows():
-    auth = auth_context()
+    """Everyone this site alerts, whoever added them.
+
+    Scoped per login originally, which meant two people running the same book
+    from the same deployment each saw half the list - and, worse, each only
+    alerted their own half. The database is already per site, so the site is
+    the right scope.
+    """
     with database_session() as db:
         rows = db.execute(
             text(
                 "SELECT id, name, chat_id, is_aceshigh, is_betwar, created_at "
                 "FROM telegram_recipients "
-                "WHERE user_id = :user_id "
                 "ORDER BY created_at DESC, name ASC"
-            ),
-            {"user_id": auth["userId"]},
+            )
         ).mappings().all()
 
     return [
@@ -2482,6 +2487,18 @@ def add_telegram_recipient(request_data):
     if not (is_aceshigh or is_betwar):
         raise ValueError("Select at least one membership")
 
+    with database_session() as db:
+        existing = db.execute(
+            text(
+                "SELECT name FROM telegram_recipients WHERE chat_id = :chat_id"
+            ),
+            {"chat_id": chat_id},
+        ).scalar()
+    if existing:
+        raise ValueError(
+            f"That Telegram Chat ID is already saved as {existing}"
+        )
+
     recipient_id = uuid.uuid4().hex
     try:
         with database_session() as db:
@@ -2493,7 +2510,6 @@ def add_telegram_recipient(request_data):
                 ),
                 {
                     "id": recipient_id,
-                    "user_id": auth["userId"],
                     "name": name,
                     "chat_id": chat_id,
                     "is_aceshigh": is_aceshigh,
@@ -2547,7 +2563,7 @@ def edit_telegram_recipient(request_data):
                     "UPDATE telegram_recipients "
                     "SET name = :name, chat_id = :chat_id, "
                     "is_aceshigh = :is_aceshigh, is_betwar = :is_betwar "
-                    "WHERE id = :id AND user_id = :user_id"
+                    "WHERE id = :id"
                 ),
                 {
                     "id": recipient_id,
@@ -2589,9 +2605,9 @@ def delete_telegram_recipient(request_data):
         removed = db.execute(
             text(
                 "DELETE FROM telegram_recipients "
-                "WHERE id = :id AND user_id = :user_id"
+                "WHERE id = :id"
             ),
-            {"id": recipient_id, "user_id": auth["userId"]},
+            {"id": recipient_id},
         ).rowcount
         db.commit()
 
