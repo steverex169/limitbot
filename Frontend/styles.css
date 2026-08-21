@@ -1292,6 +1292,32 @@ tbody tr:hover {
   color: var(--green);
 }
 
+/* The exposure summary is the part meant to be acted on, so it sits above the
+   fixture list rather than under it. */
+.comparison-exposure {
+  margin-bottom: 18px;
+}
+
+.comparison-exposure:empty {
+  display: none;
+}
+
+.exposure-card header p {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.exposure-table td {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Sitting above Pinnacle is the exposure worth seeing. Sitting below only
+   costs volume, so it is left unmarked. */
+.comparison-limit-over {
+  color: var(--red, #d92d20);
+  font-weight: 700;
+}
+
 /* The push button sits in its own column so it never crowds the number it
    is offering. */
 .comparison-push-cell {

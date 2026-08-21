@@ -136,6 +136,8 @@ const elements = {
   comparisonSectionCount: document.querySelector("#comparisonSectionCount"),
   comparisonGeneratedAt: document.querySelector("#comparisonGeneratedAt"),
   comparisonProfiles: document.querySelector("#comparisonProfiles"),
+  comparisonWindow: document.querySelector("#comparisonWindow"),
+  comparisonExposure: document.querySelector("#comparisonExposure"),
   comparisonContent: document.querySelector("#comparisonContent"),
   tradingLeague: document.querySelector("#tradingLeague"),
   tradingRefresh: document.querySelector("#tradingRefresh"),
@@ -719,12 +721,289 @@ function createPushLimitCell(data, section, row) {
   return cell;
 }
 
+/*
+ * Pinnacle raises a limit as the game approaches: today the NFL fixtures are
+ * three weeks out and capped at 750, while MLB games a few hours away sit
+ * between 3,750 and 8,272. Comparing a standing league limit against a
+ * far-out fixture therefore says nothing, so the window drops them.
+ */
+function comparisonWindowHours() {
+  const raw = elements.comparisonWindow?.value ?? "24";
+  if (raw === "all") {
+    return Infinity;
+  }
+  const hours = Number(raw);
+  return Number.isFinite(hours) && hours > 0 ? hours : 24;
+}
+
+function hoursUntilStart(section) {
+  const start = new Date(section?.startTimeUtc);
+  if (Number.isNaN(start.valueOf())) {
+    return null;
+  }
+  return (start.getTime() - Date.now()) / 3600000;
+}
+
+function withinComparisonWindow(section, hours) {
+  if (hours === Infinity) {
+    return true;
+  }
+  const remaining = hoursUntilStart(section);
+  /* A fixture with no usable start time is kept rather than silently dropped. */
+  if (remaining === null) {
+    return true;
+  }
+  return remaining <= hours;
+}
+
+function median(values) {
+  if (!values.length) {
+    return null;
+  }
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2
+    ? sorted[middle]
+    : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+/*
+ * One row per period and market, because that is the shape of the limit being
+ * compared. A single fixture's number is not actionable on its own: the limit
+ * applies to every game, so the exposure that matters is how many fixtures sit
+ * above it, and the safe anchor is the lowest of them rather than the typical
+ * one.
+ */
+function buildExposureRows(sections) {
+  const groups = new Map();
+
+  for (const section of sections) {
+    for (const row of section.rows || []) {
+      if (!row.field) {
+        continue;
+      }
+      const pinnacle = Number(row.pinnacle?.limit);
+      if (!Number.isFinite(pinnacle)) {
+        continue;
+      }
+      const key = `${section.period}\u0000${row.field}`;
+      let group = groups.get(key);
+      if (!group) {
+        group = {
+          period: section.period,
+          field: row.field,
+          ourLimit: Number(row.acesHigh?.limit),
+          writeTarget: section.writeTarget,
+          pinnacle: [],
+          over: 0,
+          fixtures: new Set(),
+        };
+        groups.set(key, group);
+      }
+      group.pinnacle.push(pinnacle);
+      group.fixtures.add(section.fixtureId ?? section.fixture);
+      if (Number.isFinite(group.ourLimit) && group.ourLimit > pinnacle) {
+        group.over += 1;
+      }
+    }
+  }
+
+  return [...groups.values()].map((group) => ({
+    ...group,
+    lowest: Math.min(...group.pinnacle),
+    middle: median(group.pinnacle),
+    highest: Math.max(...group.pinnacle),
+    samples: group.pinnacle.length,
+  }));
+}
+
+function renderComparisonExposure(data, sections) {
+  const host = elements.comparisonExposure;
+  if (!host) {
+    return;
+  }
+  host.replaceChildren();
+
+  const rows = buildExposureRows(sections);
+  if (!rows.length) {
+    return;
+  }
+
+  const card = document.createElement("article");
+  card.className = "comparison-card exposure-card";
+
+  const header = document.createElement("header");
+  const titleWrap = document.createElement("div");
+  const title = document.createElement("h3");
+  title.textContent = "Where your limits sit against Pinnacle";
+  const meta = document.createElement("p");
+  const hours = comparisonWindowHours();
+  meta.textContent =
+    hours === Infinity
+      ? `Across every matched fixture. Each limit applies to the whole league and period.`
+      : `Across fixtures starting within ${hours} hours. Each limit applies to the whole league and period.`;
+  titleWrap.append(title, meta);
+  header.append(titleWrap);
+  card.append(header);
+
+  const wrap = document.createElement("div");
+  wrap.className = "comparison-table-wrap";
+  const table = document.createElement("table");
+  table.className = "comparison-table exposure-table";
+
+  const head = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  [
+    "Period",
+    "Market",
+    "Your limit",
+    "Pinnacle lowest",
+    "Pinnacle median",
+    "Pinnacle highest",
+    "Over on",
+    "",
+  ].forEach((label) => {
+    const th = document.createElement("th");
+    th.textContent = label;
+    headRow.append(th);
+  });
+  head.append(headRow);
+  table.append(head);
+
+  const body = document.createElement("tbody");
+  const order = ["spread", "moneyLine", "total", "teamTotal"];
+  rows.sort(
+    (a, b) =>
+      String(a.period).localeCompare(String(b.period)) ||
+      order.indexOf(a.field) - order.indexOf(b.field)
+  );
+
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    const fixtures = row.fixtures.size;
+
+    const overCell = document.createElement("td");
+    overCell.textContent = `${row.over} of ${fixtures}`;
+    /* Being over Pinnacle is the exposure worth seeing; being under only
+     * costs volume. */
+    overCell.className = row.over
+      ? "comparison-limit comparison-limit-over"
+      : "comparison-limit";
+
+    tr.append(
+      comparisonCell(comparisonText(row.period)),
+      comparisonCell(fieldLabels[row.field] || row.field),
+      comparisonCell(
+        Number.isFinite(row.ourLimit)
+          ? formatComparisonLimit(row.ourLimit)
+          : "—",
+        "comparison-limit"
+      ),
+      comparisonCell(formatComparisonLimit(row.lowest), "comparison-limit"),
+      comparisonCell(formatComparisonLimit(row.middle)),
+      comparisonCell(formatComparisonLimit(row.highest)),
+      overCell,
+      createExposurePushCell(data, row)
+    );
+    body.append(tr);
+  }
+
+  table.append(body);
+  wrap.append(table);
+  card.append(wrap);
+  host.append(card);
+}
+
+/*
+ * The button offers the lowest Pinnacle limit in the window, not the median.
+ * One number covers every fixture, so the exposure is set by the game Pinnacle
+ * trusts least; anchoring to the typical game still leaves you above the
+ * weakest one.
+ */
+function createExposurePushCell(data, row) {
+  const cell = document.createElement("td");
+  cell.className = "comparison-push-cell";
+
+  const target = roundPushValue(row.lowest);
+  if (!row.writeTarget || target === null) {
+    return cell;
+  }
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "comparison-push";
+  const label = fieldLabels[row.field] || row.field;
+
+  if (Number.isFinite(row.ourLimit) && row.ourLimit === target) {
+    button.disabled = true;
+    button.textContent = "Matches";
+    button.title = "Already at the lowest Pinnacle limit in this window";
+    cell.append(button);
+    return cell;
+  }
+
+  button.textContent = `Use ${target.toLocaleString()}`;
+  button.title = `Set ${label} to the lowest Pinnacle limit in this window`;
+
+  button.addEventListener("click", async () => {
+    const current = Number.isFinite(row.ourLimit)
+      ? formatComparisonLimit(row.ourLimit)
+      : "unset";
+    const confirmed = window.confirm(
+      `Set the ${label} limit for ${comparisonText(data.league, "this league")} ` +
+      `${comparisonText(row.period, "Full Game")} to ${target.toLocaleString()}?\n\n` +
+      `Currently ${current}. This is the lowest Pinnacle limit across ` +
+      `${row.samples} compared selections in the chosen window.\n\n` +
+      `It applies to every fixture in this league and period.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    const original = button.textContent;
+    button.disabled = true;
+    button.textContent = "Saving...";
+
+    try {
+      const response = await fetch("/api/limits", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: data.accountId,
+          idOrganization: row.writeTarget.idOrganization,
+          idLeague: row.writeTarget.idLeague,
+          idSportType: row.writeTarget.idSportType,
+          periodNumber: row.writeTarget.periodNumber || 0,
+          field: row.field,
+          value: target,
+          limitMode: "normal",
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || "Could not set the limit");
+      }
+      const skipped = result.changed === false;
+      await loadPinnacleComparison(true).catch(() => {});
+      setComparisonMessage(
+        skipped
+          ? result.note || "Skipped, the limit was not changed"
+          : `${label} limit set to ${target.toLocaleString()}`,
+        skipped ? "error" : "success"
+      );
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = original;
+      setComparisonMessage(error.message, "error");
+    }
+  });
+
+  cell.append(button);
+  return cell;
+}
+
 function renderPinnacleComparison(data) {
   state.comparison = data;
-  elements.comparisonFixtureCount.textContent =
-    comparisonText(data.matchedFixtureCount, "0");
-  elements.comparisonSectionCount.textContent =
-    comparisonText(data.sectionCount, "0");
 
   const generated = new Date(data.generatedAt);
   elements.comparisonGeneratedAt.textContent = Number.isNaN(generated.valueOf())
@@ -739,6 +1018,18 @@ function renderPinnacleComparison(data) {
   renderComparisonProfiles(data);
   elements.comparisonContent.replaceChildren();
 
+  const hours = comparisonWindowHours();
+  const sections = (data.comparisons || []).filter((section) =>
+    withinComparisonWindow(section, hours)
+  );
+
+  elements.comparisonFixtureCount.textContent = String(
+    new Set(sections.map((section) => section.fixtureId ?? section.fixture)).size
+  );
+  elements.comparisonSectionCount.textContent = String(sections.length);
+
+  renderComparisonExposure(data, sections);
+
   if (!data.comparisons?.length) {
     const empty = document.createElement("p");
     empty.className = "comparison-empty";
@@ -748,7 +1039,19 @@ function renderPinnacleComparison(data) {
     return;
   }
 
-  data.comparisons.forEach((section) => {
+  if (!sections.length) {
+    const empty = document.createElement("p");
+    empty.className = "comparison-empty";
+    const total = data.comparisons.length;
+    empty.textContent =
+      `None of the ${total} mapped ${total === 1 ? "fixture" : "fixtures"} start within ` +
+      `${hours} hours. Pinnacle's limits are low this far out, so comparing them ` +
+      `to a standing limit would mislead. Widen the window to see them anyway.`;
+    elements.comparisonContent.append(empty);
+    return;
+  }
+
+  sections.forEach((section) => {
     const card = document.createElement("article");
     card.className = "comparison-card";
 
@@ -833,6 +1136,16 @@ function renderPinnacleComparison(data) {
     wrap.append(table);
     card.append(wrap);
     elements.comparisonContent.append(card);
+  });
+}
+
+if (elements.comparisonWindow) {
+  elements.comparisonWindow.addEventListener("change", () => {
+    /* Filtering is done over data already in hand, so this is instant and
+     * costs AccessHigh and OddsPapi nothing. */
+    if (state.comparison) {
+      renderPinnacleComparison(state.comparison);
+    }
   });
 }
 

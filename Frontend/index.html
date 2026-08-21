@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Limit Control Bot</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/styles.css?v=20260821-schedule-alerts-layout">
+  <link rel="stylesheet" href="/styles.css?v=20260821-exposure-summary">
 </head>
 
 <body class="app-loading">
@@ -221,6 +221,14 @@
           <select id="comparisonLeague" aria-label="Comparison league" disabled>
             <option value="">Loading leagues...</option>
           </select>
+          <label for="comparisonWindow">Starting within</label>
+          <select id="comparisonWindow" aria-label="Only compare fixtures starting within">
+            <option value="24">24 hours</option>
+            <option value="48">48 hours</option>
+            <option value="72">3 days</option>
+            <option value="168">7 days</option>
+            <option value="all">Any time</option>
+          </select>
           <button id="comparisonRefresh" class="button secondary" type="button">Refresh data</button>
         </div>
       </div>
@@ -242,11 +250,13 @@
         </article>
       </div>
 
+      <div id="comparisonExposure" class="comparison-exposure"></div>
+
       <div id="comparisonProfiles" class="comparison-profiles" data-partner-aria="{name} limit profiles" aria-label="Aces High limit profiles"></div>
       <div id="comparisonContent" class="comparison-content">
         <p class="comparison-empty">Select an agent and league to load the comparison.</p>
       </div>
-      <p class="comparison-source-note">Pinnacle limits are supplied in USD by OddsPapi. <span class="partner-name">Aces High</span> limits are the selected agent's configured values.</p>
+      <p class="comparison-source-note">Pinnacle limits are supplied in USD by OddsPapi. <span class="partner-name">Aces High</span> limits are the selected agent&#39;s configured values, and apply to every fixture in the league and period &mdash; not to one game. Pinnacle raises its limits as a game approaches, so fixtures far from kick-off are excluded by the window above.</p>
     </section>
 
     <section id="tradingMonitorView" class="panel trading-monitor-panel" hidden aria-hidden="true">
@@ -450,7 +460,7 @@
     </div>
   </dialog>
 
-  <script src="/script.js?v=20260821-schedule-alerts-layout" defer></script>
+  <script src="/script.js?v=20260821-exposure-summary" defer></script>
 </body>
 
 </html>
