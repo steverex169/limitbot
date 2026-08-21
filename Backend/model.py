@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Float, BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -137,3 +137,24 @@ class ScheduledLimit(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     user: Mapped[User] = relationship(back_populates="schedules")
+
+class PinnacleLimitSample(Base):
+    """One reading of a Pinnacle limit, with how far the game still is.
+
+    Collected over days these rows give the intraday curve - how much a limit
+    grows as a fixture absorbs two-way money. Only the shape transfers to a
+    smaller book; the level reflects Pinnacle's own volume and never does.
+    """
+
+    __tablename__ = "pinnacle_limit_samples"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    league: Mapped[str] = mapped_column(String(24), index=True)
+    period: Mapped[str] = mapped_column(String(32))
+    field: Mapped[str] = mapped_column(String(20))
+    fixture_id: Mapped[str] = mapped_column(String(64), index=True)
+    hours_to_start: Mapped[float] = mapped_column(Float)
+    limit_value: Mapped[float] = mapped_column(Float)
+    sampled_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True
+    )

@@ -777,6 +777,103 @@ def _market_label(key: str) -> str:
     }.get(key, key)
 
 
+class RateLimited(ComparisonError):
+    """OddsPapi refused because we asked too often."""
+
+
+def sample_pinnacle_limits(
+    api_key: str,
+    league: str,
+    max_fixtures: int = 6,
+) -> list[dict[str, Any]]:
+    """Pinnacle's current limits for one league, with time to kick-off.
+
+    Recorded over days this becomes the intraday curve: how a limit grows as a
+    game absorbs two-way money. The shape is what transfers to a smaller book -
+    the level never does - so this reads only Pinnacle and needs no partner
+    login.
+    """
+    config = LEAGUE_CONFIGS[league]
+    session = requests.Session()
+    session.headers.update(
+        {"Accept": "application/json", "User-Agent": "limitbot-comparison/1.0"}
+    )
+    samples: list[dict[str, Any]] = []
+    now = time.time()
+    try:
+        # OddsPapi's quota is shared with the comparison page, which a person
+        # is waiting on. Sample only the fixtures nearest kick-off - they are
+        # the ones whose limits are still moving - and never more than a
+        # handful, so a background reading cannot starve a page load.
+        upcoming = []
+        for fixture in _league_fixtures(session, api_key, league):
+            try:
+                hours = (float(fixture.get("startTime")) - now) / 3600.0
+            except (TypeError, ValueError):
+                continue
+            if hours < -3:
+                continue
+            upcoming.append((hours, fixture))
+        upcoming.sort(key=lambda item: item[0])
+
+        for hours_to_start, fixture in upcoming[:max_fixtures]:
+            try:
+                payload = _odds_get(
+                    session,
+                    api_key,
+                    "/fixtures/odds",
+                    fixtureId=fixture["fixtureId"],
+                    bookmakers=BOOKMAKER,
+                    mainLine=True,
+                )
+            except ComparisonError as error:
+                if "429" in str(error):
+                    # Stop the whole cycle rather than keep pushing against a
+                    # limiter the page also depends on.
+                    raise RateLimited(str(error)) from None
+                raise
+            quote_map = ((payload.get("odds") or {}).get(BOOKMAKER) or {})
+            quotes = [
+                quote
+                for quote in quote_map.values()
+                if isinstance(quote, dict)
+                and quote.get("active") is True
+                and quote.get("marketActive") is not False
+                and quote.get("limit") is not None
+            ]
+            if not quotes:
+                continue
+            markets = _market_map(session, api_key, quotes)
+            for period_label, odds_period in (
+                ("Full Game", "result"),
+                ("1st Half", "p1"),
+                ("2nd Half", "p2"),
+                ("1st 5 Innings", "p1+p2+p3+p4+p5"),
+            ):
+                for entry in _pinnacle_entries(
+                    payload, quotes, markets, odds_period
+                ):
+                    field = _limit_field(entry.get("marketKey"))
+                    limit = entry.get("limit")
+                    if not field or not isinstance(limit, (int, float)):
+                        continue
+                    samples.append({
+                        "league": league,
+                        "leagueName": config["name"],
+                        "period": period_label,
+                        "field": field,
+                        "fixtureId": str(fixture.get("fixtureId")),
+                        "hoursToStart": round(hours_to_start, 2),
+                        "limit": float(limit),
+                    })
+            # Slower than the page's own throttle: a background reading is
+            # never urgent, and the quota belongs to whoever is waiting.
+            time.sleep(0.5)
+    finally:
+        session.close()
+    return samples
+
+
 def _comparison_section(
     fixture: dict[str, Any],
     aces_game: dict[str, Any],

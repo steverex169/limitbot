@@ -26,12 +26,22 @@ from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import case, delete, func, inspect, select, text, update
 from urllib.parse import urlparse, parse_qs
 from database import Base, database_session, engine
-from model import AgentTreeCache, LimitChange, LoginSession, ScheduledLimit, User
+from model import (
+    AgentTreeCache,
+    LimitChange,
+    LoginSession,
+    PinnacleLimitSample,
+    ScheduledLimit,
+    User,
+)
 from odds_comparison import (
     ComparisonError,
+    LEAGUE_CONFIGS,
+    RateLimited,
     build_league_comparison,
     build_trading_monitor,
     comparison_leagues,
+    sample_pinnacle_limits,
 )
 
 backend_directory = Path(__file__).resolve().parent
@@ -3110,6 +3120,102 @@ def prune_expired_sessions():
             del login_attempts[key]
 
 
+# How often Pinnacle's limits are recorded, and how long the readings are kept.
+# Only one deployment needs to collect them: the readings describe Pinnacle,
+# not a partner site, so the second site would store the same numbers twice.
+pinnacle_sample_minutes = int(os.getenv("PINNACLE_SAMPLE_MINUTES", "60") or 60)
+pinnacle_sample_days = int(os.getenv("PINNACLE_SAMPLE_DAYS", "60") or 60)
+pinnacle_sampling_enabled = (
+    os.getenv("PINNACLE_SAMPLING", "").strip().lower()
+    not in {"off", "false", "0", "no"}
+)
+
+
+def record_pinnacle_samples():
+    """Take one reading of every league's Pinnacle limits."""
+    api_key = os.getenv("ODDSPAPI_KEY", "").strip()
+    if not api_key:
+        return 0
+
+    stored = 0
+    now = datetime.now(timezone.utc)
+    for league in LEAGUE_CONFIGS:
+        if shutdown_event.is_set():
+            break
+        try:
+            samples = sample_pinnacle_limits(api_key, league)
+        except RateLimited:
+            # The quota is shared with the comparison page. Give the rest of
+            # this cycle up rather than keep pushing against the limiter
+            # somebody's page load also depends on.
+            logger.info(
+                "Pinnacle sampling stopped early: OddsPapi is rate limiting"
+            )
+            break
+        except Exception:
+            # One league failing must not stop the rest, and a sampling
+            # failure must never affect anything a person is doing.
+            logger.warning(
+                "Could not sample Pinnacle limits for %s", league, exc_info=True
+            )
+            continue
+        if not samples:
+            continue
+        try:
+            with database_session() as db:
+                db.add_all([
+                    PinnacleLimitSample(
+                        league=sample["league"],
+                        period=sample["period"],
+                        field=sample["field"],
+                        fixture_id=sample["fixtureId"],
+                        hours_to_start=sample["hoursToStart"],
+                        limit_value=sample["limit"],
+                        sampled_at=now.replace(tzinfo=None),
+                    )
+                    for sample in samples
+                ])
+                db.commit()
+            stored += len(samples)
+        except Exception:
+            logger.warning(
+                "Could not store Pinnacle samples for %s", league, exc_info=True
+            )
+    if stored:
+        logger.info("Recorded %d Pinnacle limit readings", stored)
+    return stored
+
+
+def prune_pinnacle_samples():
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+        days=pinnacle_sample_days
+    )
+    with database_session() as db:
+        db.execute(
+            delete(PinnacleLimitSample).where(
+                PinnacleLimitSample.sampled_at < cutoff
+            )
+        )
+        db.commit()
+
+
+def run_pinnacle_sampler():
+    """Record Pinnacle's limits on a timer, forever, without ever failing loudly."""
+    if not pinnacle_sampling_enabled:
+        logger.info("Pinnacle sampling is disabled")
+        return
+    # A short first delay keeps startup responsive and staggers the two sites
+    # if both are ever asked to sample.
+    shutdown_event.wait(30)
+    while not shutdown_event.is_set():
+        try:
+            record_pinnacle_samples()
+            prune_pinnacle_samples()
+        except Exception:
+            logger.exception("Pinnacle sampler iteration failed")
+        shutdown_event.wait(max(60, pinnacle_sample_minutes * 60))
+
+
 def run_schedule_worker():
     # Any exception escaping this loop silently stops all scheduled limits
     # until a restart, so every iteration must survive failures.
@@ -4067,6 +4173,8 @@ logger.info("Dashboard listening on http://%s:%s", server_host, server_port)
 
 schedule_worker = threading.Thread(target=run_schedule_worker, daemon=True)
 schedule_worker.start()
+pinnacle_sampler = threading.Thread(target=run_pinnacle_sampler, daemon=True)
+pinnacle_sampler.start()
 server = ThreadingHTTPServer((server_host, server_port), DashboardHandler)
 
 def stop_server(_signum, _frame):
