@@ -340,30 +340,20 @@
 }
 
 /* Form fields stop at a readable width instead of stretching across a
-   full-width monitor. */
-/* The seven weekday chips need a column wide enough to hold them on one
-   line; "Sun" alone on a second row reads like a mistake. */
+   full-width monitor.
+
+   The four fields take as many columns as fit rather than a fixed three.
+   Two rigid three-column templates used to fight over this: the second sat
+   outside any media query, so it beat the first one's breakpoint at every
+   width. The grid then held a floor of 830px inside a column only as wide as
+   the viewport less the sidebar and padding, which meant that between roughly
+   1100px and 1230px the last columns were pushed outside the content box and
+   clipped away by #dashboardView's overflow-x: hidden. Both templates were
+   sized around a weekday-chip field that no longer exists, and the grid holds
+   four fields, not three. */
 .build-ramp-panel .ramp-grid {
   max-width: 1100px;
-  grid-template-columns:
-    minmax(200px, 0.8fr)
-    minmax(430px, 1.2fr)
-    minmax(240px, 1fr);
-}
-
-.build-ramp-panel .ramp-days-field .ramp-checks {
-  flex-wrap: nowrap;
-  gap: 4px 12px;
-}
-
-@media (max-width: 1180px) {
-  .build-ramp-panel .ramp-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .build-ramp-panel .ramp-days-field .ramp-checks {
-    flex-wrap: wrap;
-  }
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .build-ramp-panel .ramp-builder input[type="text"] {
@@ -519,16 +509,3 @@
   min-width: 640px;
 }
 
-/* Four limit types fit on one line at this width instead of wrapping to two. */
-.build-ramp-panel .ramp-grid {
-  grid-template-columns:
-    minmax(330px, 1.1fr)
-    minmax(260px, 1fr)
-    minmax(240px, 0.9fr);
-}
-
-@media (max-width: 1100px) {
-  .build-ramp-panel .ramp-grid {
-    grid-template-columns: 1fr;
-  }
-}
