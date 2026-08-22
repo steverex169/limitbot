@@ -175,6 +175,7 @@ const elements = {
   rampSelectNone: document.querySelector("#rampSelectNone"),
   rampTracked: document.querySelector("#rampTracked"),
   rampScale: document.querySelector("#rampScale"),
+  rampIncludePeriods: document.querySelector("#rampIncludePeriods"),
   rampAgentName: document.querySelector("#rampAgentName"),
   rampMessage: document.querySelector("#rampMessage"),
   rampPreview: document.querySelector("#rampPreview"),
@@ -3460,6 +3461,47 @@ async function createRamp() {
       editableFields: row.editableFields,
     }));
 
+  /*
+   * A league's period markets are a separate row that the dashboard only
+   * fetches when the league is expanded, so they are not in the picker.
+   * Fetching them here means "all of MLB" really means all of it, rather
+   * than quietly meaning full game only.
+   */
+  if (elements.rampIncludePeriods?.checked) {
+    for (const row of rows.filter(
+      (candidate) => candidate.hasPeriods && selected.has(rampRowKey(candidate))
+    )) {
+      try {
+        const query = new URLSearchParams({
+          accountId: row.accountId,
+          idOrganization: row.idOrganization,
+          idLeague: row.idLeague,
+        });
+        const response = await fetch(`/api/periods?${query}`, {
+          cache: "no-store",
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          continue;
+        }
+        for (const period of data.rows || []) {
+          targets.push({
+            idOrganization: period.idOrganization,
+            idLeague: period.idLeague,
+            idSportType: period.idSportType,
+            periodNumber: period.periodNumber || 0,
+            leagueName: rampLeagueLabel(row),
+            periodDescription:
+              period.periodDescription || period.leagueName,
+            editableFields: period.editableFields,
+          });
+        }
+      } catch {
+        /* A league whose periods cannot be read still tracks its full game. */
+      }
+    }
+  }
+
   const fields = rampCheckedValues(elements.rampFields);
   const agentName = elements.rampAgentName?.value.trim() || "";
   const scale = rampScalePercent();
@@ -3482,11 +3524,13 @@ async function createRamp() {
   }
 
   const total = targets.length * fields.length;
+  const periodCount = targets.filter((t) => t.periodNumber).length;
   if (
     !window.confirm(
       `Track ${total.toLocaleString()} limit${total === 1 ? "" : "s"} at ${scale}% of Pinnacle?\n\n` +
-      `Across ${targets.length} league${targets.length === 1 ? "" : "s"} and ` +
-      `${fields.length} limit type${fields.length === 1 ? "" : "s"}.\n\n` +
+      `Across ${targets.length} row${targets.length === 1 ? "" : "s"}` +
+      (periodCount ? ` (${periodCount} of them period markets)` : "") +
+      ` and ${fields.length} limit type${fields.length === 1 ? "" : "s"}.\n\n` +
       `These limits will be rewritten automatically whenever Pinnacle moves. ` +
       `Tracked limits are the one place the blue rule does not apply, because ` +
       `every write marks a limit blue and tracking could otherwise run once only.`

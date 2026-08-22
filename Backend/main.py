@@ -2994,6 +2994,29 @@ def limit_tracker_rows(account_id):
         } for row in rows]
 
 
+def pinnacle_period_label(period_description):
+    """The label Pinnacle samples are stored under, for an AccessHigh period.
+
+    The two do not use the same words: AccessHigh calls the baseball period
+    row "Innings" while Pinnacle records "1st 5 Innings". A tracker storing
+    AccessHigh's wording would look up a key that does not exist and quietly
+    never write, so the translation happens once, here.
+    """
+    text_value = str(period_description or "").strip()
+    lowered = text_value.lower()
+    if not lowered or lowered in {"full game", "game"}:
+        return "Full Game"
+    if "inning" in lowered:
+        return "1st 5 Innings"
+    if "2nd half" in lowered or "second half" in lowered:
+        return "2nd Half"
+    if "half" in lowered:
+        return "1st Half"
+    # Quarters and thirds are not among the periods the sampler records, so
+    # they resolve to nothing and are reported rather than guessed at.
+    return text_value
+
+
 def create_limit_trackers(request_data):
     """Put a set of limits under live tracking.
 
@@ -3064,6 +3087,14 @@ def create_limit_trackers(request_data):
                 skipped.append(f"{league_label} is missing its league ids")
                 continue
 
+            period_label = pinnacle_period_label(target.get("periodDescription"))
+            if period_label not in {"Full Game", "1st Half", "2nd Half", "1st 5 Innings"}:
+                skipped.append(
+                    f"{league_label}: Pinnacle limits are not recorded for "
+                    f"the {period_label} period"
+                )
+                continue
+
             allowed = target.get("editableFields")
             for field in fields:
                 if isinstance(allowed, list) and allowed and field not in allowed:
@@ -3097,7 +3128,9 @@ def create_limit_trackers(request_data):
                     field=field,
                     is_early_limit=is_early_limit,
                     league_slug=slug,
-                    period_label=str(target.get("periodDescription") or "Full Game"),
+                    period_label=pinnacle_period_label(
+                        target.get("periodDescription")
+                    ),
                     league_name=league_label,
                     scale_percent=scale_percent,
                     enabled=True,

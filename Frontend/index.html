@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Limit Control Bot</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/styles.css?v=20260822-tracker-basis">
+  <link rel="stylesheet" href="/styles.css?v=20260822-periods">
 </head>
 
 <body class="app-loading">
@@ -344,6 +344,14 @@
             </div>
 
             <div class="ramp-field">
+              <span class="ramp-label">Also track</span>
+              <label class="ramp-check">
+                <input id="rampIncludePeriods" type="checkbox" checked>
+                <span>Period markets too (MLB innings, halves)</span>
+              </label>
+            </div>
+
+            <div class="ramp-field">
               <span class="ramp-label">Share of Pinnacle</span>
               <label class="ramp-scale">
                 <input id="rampScale" type="number" min="1" max="200" step="5" value="50">
@@ -529,7 +537,7 @@
     </div>
   </dialog>
 
-  <script src="/script.js?v=20260822-tracker-basis" defer></script>
+  <script src="/script.js?v=20260822-periods" defer></script>
 </body>
 
 </html>
