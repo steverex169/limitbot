@@ -1,5 +1,6 @@
 const state = {
   trackers: [],
+  trackerHistory: [],
   trackerSettings: null,
   agents: [],
   selectedAgentId: null,
@@ -174,6 +175,7 @@ const elements = {
   rampSelectAll: document.querySelector("#rampSelectAll"),
   rampSelectNone: document.querySelector("#rampSelectNone"),
   rampTracked: document.querySelector("#rampTracked"),
+  rampHistory: document.querySelector("#rampHistory"),
   rampScale: document.querySelector("#rampScale"),
   rampIncludePeriods: document.querySelector("#rampIncludePeriods"),
   rampAgentName: document.querySelector("#rampAgentName"),
@@ -3343,11 +3345,81 @@ async function loadTrackedLimits() {
       throw new Error(data.error || "Could not load tracked limits");
     }
     state.trackers = Array.isArray(data.trackers) ? data.trackers : [];
+    state.trackerHistory = Array.isArray(data.history) ? data.history : [];
     state.trackerSettings = data;
     renderTrackedLimits();
+    renderTrackerHistory();
   } catch (error) {
     setRampMessage(error.message, "error");
   }
+}
+
+/*
+ * Every write the tracker has made, newest first. Read from the change log
+ * rather than kept alongside it, so this cannot drift from what was actually
+ * written.
+ */
+function renderTrackerHistory() {
+  const host = elements.rampHistory;
+  if (!host) {
+    return;
+  }
+  host.replaceChildren();
+
+  const history = state.trackerHistory || [];
+  if (!history.length) {
+    const empty = document.createElement("p");
+    empty.className = "ramp-count";
+    empty.textContent =
+      "No tracked limit has changed yet. A change is recorded here the moment one is written.";
+    host.append(empty);
+    return;
+  }
+
+  const table = document.createElement("table");
+  table.className = "ramp-tracked-table";
+  const head = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  ["When (EST)", "League", "Period", "Market", "From", "To", "Move"]
+    .forEach((label) => {
+      const th = document.createElement("th");
+      th.textContent = label;
+      headRow.append(th);
+    });
+  head.append(headRow);
+  table.append(head);
+
+  const body = document.createElement("tbody");
+  for (const entry of history) {
+    const row = document.createElement("tr");
+    const from = Number(entry.from);
+    const to = Number(entry.to);
+    /* Direction matters more than the delta: a limit coming down is the one
+     * worth noticing at a glance. */
+    let move = "—";
+    let moveClass = "";
+    if (Number.isFinite(from) && Number.isFinite(to) && from > 0) {
+      const percent = Math.round(((to - from) / from) * 100);
+      move = `${percent > 0 ? "+" : ""}${percent}%`;
+      moveClass = percent < 0 ? "comparison-limit-over" : "";
+    }
+    const moveCell = comparisonCell(move, moveClass);
+
+    row.append(
+      comparisonCell(comparisonText(entry.at)),
+      comparisonCell(comparisonText(entry.leagueName)),
+      comparisonCell(comparisonText(entry.period, "Full Game")),
+      comparisonCell(fieldLabels[entry.field] || entry.field),
+      comparisonCell(
+        Number.isFinite(from) ? from.toLocaleString() : "—"
+      ),
+      comparisonCell(Number.isFinite(to) ? to.toLocaleString() : "—"),
+      moveCell
+    );
+    body.append(row);
+  }
+  table.append(body);
+  host.append(table);
 }
 
 function renderTrackedLimits() {

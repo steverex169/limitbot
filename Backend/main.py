@@ -2959,6 +2959,68 @@ def pinnacle_ramp_value(curve, slug, period, field, window, scale_percent):
     return max(100, int(round(value / 100.0)) * 100)
 
 
+def tracker_history_rows(account_id, limit=60):
+    """What the live tracker has actually written, most recent first.
+
+    Read from the change log rather than kept separately: every write already
+    records its old and new value and what caused it, so a tracker's history is
+    a filter on that, not a second copy that could disagree with it.
+    """
+    auth = auth_context()
+    conditions = [
+        LimitChange.user_id == auth["userId"],
+        LimitChange.source == "tracker",
+    ]
+    if int(account_id) != int(auth["id"]):
+        conditions.append(LimitChange.account_id == int(account_id))
+
+    with database_session() as db:
+        changes = db.execute(
+            select(LimitChange)
+            .where(*conditions)
+            .order_by(LimitChange.changed_at.desc())
+            .limit(max(1, min(int(limit), 200)))
+        ).scalars().all()
+
+        # The tracker rows carry the readable league and period names; the
+        # change log only has ids.
+        trackers = db.execute(
+            select(LimitTracker).where(LimitTracker.user_id == auth["userId"])
+        ).scalars().all()
+
+    named = {
+        (t.organization_id, t.league_id, t.sport_type_id, t.period_number): (
+            t.league_name, t.period_label, t.scale_percent
+        )
+        for t in trackers
+    }
+
+    rows = []
+    for change in changes:
+        key = (
+            change.organization_id,
+            change.league_id,
+            change.sport_type_id,
+            change.period_number,
+        )
+        league_name, period_label, scale = named.get(
+            key, (f"League {change.league_id}", "", None)
+        )
+        rows.append({
+            "at": (
+                eastern_timestamp(change.changed_at.replace(tzinfo=timezone.utc))
+                if change.changed_at else None
+            ),
+            "leagueName": league_name,
+            "period": period_label,
+            "field": change.field,
+            "from": change.old_value,
+            "to": change.new_value,
+            "scalePercent": scale,
+        })
+    return rows
+
+
 def limit_tracker_rows(account_id):
     """Every tracked limit for this account, with what the last cycle saw."""
     auth = auth_context()
@@ -4908,6 +4970,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     200,
                     {
                         "trackers": limit_tracker_rows(account_id),
+                        "history": tracker_history_rows(account_id),
                         "intervalMinutes": tracker_interval_minutes,
                         "windowHours": tracker_window_hours,
                         "minChangePercent": tracker_min_change_percent,

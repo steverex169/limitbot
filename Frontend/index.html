@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Limit Control Bot</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/styles.css?v=20260822-notes">
+  <link rel="stylesheet" href="/styles.css?v=20260822-history">
 </head>
 
 <body class="app-loading">
@@ -381,6 +381,11 @@
               <span class="ramp-label">Currently tracked</span>
               <div id="rampTracked" class="ramp-tracked"></div>
             </div>
+
+            <div class="ramp-field">
+              <span class="ramp-label">What it has changed</span>
+              <div id="rampHistory" class="ramp-tracked"></div>
+            </div>
           </div>
 
           <div id="rampMessage" class="message" role="status" hidden></div>
@@ -537,7 +542,7 @@
     </div>
   </dialog>
 
-  <script src="/script.js?v=20260822-notes" defer></script>
+  <script src="/script.js?v=20260822-history" defer></script>
 </body>
 
 </html>
