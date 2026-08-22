@@ -2551,6 +2551,7 @@ def add_telegram_recipient(request_data):
                 ),
                 {
                     "id": recipient_id,
+                    "user_id": auth["userId"],
                     "name": name,
                     "chat_id": chat_id,
                     "is_aceshigh": is_aceshigh,
