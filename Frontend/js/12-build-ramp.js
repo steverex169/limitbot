@@ -356,7 +356,7 @@ function renderTrackerHistory() {
   }
 
   const table = document.createElement("table");
-  table.className = "ramp-tracked-table";
+  table.className = "ramp-tracked-table ramp-history-table";
   const head = document.createElement("thead");
   const headRow = document.createElement("tr");
   ["When (EST)", "League", "Period", "Market", "From", "To", "Move"]
@@ -432,7 +432,7 @@ function renderTrackedLimits() {
   host.append(note);
 
   const table = document.createElement("table");
-  table.className = "ramp-tracked-table";
+  table.className = "ramp-tracked-table ramp-current-table";
   const head = document.createElement("thead");
   const headRow = document.createElement("tr");
   ["League", "Market", "Pinnacle now", "Your limit", "Last checked", "What happened", ""]
@@ -647,4 +647,3 @@ if (elements.rampCreate) {
   );
   elements.rampLeagueSearch?.addEventListener("input", filterRampLeagues);
 }
-

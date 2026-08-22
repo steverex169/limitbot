@@ -59,7 +59,7 @@
 
 .ramp-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: 18px;
   margin-bottom: 20px;
 }
@@ -212,7 +212,7 @@
   grid-template-columns: minmax(0, 1fr);
   gap: 20px 24px;
   align-items: start;
-  max-width: 1100px;
+  width: 100%;
   margin-bottom: 4px;
 }
 
@@ -352,8 +352,8 @@
    sized around a weekday-chip field that no longer exists, and the grid holds
    four fields, not three. */
 .build-ramp-panel .ramp-grid {
-  max-width: 1100px;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  width: 100%;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
 }
 
 .build-ramp-panel .ramp-builder input[type="text"] {
@@ -361,7 +361,8 @@
 }
 
 .build-ramp-panel .ramp-field {
-  max-width: 1100px;
+  max-width: none;
+  min-width: 0;
 }
 
 /* Four markets as two rows of two. Left to wrap, "Team total" dropped to a
@@ -409,6 +410,11 @@
   font-size: 12px;
 }
 
+.ramp-scale span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .ramp-scale input {
   width: 68px;
   min-height: 30px;
@@ -452,6 +458,7 @@
   width: 100%;
   margin-top: 8px;
   font-size: 12px;
+  table-layout: fixed;
 }
 
 .ramp-tracked-table th {
@@ -466,6 +473,8 @@
 .ramp-tracked-table td {
   padding: 6px 10px 6px 0;
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  vertical-align: top;
 }
 
 /* Left to itself the exposure table spread seven columns across the whole
@@ -506,6 +515,57 @@
 }
 
 .ramp-tracked-table {
-  min-width: 640px;
+  min-width: 0;
 }
 
+/* The two ramp tables contain different data, so they need different column
+   proportions. Keeping them fixed to the available width prevents long league
+   names, timestamps and status messages from silently widening the table past
+   the panel and hiding the final columns. */
+.ramp-current-table th:nth-child(1),
+.ramp-current-table td:nth-child(1) { width: 19%; }
+.ramp-current-table th:nth-child(2),
+.ramp-current-table td:nth-child(2) { width: 23%; }
+.ramp-current-table th:nth-child(3),
+.ramp-current-table td:nth-child(3) { width: 13%; }
+.ramp-current-table th:nth-child(4),
+.ramp-current-table td:nth-child(4) { width: 13%; }
+.ramp-current-table th:nth-child(5),
+.ramp-current-table td:nth-child(5) { width: 14%; }
+.ramp-current-table th:nth-child(6),
+.ramp-current-table td:nth-child(6) { width: 14%; }
+.ramp-current-table th:nth-child(7),
+.ramp-current-table td:nth-child(7) { width: 4%; }
+
+.ramp-history-table th:nth-child(1),
+.ramp-history-table td:nth-child(1) { width: 25%; }
+.ramp-history-table th:nth-child(2),
+.ramp-history-table td:nth-child(2) { width: 25%; }
+.ramp-history-table th:nth-child(3),
+.ramp-history-table td:nth-child(3) { width: 16%; }
+.ramp-history-table th:nth-child(4),
+.ramp-history-table td:nth-child(4) { width: 16%; }
+.ramp-history-table th:nth-child(5),
+.ramp-history-table td:nth-child(5),
+.ramp-history-table th:nth-child(6),
+.ramp-history-table td:nth-child(6) { width: 7%; }
+.ramp-history-table th:nth-child(7),
+.ramp-history-table td:nth-child(7) { width: 4%; }
+
+@media (max-width: 760px) {
+  .ramp-leagues-head {
+    align-items: stretch;
+  }
+
+  .ramp-league-search {
+    width: 100%;
+    flex-basis: 100%;
+  }
+
+  /* At phone widths preserving readable cells is more useful than squeezing
+     seven columns into a few pixels. The overflow remains local to the table
+     card, never to the dashboard page. */
+  .ramp-tracked-table {
+    min-width: 720px;
+  }
+}
