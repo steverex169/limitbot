@@ -88,14 +88,12 @@
   gap: 10px 20px;
 }
 
-/* The league list can run long, so it scrolls instead of pushing the button
-   off the bottom of the page. */
 /* Grouped by the tier AccessHigh files each league under, because in its own
    payload order the first screenful was Politics, Poker and Dog Racing while
    the Big Six sat below the fold. */
 .ramp-leagues {
-  max-height: min(38vh, 360px);
-  overflow-y: auto;
+  max-height: none;
+  overflow: visible;
   padding: 0 16px 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -110,12 +108,8 @@
   margin-top: 14px;
 }
 
-/* Sticky so the tier a league belongs to is still named after scrolling past
-   its heading. Opaque, or the rows behind it show through. */
 .ramp-league-group-head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
+  position: static;
   display: flex;
   align-items: baseline;
   gap: 10px;
@@ -450,8 +444,8 @@
 
 /* The list of limits currently following Pinnacle. */
 .ramp-tracked {
-  max-height: 340px;
-  overflow: auto;
+  max-height: none;
+  overflow: visible;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 12px;
@@ -464,13 +458,10 @@
   table-layout: fixed;
 }
 
-/* Keep the column names visible while this box scrolls. The background must
-   stay opaque or the first data row shows through the sticky header and makes
-   the text look doubled. */
+/* These sections now expand with the page instead of creating a second scroll
+   area, so their headers remain in normal document flow. */
 .ramp-tracked-table thead {
-  position: sticky;
-  top: 0;
-  z-index: 2;
+  position: static;
 }
 
 .ramp-tracked-table th {
@@ -520,9 +511,7 @@
   border-left: 0;
 }
 
-/* The tables scroll inside their own box, never the page. */
 .ramp-tracked {
-  overflow: auto;
   max-width: 100%;
 }
 
@@ -586,6 +575,11 @@
   /* At phone widths preserving readable cells is more useful than squeezing
      seven columns into a few pixels. The overflow remains local to the table
      card, never to the dashboard page. */
+  .ramp-tracked {
+    overflow-x: auto;
+    overflow-y: visible;
+  }
+
   .ramp-tracked-table {
     min-width: 720px;
   }

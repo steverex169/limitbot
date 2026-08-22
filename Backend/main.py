@@ -2988,12 +2988,12 @@ def tracker_history_rows(account_id, limit=60):
     a filter on that, not a second copy that could disagree with it.
     """
     auth = auth_context()
+    selected_account_id = int(account_id)
     conditions = [
         LimitChange.user_id == auth["userId"],
         LimitChange.source == "tracker",
+        LimitChange.account_id == selected_account_id,
     ]
-    if int(account_id) != int(auth["id"]):
-        conditions.append(LimitChange.account_id == int(account_id))
 
     with database_session() as db:
         changes = db.execute(
@@ -3006,7 +3006,10 @@ def tracker_history_rows(account_id, limit=60):
         # The tracker rows carry the readable league and period names; the
         # change log only has ids.
         trackers = db.execute(
-            select(LimitTracker).where(LimitTracker.user_id == auth["userId"])
+            select(LimitTracker).where(
+                LimitTracker.user_id == auth["userId"],
+                LimitTracker.account_id == selected_account_id,
+            )
         ).scalars().all()
 
     named = {
@@ -3045,9 +3048,10 @@ def tracker_history_rows(account_id, limit=60):
 def limit_tracker_rows(account_id):
     """Every tracked limit for this account, with what the last cycle saw."""
     auth = auth_context()
-    conditions = [LimitTracker.user_id == auth["userId"]]
-    if int(account_id) != int(auth["id"]):
-        conditions.append(LimitTracker.account_id == int(account_id))
+    conditions = [
+        LimitTracker.user_id == auth["userId"],
+        LimitTracker.account_id == int(account_id),
+    ]
     with database_session() as db:
         rows = db.execute(
             select(LimitTracker).where(*conditions).order_by(
