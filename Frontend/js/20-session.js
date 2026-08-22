@@ -47,11 +47,16 @@ function applyPartnerName(name) {
 function applyDeploymentFeatures(sessionData) {
   state.pinnacleComparisonEnabled =
     sessionData?.pinnacleComparisonEnabled !== false;
+  state.tradingMonitorEnabled =
+    sessionData?.tradingMonitorEnabled !== false;
   state.telegramSite = sessionData?.telegramSite || "aceshigh";
 
   if (elements.pinnacleComparisonLink) {
     elements.pinnacleComparisonLink.hidden =
       !state.pinnacleComparisonEnabled;
+  }
+  if (elements.tradingMonitorLink) {
+    elements.tradingMonitorLink.hidden = !state.tradingMonitorEnabled;
   }
 
   const betwarTelegram = state.telegramSite === "betwar";
@@ -71,6 +76,9 @@ function applyDeploymentFeatures(sessionData) {
     !state.pinnacleComparisonEnabled &&
     isPinnacleComparisonRoute()
   ) {
+    window.history.replaceState({}, "", "/");
+  }
+  if (!state.tradingMonitorEnabled && isTradingMonitorRoute()) {
     window.history.replaceState({}, "", "/");
   }
 }

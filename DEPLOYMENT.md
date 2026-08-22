@@ -29,9 +29,8 @@ the Aces High credentials used solely to renew expired automation tokens.
 ## Running more than one site
 
 betwar.ag runs the same image. Deployment features follow `PARTNER_HOST`: the
-Pinnacle lines-comparison page is disabled on BetWar, while Trading Monitor
-remains available when a player account is configured. Deploy one container
-per site, each with its own database:
+Pinnacle lines-comparison page and Trading Monitor are disabled on BetWar.
+Deploy one container per site, each with its own database:
 
 ```sh
 docker run -d --name betwar-app --restart unless-stopped -p 8001:8000 \
@@ -69,17 +68,17 @@ site cannot reach the other's schedules or limits.
   Defaults to `aceshigh.ag`.
 - `PARTNER_NAME`: what to call that site in the interface. Defaults to
   "Aces High" for aceshigh.ag, otherwise the host. Both variables also drive
-  Trading Monitor and the Aces High Pinnacle comparison page. The comparison
-  page, navigation entry and API are disabled when `PARTNER_HOST=betwar.ag`.
+  Trading Monitor and the Aces High Pinnacle comparison page. Both pages,
+  their navigation entries and APIs are disabled when
+  `PARTNER_HOST=betwar.ag`.
 - `PLAYER_USERNAME` / `PLAYER_PASSWORD`: a read-only player account on
-  `PARTNER_HOST`, used to read the fixture schedule for Trading Monitor and,
-  on Aces High, the Pinnacle comparison page. Those fixtures come from the
+  `PARTNER_HOST`, used on Aces High to read the fixture schedule for Trading
+  Monitor and the Pinnacle comparison page. Those fixtures come from the
   player site, not the partner site, and a partner token is rejected there.
   Leave both unset for aceshigh.ag, which serves an anonymous token from
-  `identity/GuestToken`. **betwar.ag does not serve that route and has no
-  guest mode, so Trading Monitor stays unavailable until a player account is
-  configured there.** No other page depends on this; limits, schedules and
-  the agent tree all use the partner token and work without it.
+  `identity/GuestToken`. BetWar does not expose either page. No other page
+  depends on this; limits, schedules and the agent tree all use the partner
+  token and work without it.
 - `WRITE_ALLOWED_ACCOUNTS`: a comma-separated list of AccessHigh account ids
   that limits may be written on. Empty means no restriction, which is normal
   operation. A populated list is a hard stop enforced inside

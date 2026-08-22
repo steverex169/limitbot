@@ -223,6 +223,7 @@ partner_name = os.getenv("PARTNER_NAME", "").strip() or (
 # deployment-aware instead of maintaining a second frontend or only hiding a
 # link while leaving the route and APIs active.
 pinnacle_comparison_enabled = partner_host != "betwar.ag"
+trading_monitor_enabled = partner_host != "betwar.ag"
 partner_origin = f"https://{partner_host}"
 partner_api = f"{partner_origin}/partner-api/partner"
 
@@ -4812,6 +4813,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.redirect("/")
             return
 
+        if not trading_monitor_enabled and path in {
+            "/trading_monitor", "/trading_monitor/",
+        }:
+            self.redirect("/")
+            return
+
         asset = self.composed_asset(path)
         if asset is not None:
             self.send_composed(asset)
@@ -4838,6 +4845,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.redirect("/")
             return
 
+        if not trading_monitor_enabled and path in {
+            "/trading_monitor", "/trading_monitor/",
+        }:
+            self.redirect("/")
+            return
+
         if path == "/api/health":
             try:
                 with engine.connect() as connection:
@@ -4857,6 +4870,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     "preferences": user_preferences(auth),
                     "partnerName": partner_name,
                     "pinnacleComparisonEnabled": pinnacle_comparison_enabled,
+                    "tradingMonitorEnabled": trading_monitor_enabled,
                     "telegramSite": "betwar" if partner_host == "betwar.ag" else "aceshigh",
                 })
             return
@@ -4868,6 +4882,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             not pinnacle_comparison_enabled
             and path.startswith("/api/pinnacle-comparison")
         ):
+            self.send_json(404, {"error": "This page is not enabled for BetWar"})
+            return
+
+        if not trading_monitor_enabled and path == "/api/trading-monitor":
             self.send_json(404, {"error": "This page is not enabled for BetWar"})
             return
 
@@ -5173,6 +5191,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     "preferences": preferences,
                     "partnerName": partner_name,
                     "pinnacleComparisonEnabled": pinnacle_comparison_enabled,
+                    "tradingMonitorEnabled": trading_monitor_enabled,
                     "telegramSite": "betwar" if partner_host == "betwar.ag" else "aceshigh",
                 }).encode("utf-8")
                 self.send_response(200)

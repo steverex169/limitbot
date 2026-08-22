@@ -41,7 +41,8 @@ function applyDashboardRoute() {
   const activityLogsActive = isActivityLogsRoute();
   const comparisonActive =
     state.pinnacleComparisonEnabled && isPinnacleComparisonRoute();
-  const tradingActive = isTradingMonitorRoute();
+  const tradingActive =
+    state.tradingMonitorEnabled && isTradingMonitorRoute();
   const telegramAlertsActive = isTelegramAlertsRoute();
   const buildRampActive = isBuildRampRoute();
   const dashboardActive =
@@ -238,4 +239,3 @@ function applyDashboardRoute() {
     });
   }
 }
-
