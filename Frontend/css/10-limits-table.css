@@ -1,0 +1,62 @@
+/* 10-limits-table.css
+   Editable limits table: type badge, limit input, save button, and
+   the empty state. */
+
+.type-badge {
+  display: inline-block;
+  margin-top: 5px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #f2f4f7;
+  color: #475467;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.limit-input {
+  width: 112px;
+  padding: 0 10px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.limit-input:disabled {
+  border-color: #eaecf0;
+  background: #f2f4f7;
+  color: #98a2b3;
+  cursor: not-allowed;
+}
+
+.save-button,
+.button {
+  border: 0;
+  border-radius: 9px;
+  cursor: pointer;
+  font-weight: 750;
+}
+
+.save-button {
+  min-width: 72px;
+  height: 38px;
+  padding: 0 14px;
+  background: var(--blue);
+  color: #fff;
+}
+
+.save-button:disabled {
+  cursor: not-allowed;
+  background: #d0d5dd;
+}
+
+.save-button:disabled[title] {
+  min-width: 105px;
+  font-size: 11px;
+}
+
+.empty-state {
+  padding: 52px;
+  color: var(--muted);
+  text-align: center;
+}
+

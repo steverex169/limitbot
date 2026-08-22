@@ -1,0 +1,46 @@
+    <section id="telegramAlertsView" class="panel telegram-alerts-panel" hidden aria-hidden="true">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">NOTIFICATIONS</p>
+          <h2>Telegram Alerts</h2>
+          <p>Add people who can receive scheduled limit alerts from <span class="partner-name">Aces High</span>. Each site sends through its own bot, so a recipient must be listed here to receive <span class="partner-name">Aces High</span> alerts. The bot token stays on the server.</p>
+        </div>
+      </div>
+
+      <div id="telegramAlertsMessage" class="message" role="status" hidden></div>
+
+      <form id="telegramAlertsForm" class="telegram-alert-form">
+        <label>
+          <span>Name</span>
+          <input id="telegramAlertName" type="text" maxlength="100" autocomplete="off" placeholder="e.g. Swam" required>
+        </label>
+        <label>
+          <span>Telegram Chat ID</span>
+          <div class="telegram-inline-field">
+            <input id="telegramAlertChatId" type="text" maxlength="64" inputmode="numeric" autocomplete="off" placeholder="e.g. 12312312" required>
+            <select id="telegramAlertAudience" aria-label="Membership">
+              <option value="all">All</option>
+              <option value="aceshigh">AcesHigh only</option>
+              <option value="betwar">BetWar only</option>
+            </select>
+          </div>
+        </label>
+        <button id="telegramAlertAdd" class="button primary" type="submit">Add Telegram recipient</button>
+      </form>
+
+      <div class="table-wrap telegram-alerts-table-wrap">
+        <table class="telegram-alerts-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Telegram Chat ID</th>
+              <th>Membership</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="telegramAlertRows">
+            <tr><td colspan="4" class="empty-state">No Telegram recipients added yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>

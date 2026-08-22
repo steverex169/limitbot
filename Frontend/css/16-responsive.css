@@ -1,0 +1,200 @@
+/* 16-responsive.css
+   Breakpoints for the pre-shell layout: 1180px, 920px, 560px. */
+
+@media (max-width: 1180px) {
+
+  .topbar,
+  main {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+
+  .topbar {
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .topbar-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .agent-search input {
+    width: 160px;
+  }
+
+  .agent-select-button {
+    min-width: 180px;
+  }
+
+  .filters {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .search-field input {
+    width: 220px;
+  }
+}
+
+@media (max-width: 920px) {
+  body {
+    min-width: 0;
+  }
+
+  .topbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .topbar-title {
+    gap: 8px;
+  }
+
+  .title-row {
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .topbar-actions {
+    justify-content: stretch;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .topbar-actions>* {
+    width: 100%;
+  }
+
+  .limit-selector span {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--topbar-muted);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  
+  .limit-selector select {
+    height: 42px;
+    padding: 0 12px;
+    border: 1px solid var(--topbar-border);
+    border-radius: 10px;
+    background: var(--topbar-soft);
+    color: #fff;
+    font-weight: 700;
+  }
+
+  .agent-search input,
+  .search-field input,
+  .select-field select,
+  .limit-selector select,
+  .agent-select-button {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .account-chip {
+    justify-content: space-between;
+  }
+
+  main {
+    padding-left: 12px;
+    padding-right: 12px;
+    padding-bottom: 24px;
+  }
+
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .panel-head,
+  .filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  table {
+    min-width: 860px;
+  }
+
+  .dialog-actions {
+    flex-direction: column;
+  }
+
+  .dialog-actions .button {
+    width: 100%;
+  }
+
+  .schedule-days {
+    gap: 6px;
+  }
+
+  .schedule-days label {
+    flex: 1 1 calc(33.333% - 6px);
+    justify-content: center;
+  }
+}
+
+@media (max-width: 560px) {
+  .topbar {
+    padding: 16px 14px;
+  }
+
+  .topbar-title h1 {
+    font-size: 22px;
+  }
+
+  .theme-toggle {
+    flex-shrink: 0;
+  }
+
+  .panel {
+    border-radius: 12px;
+  }
+
+  .summary-card,
+  .panel-head,
+  .message,
+  dialog form,
+  .schedule-status-content,
+  .login-card {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .summary-card {
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+
+  .search-field input,
+  .select-field select,
+  .schedule-time-picker select,
+  .login-card input,
+  .schedule-field input,
+  .auth-form input {
+    min-width: 0;
+  }
+
+  .schedule-days label {
+    flex-basis: calc(50% - 6px);
+  }
+
+  .change-preview {
+    gap: 10px;
+    padding: 14px;
+    font-size: 18px;
+  }
+}
+
+/* =========================================================
+   Dashboard shell: normal-flow topbar + permanent sidebar
+   ========================================================= */

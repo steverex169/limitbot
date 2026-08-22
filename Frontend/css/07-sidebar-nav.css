@@ -1,0 +1,49 @@
+/* 07-sidebar-nav.css
+   Sidebar footer navigation links and their active state. */
+
+.dashboard-sidebar > .sidebar-footer {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  margin-top: 24px;
+  padding: 18px 0 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+}
+
+.sidebar-footer a {
+  display: flex;
+  /* The site name is its own element so it can follow the deployment, and a
+     flex container drops the whitespace around it - which is what turned
+     "Pinnacle vs Aces High" into "Pinnacle vsAces High". */
+  gap: 0.3em;
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+  text-decoration: none;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.sidebar-footer a:hover,
+.sidebar-footer a:focus-visible {
+  background: var(--blue-soft);
+  color: var(--blue);
+  outline: none;
+}
+
+.sidebar-footer a.active,
+.sidebar-footer a[aria-current="page"] {
+  border-color: var(--line);
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+

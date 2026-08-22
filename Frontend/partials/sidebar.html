@@ -1,0 +1,39 @@
+  <aside id="dashboardSidebar" class="dashboard-sidebar" aria-label="Dashboard filters" hidden>
+    <div class="sidebar-heading">
+      <div>
+        <p class="eyebrow">FILTERS</p>
+        <strong>League &amp; agent</strong>
+      </div>
+    </div>
+
+    <div class="sidebar-controls">
+      <label class="select-field limit-selector sidebar-control">
+        <span>Select League</span>
+        <select id="limitFilter">
+          <option value="">Select League</option>
+        </select>
+      </label>
+
+      <label class="agent-search sidebar-control">
+        <span>Find agent</span>
+        <input id="agentSearch" type="search" placeholder="Search agents...." autocomplete="off">
+        <div id="agentSearchResults" class="agent-search-results" role="listbox" hidden></div>
+      </label>
+
+      <label class="agent-selector sidebar-control">
+        <span>Select agent</span>
+        <button id="agentSelectButton" class="agent-select-button" type="button" disabled>
+          Loading agents...
+        </button>
+        <div id="agentTree" class="agent-tree" role="tree" hidden></div>
+      </label>
+    </div>
+    <div class="sidebar-footer">
+      <a id="dashboardHomeLink" class="sidebar-nav-link" href="/">Dashboard</a>
+      <a id="activityLogsLink" class="sidebar-nav-link" href="/activity_logs">Activity Logs</a>
+      <a id="pinnacleComparisonLink" class="sidebar-nav-link" href="/pinnacle_aceshigh">Pinnacle vs <span class="partner-name">Aces High</span> Lines</a>
+      <a id="tradingMonitorLink" class="sidebar-nav-link" href="/trading_monitor">Trading Monitor</a>
+      <a id="buildRampLink" class="sidebar-nav-link" href="/build_ramp">Build a Ramp</a>
+      <a id="telegramAlertsLink" class="sidebar-nav-link" href="/telegram_alerts">Telegram Alerts</a>
+    </div>
+  </aside>

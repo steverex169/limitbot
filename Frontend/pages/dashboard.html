@@ -1,0 +1,69 @@
+    <section id="dashboardSummary" class="summary-grid" aria-label="Dashboard summary">
+      <article class="summary-card">
+        <span>Editable rows</span>
+        <strong id="rowCount">—</strong>
+      </article>
+      <article class="summary-card">
+        <span>Visible rows</span>
+        <strong id="visibleCount">—</strong>
+      </article>
+      <article class="summary-card">
+        <span>Pending edits</span>
+        <strong id="pendingCount">0</strong>
+      </article>
+    </section>
+
+    <section id="limitsPanel" class="panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">STRAIGHT WAGER LIMITS</p>
+          <h2>Editable leagues</h2>
+          <p>Change one value, review it, then save it directly to <span class="partner-name">Aces High</span>.</p>
+        </div>
+
+        <div class="filters">
+          <label class="select-field">
+            <span>Options</span>
+            <select id="limitModeFilter">
+              <option value="normal">Normal limits</option>
+              <option value="early">Early limits only</option>
+            </select>
+          </label>
+          <label class="search-field">
+            <span>Search</span>
+            <input id="searchInput" type="search" placeholder="League or organization">
+          </label>
+          <label class="select-field">
+            <span>Rows</span>
+            <select id="rowTypeFilter">
+              <option value="all">All editable rows</option>
+              <option value="League">Leagues only</option>
+              <option value="Summary">Summaries only</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div id="message" class="message" role="status" hidden></div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>League</th>
+              <th>Period</th>
+              <th>Spread</th>
+              <th>Money line</th>
+              <th>Total</th>
+              <th>Team total</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="leagueRows">
+            <tr>
+              <td colspan="7" class="empty-state">No league is selected.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>

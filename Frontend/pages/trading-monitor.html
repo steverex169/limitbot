@@ -1,0 +1,56 @@
+    <section id="tradingMonitorView" class="panel trading-monitor-panel" hidden aria-hidden="true">
+      <div class="panel-head trading-monitor-head">
+        <div>
+          <div class="trading-title-row">
+            <p class="eyebrow">LIVE TRADING</p>
+            <span class="dry-run-badge">Dry run — no writes</span>
+          </div>
+          <h2>Trading Monitor</h2>
+          <p>Mapped scores, availability, and Pinnacle suspension signals for <span class="partner-name">Aces High</span>.</p>
+        </div>
+        <div class="comparison-actions">
+          <label for="tradingLeague">League</label>
+          <select id="tradingLeague" aria-label="Trading monitor league" disabled>
+            <option value="">Loading leagues...</option>
+          </select>
+          <button id="tradingRefresh" class="button secondary" type="button">Refresh</button>
+        </div>
+      </div>
+
+      <div id="tradingMessage" class="message comparison-message" role="status" hidden></div>
+
+      <div class="comparison-summary" aria-label="Trading monitor summary">
+        <article class="comparison-summary-card">
+          <span>Mapped events</span>
+          <strong id="tradingEventCount">—</strong>
+        </article>
+        <article class="comparison-summary-card">
+          <span>Pinnacle suspended</span>
+          <strong id="tradingSuspendedCount">—</strong>
+        </article>
+        <article class="comparison-summary-card">
+          <span>Dry-run actions</span>
+          <strong id="tradingActionCount">—</strong>
+        </article>
+      </div>
+
+      <div class="table-wrap trading-table-wrap">
+        <table class="trading-table">
+          <thead>
+            <tr>
+              <th>Fixture</th>
+              <th>Score / clock</th>
+              <th>Game status</th>
+              <th class="partner-name">Aces High</th>
+              <th>Pinnacle</th>
+              <th>Dry-run signal</th>
+              <th>Updated</th>
+            </tr>
+          </thead>
+          <tbody id="tradingRows">
+            <tr><td colspan="7" class="empty-state">Select an agent and league to load the trading monitor.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="comparison-source-note">Auto-refreshes every 30 seconds. Stale or missing Pinnacle data never triggers a takedown recommendation.</p>
+    </section>

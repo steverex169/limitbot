@@ -1,0 +1,173 @@
+/* 19-telegram-alerts.css
+   Telegram Alerts: panel, add-recipient form, recipients table, and
+   the edit dialog. */
+
+.telegram-alerts-panel {
+  display: block;
+}
+
+.telegram-alert-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  padding: 18px 20px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.telegram-alert-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.telegram-alert-form label > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.telegram-alert-form input {
+  width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.telegram-inline-field {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.telegram-inline-field input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.telegram-inline-field select {
+  flex: 0 0 180px;
+  height: 42px;
+  padding: 0 14px;
+  text-align: left;
+  text-align-last: left;
+}
+
+.telegram-alerts-table th:last-child,
+.telegram-alerts-table td:last-child {
+  width: 190px;
+  text-align: right;
+}
+
+.telegram-alerts-table .empty-state {
+  text-align: center;
+}
+
+.telegram-action-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.telegram-edit-button,
+.telegram-delete-button {
+  min-width: 78px;
+  height: 36px;
+}
+
+.telegram-edit-button {
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.telegram-edit-button:hover {
+  background: var(--blue-soft);
+}
+
+.telegram-edit-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+@media (max-width: 800px) {
+  .telegram-alert-form {
+    grid-template-columns: 1fr;
+  }
+
+  .telegram-inline-field {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .telegram-inline-field select {
+    flex-basis: auto;
+    width: 100%;
+  }
+}
+
+/* Telegram recipient edit popup */
+.telegram-edit-dialog {
+  width: min(460px, calc(100vw - 32px));
+  padding: 0;
+  border: 0;
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.telegram-edit-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.58);
+}
+
+.telegram-edit-dialog form {
+  display: grid;
+  gap: 16px;
+  padding: 24px;
+}
+
+.telegram-edit-dialog h2 {
+  margin: 0;
+}
+
+.telegram-edit-field {
+  display: grid;
+  gap: 7px;
+}
+
+.telegram-edit-field > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.telegram-edit-field input {
+  width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.telegram-edit-dialog .dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+/* --- Limit ramp builder ------------------------------------------------- */
+

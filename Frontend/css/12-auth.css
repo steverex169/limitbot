@@ -1,0 +1,82 @@
+/* 12-auth.css
+   Standalone auth page shell, card, form, and password field. */
+
+.auth-page {
+  min-width: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 15% 10%, rgba(21, 94, 239, 0.18), transparent 30%),
+    var(--navy);
+}
+
+.auth-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 28px;
+}
+
+.auth-card {
+  width: min(440px, 100%);
+  padding: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 30px 100px rgba(0, 0, 0, 0.35);
+}
+
+.auth-card h1 {
+  margin-top: 7px;
+  color: var(--ink);
+  font-size: 28px;
+}
+
+.auth-copy {
+  margin-top: 10px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.auth-form {
+  display: grid;
+  gap: 17px;
+  margin-top: 26px;
+}
+
+.auth-form label {
+  display: grid;
+  gap: 6px;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.auth-form input {
+  width: 100%;
+  padding: 0 12px;
+}
+
+.password-field {
+  position: relative;
+}
+
+.password-field input {
+  padding-right: 66px;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  height: 30px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px;
+  background: #f2f4f7;
+  color: #344054;
+  cursor: pointer;
+  transform: translateY(-50%);
+  font-size: 12px;
+  font-weight: 700;
+}
+

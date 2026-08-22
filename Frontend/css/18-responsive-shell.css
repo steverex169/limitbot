@@ -1,0 +1,158 @@
+/* 18-responsive-shell.css
+   Shell breakpoints: 1180px, 1024px, 760px, 520px. */
+
+@media (max-width: 1180px) {
+  #dashboardHeader.topbar {
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+
+  #dashboardView {
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+}
+
+@media (max-width: 1024px) {
+  :root {
+    --dashboard-topbar-height: 74px;
+    --dashboard-sidebar-width: 260px;
+  }
+
+  #dashboardHeader.topbar {
+    padding: 10px 16px;
+  }
+
+  #dashboardHeader .topbar-actions {
+    width: 100%;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+  }
+
+  #dashboardHeader .topbar-title {
+    flex: 0 1 auto;
+  }
+
+  #dashboardHeader .account-chip {
+    min-width: 0;
+    padding: 9px 11px;
+  }
+
+  #dashboardHeader .account-chip small {
+    display: none;
+  }
+
+  #dashboardView {
+    padding-right: 14px;
+    padding-left: 14px;
+    padding-bottom: 24px;
+  }
+}
+
+@media (max-width: 760px) {
+  /* No collapse button: sidebar stacks normally on small screens. */
+  .dashboard-sidebar {
+    position: static;
+    width: 100%;
+    height: auto;
+    margin-top: var(--dashboard-topbar-height);
+    max-height: none;
+    padding: 16px 14px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    overflow: visible;
+    box-shadow: none;
+  }
+
+  #dashboardView {
+    height: auto;
+    margin-top: 0;
+    margin-left: 0;
+    padding: 14px 10px 24px;
+    overflow-y: visible;
+  }
+
+  #dashboardHeader .topbar-title h1 {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 18px;
+  }
+
+  #dashboardHeader .account-chip {
+    display: none;
+  }
+
+  #dashboardHeader .logout-button {
+    height: 38px;
+    padding: 0 11px;
+    font-size: 12px;
+  }
+
+  #dashboardHeader .theme-toggle {
+    height: 30px;
+    padding: 0 5px;
+  }
+
+  #dashboardHeader .theme-toggle-icon {
+    width: 20px;
+    height: 20px;
+  }
+
+  .comparison-head,
+  .trading-monitor-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .comparison-actions {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .comparison-actions label {
+    align-self: center;
+  }
+
+  .comparison-actions select {
+    flex: 1 1 180px;
+  }
+
+  .comparison-summary,
+  .comparison-profiles {
+    grid-template-columns: 1fr;
+  }
+
+  .comparison-profile-card dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  #dashboardHeader.topbar {
+    padding-right: 10px;
+    padding-left: 10px;
+    gap: 8px;
+  }
+
+  #dashboardHeader .topbar-actions {
+    gap: 7px;
+  }
+
+  #dashboardHeader .topbar-title .eyebrow {
+    font-size: 9px;
+    letter-spacing: 0.08em;
+  }
+
+  #dashboardHeader .topbar-title h1 {
+    max-width: 145px;
+    font-size: 16px;
+  }
+
+  #dashboardHeader .logout-button {
+    padding: 0 9px;
+  }
+}
+
+/* Telegram alert recipient management */

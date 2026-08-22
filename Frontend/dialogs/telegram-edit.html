@@ -1,0 +1,30 @@
+  <dialog id="telegramEditDialog" class="telegram-edit-dialog">
+    <form id="telegramEditForm">
+      <p class="eyebrow">TELEGRAM ALERT</p>
+      <h2>Edit Telegram recipient</h2>
+
+      <label class="telegram-edit-field">
+        <span>Name</span>
+        <input id="telegramEditName" type="text" maxlength="100" autocomplete="off" required>
+      </label>
+
+      <label class="telegram-edit-field">
+        <span>Telegram Chat ID</span>
+        <div class="telegram-inline-field">
+          <input id="telegramEditChatId" type="text" maxlength="64" inputmode="numeric" autocomplete="off" required>
+          <select id="telegramEditAudience" aria-label="Membership">
+            <option value="all">All</option>
+            <option value="aceshigh">AcesHigh only</option>
+            <option value="betwar">BetWar only</option>
+          </select>
+        </div>
+      </label>
+
+      <div id="telegramEditMessage" class="message error" role="alert" hidden></div>
+
+      <div class="dialog-actions">
+        <button id="telegramEditCancel" class="button secondary" type="button">Cancel</button>
+        <button id="telegramEditSave" class="button primary" type="submit">Save changes</button>
+      </div>
+    </form>
+  </dialog>

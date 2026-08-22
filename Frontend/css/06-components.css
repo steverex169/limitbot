@@ -1,0 +1,170 @@
+/* 06-components.css
+   Shared building blocks: panel head, filter fields, inputs, message
+   banners, base table styling, league rows, and the expand button. */
+
+.panel-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.panel-head h2 {
+  margin-top: 5px;
+}
+
+.panel-head p:not(.eyebrow) {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.filters {
+  display: flex;
+  gap: 12px;
+}
+
+.search-field,
+.select-field {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+input,
+select {
+  height: 40px;
+  border: 1px solid #d0d5dd;
+  border-radius: 9px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  outline: none;
+}
+
+.search-field input {
+  width: 260px;
+  padding: 0 12px;
+}
+
+.select-field select {
+  width: 170px;
+  padding: 0 10px;
+}
+
+input:focus,
+select:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(21, 94, 239, 0.12);
+}
+
+.message {
+  margin: 16px 24px 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--blue-soft);
+  color: #1849a9;
+  font-size: 14px;
+}
+
+.message.error {
+  background: #fef3f2;
+  color: var(--red);
+}
+
+.message.success {
+  background: #ecfdf3;
+  color: #067647;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+
+thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+th {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  background: #f9fafb;
+  color: #475467;
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+td {
+  padding: 11px 14px;
+  border-bottom: 1px solid #eef0f3;
+  vertical-align: middle;
+}
+
+tbody tr:hover {
+  background: #fafcff;
+}
+
+.league-name {
+  max-width: 290px;
+}
+
+.row-level-0 {
+  background: #f8fafc;
+}
+
+.row-level-0 .league-name strong {
+  text-transform: uppercase;
+}
+
+.row-level-1 .league-name {
+  padding-left: 28px;
+}
+
+.row-level-2 {
+  background: #fcfcfd;
+}
+
+.row-level-2 .league-name {
+  padding-left: 58px;
+}
+
+.expand-button {
+  width: 25px;
+  height: 25px;
+  margin-right: 8px;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  background: #fff;
+  color: #344054;
+  cursor: pointer;
+  font-weight: 800;
+  vertical-align: middle;
+}
+
+.league-name strong,
+.league-name small {
+  display: block;
+}
+
+.league-name small {
+  margin-top: 3px;
+  color: var(--muted);
+}
+

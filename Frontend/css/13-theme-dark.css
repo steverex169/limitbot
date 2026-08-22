@@ -1,0 +1,236 @@
+/* 13-theme-dark.css
+   Dark-theme overrides for every feature above.
+   Deliberately one file: these rules must stay after all the light
+   definitions they override, and many share their specificity. */
+
+:root[data-theme="dark"] .summary-card,
+:root[data-theme="dark"] .panel,
+:root[data-theme="dark"] .comparison-summary-card,
+:root[data-theme="dark"] .comparison-profile-card,
+:root[data-theme="dark"] .comparison-card,
+:root[data-theme="dark"] .agent-tree,
+:root[data-theme="dark"] .agent-search-results,
+:root[data-theme="dark"] .dialog form,
+:root[data-theme="dark"] dialog,
+:root[data-theme="dark"] .login-card,
+:root[data-theme="dark"] .auth-card,
+:root[data-theme="dark"] .auth-form,
+:root[data-theme="dark"] .table-wrap,
+:root[data-theme="dark"] .schedule-status-content {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .panel-head,
+:root[data-theme="dark"] th,
+:root[data-theme="dark"] .row-level-0,
+:root[data-theme="dark"] .row-level-2,
+:root[data-theme="dark"] tbody tr:hover,
+:root[data-theme="dark"] .type-badge,
+:root[data-theme="dark"] .expand-button,
+:root[data-theme="dark"] .limit-input,
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] input,
+:root[data-theme="dark"] .schedule-cancel,
+:root[data-theme="dark"] .password-toggle,
+:root[data-theme="dark"] .change-preview {
+  background-color: rgba(15, 23, 42, 0.9);
+}
+
+:root[data-theme="dark"] .summary-card,
+:root[data-theme="dark"] .panel,
+:root[data-theme="dark"] .comparison-summary-card,
+:root[data-theme="dark"] .comparison-profile-card,
+:root[data-theme="dark"] .comparison-card,
+:root[data-theme="dark"] dialog,
+:root[data-theme="dark"] .login-card,
+:root[data-theme="dark"] .agent-tree,
+:root[data-theme="dark"] .agent-search-results {
+  border-color: var(--line);
+}
+
+:root[data-theme="dark"] .agent-tree-row {
+  background: rgba(15, 23, 42, 0.96);
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .agent-tree-row:hover,
+:root[data-theme="dark"] .agent-tree-row:focus {
+  background: rgba(30, 41, 59, 0.98);
+}
+
+:root[data-theme="dark"] .agent-tree-row[aria-selected="true"] {
+  background: rgba(37, 99, 235, 0.18);
+  color: #dbeafe;
+  box-shadow: inset 3px 0 0 var(--blue);
+}
+
+:root[data-theme="dark"] .agent-tree-toggle {
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .agent-tree-toggle:not(:disabled):hover,
+:root[data-theme="dark"] .agent-tree-row[aria-selected="true"] .agent-tree-toggle:not(:disabled):hover {
+  background: rgba(37, 99, 235, 0.18);
+}
+
+:root[data-theme="dark"] th,
+:root[data-theme="dark"] td,
+:root[data-theme="dark"] .panel-head,
+:root[data-theme="dark"] .schedule-status-content,
+:root[data-theme="dark"] .login-card,
+:root[data-theme="dark"] dialog form {
+  border-color: var(--line);
+}
+
+:root[data-theme="dark"] th {
+  background: rgba(15, 23, 42, 0.98);
+  color: var(--muted);
+}
+
+:root[data-theme="dark"] td {
+  border-bottom: 1px solid rgba(51, 65, 85, 0.95);
+}
+
+:root[data-theme="dark"] tbody tr:hover {
+  background: rgba(30, 41, 59, 0.9);
+}
+
+:root[data-theme="dark"] .row-level-0,
+:root[data-theme="dark"] .row-level-2 {
+  background: rgba(15, 23, 42, 0.92);
+}
+
+:root[data-theme="dark"] .agent-search-results {
+  background: rgba(15, 23, 42, 0.98);
+}
+
+:root[data-theme="dark"] .agent-search-result,
+:root[data-theme="dark"] .agent-search-empty {
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .agent-search-result:hover,
+:root[data-theme="dark"] .agent-search-result:focus {
+  background: rgba(37, 99, 235, 0.14);
+}
+
+:root[data-theme="dark"] .account-chip {
+  border-color: rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.96);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+}
+
+:root[data-theme="dark"] .account-chip strong {
+  color: #f8fafc;
+}
+
+:root[data-theme="dark"] .button.secondary,
+:root[data-theme="dark"] .schedule-days label,
+:root[data-theme="dark"] .schedule-progress,
+:root[data-theme="dark"] .schedule-time-picker select,
+:root[data-theme="dark"] .type-badge,
+:root[data-theme="dark"] .expand-button,
+:root[data-theme="dark"] .password-toggle,
+:root[data-theme="dark"] .login-card input,
+:root[data-theme="dark"] .auth-form input,
+:root[data-theme="dark"] .schedule-field input,
+:root[data-theme="dark"] .search-field input,
+:root[data-theme="dark"] .select-field select,
+:root[data-theme="dark"] .limit-selector select,
+:root[data-theme="dark"] .agent-search input,
+:root[data-theme="dark"] .agent-select-button,
+:root[data-theme="dark"] .theme-toggle {
+  border-color: var(--line);
+}
+
+:root[data-theme="dark"] .button.secondary,
+:root[data-theme="dark"] .schedule-days label,
+:root[data-theme="dark"] .schedule-time-picker select,
+:root[data-theme="dark"] .type-badge,
+:root[data-theme="dark"] .expand-button,
+:root[data-theme="dark"] .password-toggle,
+:root[data-theme="dark"] .login-card input,
+:root[data-theme="dark"] .auth-form input,
+:root[data-theme="dark"] .schedule-field input,
+:root[data-theme="dark"] .search-field input,
+:root[data-theme="dark"] .select-field select,
+:root[data-theme="dark"] .limit-selector select,
+:root[data-theme="dark"] .agent-search input,
+:root[data-theme="dark"] .agent-select-button {
+  background: rgba(15, 23, 42, 0.94);
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .button.secondary:hover,
+:root[data-theme="dark"] .schedule-days label:hover,
+:root[data-theme="dark"] .expand-button:hover,
+:root[data-theme="dark"] .password-toggle:hover {
+  background: rgba(30, 41, 59, 0.98);
+}
+
+:root[data-theme="dark"] .button.secondary,
+:root[data-theme="dark"] .schedule-days label,
+:root[data-theme="dark"] .type-badge {
+  border-color: rgba(148, 163, 184, 0.24);
+}
+
+:root[data-theme="dark"] .agent-select-button {
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.96));
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .logout-button {
+  border-color: var(--topbar-border);
+  background: transparent;
+  color: #f8fafc;
+}
+
+:root[data-theme="dark"] .logout-button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+:root[data-theme="dark"] .account-chip small {
+  color: var(--topbar-muted);
+}
+
+:root[data-theme="dark"] .summary-card span,
+:root[data-theme="dark"] .panel-head p:not(.eyebrow),
+:root[data-theme="dark"] .league-name small,
+:root[data-theme="dark"] .account-chip small,
+:root[data-theme="dark"] .empty-state,
+:root[data-theme="dark"] .schedule-field,
+:root[data-theme="dark"] .schedule-option,
+:root[data-theme="dark"] .schedule-days legend,
+:root[data-theme="dark"] .login-card>p:not(.eyebrow),
+:root[data-theme="dark"] .auth-copy,
+:root[data-theme="dark"] #confirmText,
+:root[data-theme="dark"] #scheduleStatusText {
+  color: var(--muted);
+}
+
+:root[data-theme="dark"] .message,
+:root[data-theme="dark"] .message.error,
+:root[data-theme="dark"] .message.success {
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .message {
+  background: rgba(37, 99, 235, 0.18);
+}
+
+:root[data-theme="dark"] .message.error {
+  background: rgba(185, 28, 28, 0.18);
+}
+
+:root[data-theme="dark"] .message.success {
+  background: rgba(22, 163, 74, 0.18);
+}
+
+:root[data-theme="dark"] .limit-input:disabled,
+:root[data-theme="dark"] .expand-button:disabled,
+:root[data-theme="dark"] .save-button:disabled {
+  background: rgba(51, 65, 85, 0.9);
+  color: var(--muted);
+}
+

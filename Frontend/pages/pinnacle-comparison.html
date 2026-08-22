@@ -1,0 +1,46 @@
+    <section id="pinnacleComparisonView" class="panel comparison-panel" hidden aria-hidden="true">
+      <div class="panel-head comparison-head">
+        <div>
+          <p class="eyebrow">MARKET COMPARISON</p>
+          <h2>Pinnacle vs <span class="partner-name">Aces High</span> Lines</h2>
+          <p>Current full-game and period lines side by side, in American odds. Limits are handled by the live tracker on Build a Ramp.</p>
+        </div>
+        <div class="comparison-actions">
+          <label for="comparisonLeague">League</label>
+          <select id="comparisonLeague" aria-label="Comparison league" disabled>
+            <option value="">Loading leagues...</option>
+          </select>
+          <label for="comparisonWindow">Starting within</label>
+          <select id="comparisonWindow" aria-label="Only compare fixtures starting within">
+            <option value="24">24 hours</option>
+            <option value="48">48 hours</option>
+            <option value="72">3 days</option>
+            <option value="168">7 days</option>
+            <option value="all">Any time</option>
+          </select>
+          <button id="comparisonRefresh" class="button secondary" type="button">Refresh data</button>
+        </div>
+      </div>
+
+      <div id="comparisonMessage" class="message comparison-message" role="status" hidden></div>
+
+      <div class="comparison-summary" aria-label="Comparison summary">
+        <article class="comparison-summary-card">
+          <span>Matched fixtures</span>
+          <strong id="comparisonFixtureCount">—</strong>
+        </article>
+        <article class="comparison-summary-card">
+          <span>Periods compared</span>
+          <strong id="comparisonSectionCount">—</strong>
+        </article>
+        <article class="comparison-summary-card">
+          <span>Last refreshed</span>
+          <strong id="comparisonGeneratedAt">—</strong>
+        </article>
+      </div>
+
+      <div id="comparisonContent" class="comparison-content">
+        <p class="comparison-empty">Select an agent and league to load the comparison.</p>
+      </div>
+      <p class="comparison-source-note">Pinnacle lines are supplied by OddsPapi and matched to <span class="partner-name">Aces High</span> fixtures by team and start time. Fixtures far from kick-off are excluded by the window above.</p>
+    </section>

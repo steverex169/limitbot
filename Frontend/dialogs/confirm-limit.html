@@ -1,0 +1,51 @@
+  <dialog id="confirmDialog">
+    <form method="dialog">
+      <p class="eyebrow">CONFIRM LIMIT CHANGE</p>
+      <h2 id="confirmTitle">Save this value?</h2>
+      <p id="confirmText"></p>
+      <div class="change-preview">
+        <span id="oldValue">—</span>
+        <span aria-hidden="true">→</span>
+        <strong id="newValue">—</strong>
+      </div>
+      <fieldset class="schedule-days">
+        <legend>Repeat every week on</legend>
+        <label><input type="checkbox" name="scheduleDay" value="0"> Mon</label>
+        <label><input type="checkbox" name="scheduleDay" value="1"> Tue</label>
+        <label><input type="checkbox" name="scheduleDay" value="2"> Wed</label>
+        <label><input type="checkbox" name="scheduleDay" value="3"> Thu</label>
+        <label><input type="checkbox" name="scheduleDay" value="4"> Fri</label>
+        <label><input type="checkbox" name="scheduleDay" value="5"> Sat</label>
+        <label><input type="checkbox" name="scheduleDay" value="6"> Sun</label>
+      </fieldset>
+      <label class="schedule-field">
+        <span>Time (U.S. Eastern / ET)</span>
+        <div class="schedule-time-picker" aria-label="Schedule time in Eastern time">
+          <select id="scheduleHour" aria-label="Hour">
+            <option value="">HH</option>
+          </select>
+          <select id="scheduleMinute" aria-label="Minute">
+            <option value="">MM</option>
+          </select>
+          <select id="schedulePeriod" aria-label="AM or PM">
+            <option value="">AM/PM</option>
+            <option value="AM">AM</option>
+            <option value="PM">PM</option>
+          </select>
+        </div>
+      </label>
+      <label class="schedule-field">
+        <span>Customer Support Agent</span>
+        <input id="customerSupportAgent" type="text" maxlength="100" autocomplete="off" placeholder="Enter your name">
+      </label>
+      <button id="clearScheduleOptions" type="button" class="button secondary">
+        Clear schedule
+      </button>
+      <div id="dialogMessage" class="message error" role="alert" hidden></div>
+      <div class="dialog-actions">
+        <button id="cancelDialogButton" type="button" value="cancel" class="button secondary">Cancel</button>
+        <button id="confirmSchedule" value="default" class="button secondary">Schedule</button>
+        <button id="confirmSave" value="default" class="button primary">Save to <span class="partner-name">Aces High</span></button>
+      </div>
+    </form>
+  </dialog>

@@ -27,6 +27,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import bindparam, case, delete, func, inspect, select, text, update
 from urllib.parse import urlparse, parse_qs
 from database import Base, database_session, engine
+import frontend_assets
 from model import (
     AgentTreeCache,
     LimitChange,
@@ -48,6 +49,10 @@ from odds_comparison import (
 
 backend_directory = Path(__file__).resolve().parent
 app_directory = backend_directory.parent / "Frontend"
+# The dashboard is authored as one file per page, stylesheet and script; these
+# stitch those back into the single index.html, styles.css and script.js the
+# browser asks for. See frontend_assets for why it is composed and not linked.
+composed_assets = frontend_assets.build(app_directory)
 # Serialize logins per username only: a slow upstream response for one account
 # must not block every other user's login.
 login_locks_guard = threading.Lock()
@@ -4743,6 +4748,15 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
 
+    def send_composed(self, asset):
+        """Serve one of the assembled Frontend bundles."""
+        try:
+            frontend_assets.serve(self, asset)
+        except (OSError, ValueError) as error:
+            self.server_error(
+                "Frontend asset build failed", error, "The page is unavailable"
+            )
+
     def do_GET(self):
         path = self.request_path()
         query = parse_qs(urlsplit(self.path).query)
@@ -5027,6 +5041,17 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.redirect("/")
             return
 
+        # Composed from the split sources rather than read off disk. The
+        # per-page and per-concern files stay reachable at their own paths for
+        # debugging; these two are what the shell actually links.
+        if path == "/styles.css":
+            self.send_composed(composed_assets["css"])
+            return
+
+        if path == "/script.js":
+            self.send_composed(composed_assets["js"])
+            return
+
         if path in {
             "/",
             "/activity_logs",
@@ -5040,8 +5065,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             "/build_ramp",
             "/build_ramp/",
         }:
-            self.path = "/index.html"
-            super().do_GET()
+            self.send_composed(composed_assets["html"])
             return
 
         super().do_GET()

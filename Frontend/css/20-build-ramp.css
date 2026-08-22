@@ -1,0 +1,534 @@
+/* 20-build-ramp.css
+   Build a Ramp: builder layout, league picker, steps table, tracked
+   limits, exposure table, and the ramp breakpoints.
+   Kept whole: several selectors here are redefined later in the file
+   to override an earlier rule of the same specificity. */
+
+.ramp-builder {
+  margin: 0 0 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+}
+
+.ramp-builder > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  padding: 14px 16px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.ramp-builder > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ramp-builder > summary::before {
+  content: "\25B8";
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.ramp-builder[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.ramp-builder-title {
+  font-weight: 700;
+}
+
+.ramp-builder-hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ramp-builder-body {
+  padding: 0 16px 16px;
+  border-top: 1px solid var(--line);
+}
+
+.ramp-note {
+  margin: 14px 0 16px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  max-width: 70ch;
+}
+
+.ramp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
+  margin-bottom: 20px;
+}
+
+/* Fields inside the grid already have the grid gap between them; their own
+   margin was doubling it and leaving a hole above Leagues. */
+.ramp-grid .ramp-field {
+  margin-bottom: 0;
+}
+
+.ramp-field {
+  display: block;
+  margin-bottom: 16px;
+}
+
+.ramp-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ramp-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+/* The league list can run long, so it scrolls instead of pushing the button
+   off the bottom of the page. */
+/* Grouped by the tier AccessHigh files each league under, because in its own
+   payload order the first screenful was Politics, Poker and Dog Racing while
+   the Big Six sat below the fold. */
+.ramp-leagues {
+  max-height: min(56vh, 520px);
+  overflow-y: auto;
+  padding: 0 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.ramp-league-group[hidden] {
+  display: none;
+}
+
+.ramp-league-group + .ramp-league-group {
+  margin-top: 12px;
+}
+
+/* Sticky so the tier a league belongs to is still named after scrolling past
+   its heading. Opaque, or the rows behind it show through. */
+.ramp-league-group-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 0 5px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.ramp-league-group-name {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.ramp-league-group-count {
+  margin-left: auto;
+}
+
+.ramp-league-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 4px 16px;
+  padding-top: 7px;
+}
+
+/* .ramp-check is inline-flex, which beats the browser's own [hidden] rule, so
+   filtered-out leagues need saying twice. They stay in the DOM rather than
+   being removed, which is what keeps a ticked league ticked while the filter
+   hides it. */
+.ramp-check[hidden] {
+  display: none;
+}
+
+/* Long league names truncate instead of pushing the grid sideways. */
+.ramp-leagues .ramp-check {
+  min-width: 0;
+}
+
+.ramp-leagues .ramp-check span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ramp-leagues-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-bottom: 6px;
+}
+
+.ramp-league-search {
+  width: 210px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.ramp-leagues-head .ramp-count {
+  margin-left: auto;
+}
+
+.ramp-empty {
+  padding: 14px 0;
+}
+
+.ramp-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ramp-count {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Leagues and steps side by side. The steps table is three narrow columns and
+   on its own row it left two thirds of the page empty beside it, which also
+   pushed Create ramp below the fold. */
+/* Stacked, not side by side. The tracked and history tables are seven
+   columns wide and were being squeezed into a 300px slot, where they clipped
+   mid-column; and because a grid child defaults to min-width:auto it could
+   not shrink, so it pushed the whole page sideways instead. */
+.ramp-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px 24px;
+  align-items: start;
+  max-width: 1100px;
+  margin-bottom: 4px;
+}
+
+@media (max-width: 1180px) {
+  .ramp-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ramp-steps-box {
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.ramp-replace {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 680px;
+  margin: 18px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ramp-replace input {
+  height: auto;
+  margin-top: 2px;
+}
+
+/* Global table styling stretches every table to 100%, which marooned Time,
+   Limit and Remove at opposite ends of the page. Three narrow columns. */
+.ramp-steps-table {
+  width: auto;
+  border-collapse: collapse;
+  margin-bottom: 6px;
+}
+
+.ramp-steps-table th:first-child,
+.ramp-steps-table td:first-child {
+  width: 130px;
+}
+
+.ramp-steps-table th:nth-child(2),
+.ramp-steps-table td:nth-child(2) {
+  width: 140px;
+}
+
+.ramp-steps-table th {
+  padding: 0 10px 4px 0;
+  text-align: left;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.ramp-steps-table td {
+  padding: 3px 10px 3px 0;
+}
+
+.ramp-step-time,
+.ramp-step-value {
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+.ramp-step-value {
+  width: 110px;
+  font-variant-numeric: tabular-nums;
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--blue);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.link-button:hover {
+  text-decoration: underline;
+}
+
+.ramp-actions {
+  margin-top: 12px;
+}
+
+.ramp-builder input[type="text"] {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
+/* On its own page the builder is always open, so it needs no frame of its
+   own - the panel around it already provides one. */
+.ramp-builder-page {
+  margin: 0;
+  border: 0;
+  background: none;
+}
+
+.ramp-builder-page .ramp-builder-body {
+  padding: 0;
+  border-top: 0;
+}
+
+.ramp-builder-page .ramp-note {
+  margin-top: 0;
+}
+
+/* Form fields stop at a readable width instead of stretching across a
+   full-width monitor. */
+/* The seven weekday chips need a column wide enough to hold them on one
+   line; "Sun" alone on a second row reads like a mistake. */
+.build-ramp-panel .ramp-grid {
+  max-width: 1100px;
+  grid-template-columns:
+    minmax(200px, 0.8fr)
+    minmax(430px, 1.2fr)
+    minmax(240px, 1fr);
+}
+
+.build-ramp-panel .ramp-days-field .ramp-checks {
+  flex-wrap: nowrap;
+  gap: 4px 12px;
+}
+
+@media (max-width: 1180px) {
+  .build-ramp-panel .ramp-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .build-ramp-panel .ramp-days-field .ramp-checks {
+    flex-wrap: wrap;
+  }
+}
+
+.build-ramp-panel .ramp-builder input[type="text"] {
+  max-width: 320px;
+}
+
+.build-ramp-panel .ramp-field {
+  max-width: 1100px;
+}
+
+/* Four markets as two rows of two. Left to wrap, "Team total" dropped to a
+   line of its own whenever the column was a few pixels short. */
+.build-ramp-panel #rampFields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, auto));
+  justify-content: start;
+  gap: 6px 16px;
+}
+
+/* Inside the two columns each field fills its own column instead of stopping
+   at the full-width cap. */
+.build-ramp-panel .ramp-columns .ramp-field {
+  max-width: none;
+  margin-bottom: 0;
+  /* Without this a wide table inside a grid child widens the page rather
+     than scrolling inside its own box. */
+  min-width: 0;
+}
+
+.ramp-builder .button.primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Source selector and its percentage dial. */
+.ramp-select {
+  min-height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
+.ramp-scale {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ramp-scale input {
+  width: 68px;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ramp-step-window {
+  min-height: 32px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+/* Only one of the two ever shows, so the column keeps its width. */
+.ramp-steps-table th:nth-child(2),
+.ramp-steps-table td:nth-child(2) {
+  width: 190px;
+}
+
+/* The list of limits currently following Pinnacle. */
+.ramp-tracked {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.ramp-tracked-table {
+  width: 100%;
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.ramp-tracked-table th {
+  padding: 6px 10px 6px 0;
+  text-align: left;
+  font-size: 11px;
+  color: var(--muted);
+  background: none;
+  border-bottom: 1px solid var(--line);
+}
+
+.ramp-tracked-table td {
+  padding: 6px 10px 6px 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Left to itself the exposure table spread seven columns across the whole
+   panel, stranding the numbers apart and pushing the buttons off the edge. */
+.exposure-table {
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.exposure-table th:nth-child(1),
+.exposure-table td:nth-child(1) { width: 13%; }
+.exposure-table th:nth-child(2),
+.exposure-table td:nth-child(2) { width: 13%; }
+.exposure-table th:nth-child(3),
+.exposure-table td:nth-child(3) { width: 12%; }
+.exposure-table th:nth-child(4),
+.exposure-table td:nth-child(4) { width: 13%; }
+.exposure-table th:nth-child(5),
+.exposure-table td:nth-child(5) { width: 13%; }
+.exposure-table th:nth-child(6),
+.exposure-table td:nth-child(6) { width: 13%; }
+.exposure-table th:nth-child(7),
+.exposure-table td:nth-child(7) { width: 11%; }
+.exposure-table th:nth-child(8),
+.exposure-table td:nth-child(8) { width: 12%; }
+
+/* The divider before the Pinnacle columns belongs to the fixture tables, not
+   this one, where column six is a Pinnacle figure like the two beside it. */
+.exposure-table th:nth-child(6),
+.exposure-table td:nth-child(6) {
+  border-left: 0;
+}
+
+/* The tables scroll inside their own box, never the page. */
+.ramp-tracked {
+  overflow: auto;
+  max-width: 100%;
+}
+
+.ramp-tracked-table {
+  min-width: 640px;
+}
+
+/* Four limit types fit on one line at this width instead of wrapping to two. */
+.build-ramp-panel .ramp-grid {
+  grid-template-columns:
+    minmax(330px, 1.1fr)
+    minmax(260px, 1fr)
+    minmax(240px, 0.9fr);
+}
+
+@media (max-width: 1100px) {
+  .build-ramp-panel .ramp-grid {
+    grid-template-columns: 1fr;
+  }
+}
