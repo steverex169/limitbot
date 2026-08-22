@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Limit Control Bot</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/styles.css?v=20260822-history">
+  <link rel="stylesheet" href="/styles.css?v=20260822-lines">
 </head>
 
 <body class="app-loading">
@@ -82,7 +82,7 @@
     <div class="sidebar-footer">
       <a id="dashboardHomeLink" class="sidebar-nav-link" href="/">Dashboard</a>
       <a id="activityLogsLink" class="sidebar-nav-link" href="/activity_logs">Activity Logs</a>
-      <a id="pinnacleComparisonLink" class="sidebar-nav-link" href="/pinnacle_aceshigh">Pinnacle vs <span class="partner-name">Aces High</span></a>
+      <a id="pinnacleComparisonLink" class="sidebar-nav-link" href="/pinnacle_aceshigh">Pinnacle vs <span class="partner-name">Aces High</span> Lines</a>
       <a id="tradingMonitorLink" class="sidebar-nav-link" href="/trading_monitor">Trading Monitor</a>
       <a id="buildRampLink" class="sidebar-nav-link" href="/build_ramp">Build a Ramp</a>
       <a id="telegramAlertsLink" class="sidebar-nav-link" href="/telegram_alerts">Telegram Alerts</a>
@@ -215,8 +215,8 @@
       <div class="panel-head comparison-head">
         <div>
           <p class="eyebrow">MARKET COMPARISON</p>
-          <h2>Pinnacle vs <span class="partner-name">Aces High</span></h2>
-          <p>Current full-game and period lines, American odds, and available limits.</p>
+          <h2>Pinnacle vs <span class="partner-name">Aces High</span> Lines</h2>
+          <p>Current full-game and period lines side by side, in American odds. Limits are handled by the live tracker on Build a Ramp.</p>
         </div>
         <div class="comparison-actions">
           <label for="comparisonLeague">League</label>
@@ -252,13 +252,10 @@
         </article>
       </div>
 
-      <div id="comparisonExposure" class="comparison-exposure"></div>
-
-      <div id="comparisonProfiles" class="comparison-profiles" data-partner-aria="{name} limit profiles" aria-label="Aces High limit profiles"></div>
       <div id="comparisonContent" class="comparison-content">
         <p class="comparison-empty">Select an agent and league to load the comparison.</p>
       </div>
-      <p class="comparison-source-note">Pinnacle limits are supplied in USD by OddsPapi. <span class="partner-name">Aces High</span> limits are the selected agent&#39;s configured values, and apply to every fixture in the league and period &mdash; not to one game. Pinnacle raises its limits as a game approaches, so fixtures far from kick-off are excluded by the window above.</p>
+      <p class="comparison-source-note">Pinnacle lines are supplied by OddsPapi and matched to <span class="partner-name">Aces High</span> fixtures by team and start time. Fixtures far from kick-off are excluded by the window above.</p>
     </section>
 
     <section id="tradingMonitorView" class="panel trading-monitor-panel" hidden aria-hidden="true">
@@ -542,7 +539,7 @@
     </div>
   </dialog>
 
-  <script src="/script.js?v=20260822-history" defer></script>
+  <script src="/script.js?v=20260822-lines" defer></script>
 </body>
 
 </html>

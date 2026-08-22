@@ -1268,7 +1268,8 @@ tbody tr:hover {
 }
 
 .comparison-table {
-  min-width: 920px;
+  /* Six columns rather than eight now that limits live on Build a Ramp. */
+  min-width: 720px;
 }
 
 .comparison-table th,
@@ -1278,8 +1279,10 @@ tbody tr:hover {
   font-size: 12px;
 }
 
-.comparison-table th:nth-child(6),
-.comparison-table td:nth-child(6) {
+/* Separates our two columns from Pinnacle's two. Column five now that the
+   limit columns have gone from this page. */
+.comparison-table th:nth-child(5),
+.comparison-table td:nth-child(5) {
   border-left: 2px solid var(--line);
 }
 
