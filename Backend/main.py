@@ -4111,12 +4111,26 @@ def run_tracker_cycle():
                     "Could not read Pinnacle for %s", slug, exc_info=True
                 )
                 levels_by_slug[slug] = {}
-        level = levels_by_slug[slug].get((tracker["period"], tracker["field"]))
+        levels = levels_by_slug[slug]
+        level = levels.get((tracker["period"], tracker["field"]))
 
         note = None
         target = None
         if not level:
-            note = "No Pinnacle fixtures near kick-off"
+            # Distinguish a market Pinnacle is not posting from a board with
+            # nothing on it. Baseball's 1st-5 runline is the case that matters:
+            # it appears only sometimes, and blaming kick-off times for it sent
+            # somebody looking for a fault that was not there.
+            period_has_any = any(
+                key[0] == tracker["period"] for key in levels
+            )
+            note = (
+                f"Pinnacle is not posting a "
+                f"{limit_field_labels.get(tracker['field'], tracker['field']).lower()} "
+                f"for {tracker['period']} right now"
+                if period_has_any
+                else "No Pinnacle fixtures near kick-off"
+            )
         else:
             target = max(100, int(round(level * tracker["scale"] / 100.0 / 100.0)) * 100)
             previous = tracker["lastWritten"]
