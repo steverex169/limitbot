@@ -57,6 +57,10 @@
   text-align-last: left;
 }
 
+.telegram-inline-field select[hidden] {
+  display: none;
+}
+
 .telegram-alerts-table th:last-child,
 .telegram-alerts-table td:last-child {
   width: 190px;
@@ -170,4 +174,3 @@
 }
 
 /* --- Limit ramp builder ------------------------------------------------- */
-

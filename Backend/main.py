@@ -2514,8 +2514,11 @@ def add_telegram_recipient(request_data):
     auth = auth_context()
     name = str(request_data.get("name", "")).strip()
     chat_id = str(request_data.get("chatId", "")).strip()
-    is_aceshigh = bool(request_data.get("isAcesHigh"))
-    is_betwar = bool(request_data.get("isBetWar"))
+    if partner_host == "betwar.ag":
+        is_aceshigh, is_betwar = False, True
+    else:
+        is_aceshigh = bool(request_data.get("isAcesHigh"))
+        is_betwar = bool(request_data.get("isBetWar"))
 
     if not name:
         raise ValueError("Enter a name for this Telegram recipient")
@@ -2582,8 +2585,11 @@ def edit_telegram_recipient(request_data):
     recipient_id = str(request_data.get("id", "")).strip()
     name = str(request_data.get("name", "")).strip()
     chat_id = str(request_data.get("chatId", "")).strip()
-    is_aceshigh = bool(request_data.get("isAcesHigh"))
-    is_betwar = bool(request_data.get("isBetWar"))
+    if partner_host == "betwar.ag":
+        is_aceshigh, is_betwar = False, True
+    else:
+        is_aceshigh = bool(request_data.get("isAcesHigh"))
+        is_betwar = bool(request_data.get("isBetWar"))
 
     if len(recipient_id) != 32:
         raise ValueError("Invalid Telegram recipient")
@@ -4851,6 +4857,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     "preferences": user_preferences(auth),
                     "partnerName": partner_name,
                     "pinnacleComparisonEnabled": pinnacle_comparison_enabled,
+                    "telegramSite": "betwar" if partner_host == "betwar.ag" else "aceshigh",
                 })
             return
 
@@ -5166,6 +5173,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     "preferences": preferences,
                     "partnerName": partner_name,
                     "pinnacleComparisonEnabled": pinnacle_comparison_enabled,
+                    "telegramSite": "betwar" if partner_host == "betwar.ag" else "aceshigh",
                 }).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -5348,6 +5356,16 @@ def migrate_telegram_recipients():
                 "WHERE is_aceshigh = 0 AND is_betwar = 0"
             )
         )
+        if partner_host == "betwar.ag":
+            # This deployment has its own database and bot. Membership choices
+            # for another site are misleading here, so every local recipient
+            # belongs only to BetWar.
+            connection.execute(
+                text(
+                    "UPDATE telegram_recipients "
+                    "SET is_aceshigh = 0, is_betwar = 1"
+                )
+            )
 
 
 def migrate_user_columns():

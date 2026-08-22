@@ -30,6 +30,7 @@ const elements = {
   telegramAlertName: document.querySelector("#telegramAlertName"),
   telegramAlertChatId: document.querySelector("#telegramAlertChatId"),
   telegramAlertAudience: document.querySelector("#telegramAlertAudience"),
+  telegramMembershipHeader: document.querySelector("#telegramMembershipHeader"),
   telegramAlertAdd: document.querySelector("#telegramAlertAdd"),
   telegramAlertRows: document.querySelector("#telegramAlertRows"),
   telegramEditDialog: document.querySelector("#telegramEditDialog"),
@@ -114,4 +115,3 @@ const elements = {
   scheduleProgress: document.querySelector("#scheduleProgress"),
   closeScheduleStatus: document.querySelector("#closeScheduleStatus"),
 };
-

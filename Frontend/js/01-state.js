@@ -38,6 +38,7 @@ const state = {
   editingTelegramRecipientId: null,
   partnerName: "Aces High",
   pinnacleComparisonEnabled: true,
+  telegramSite: "aceshigh",
 };
 
 const pendingStorageKey = "aceshighPendingLimitEdits";

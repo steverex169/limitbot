@@ -47,10 +47,24 @@ function applyPartnerName(name) {
 function applyDeploymentFeatures(sessionData) {
   state.pinnacleComparisonEnabled =
     sessionData?.pinnacleComparisonEnabled !== false;
+  state.telegramSite = sessionData?.telegramSite || "aceshigh";
 
   if (elements.pinnacleComparisonLink) {
     elements.pinnacleComparisonLink.hidden =
       !state.pinnacleComparisonEnabled;
+  }
+
+  const betwarTelegram = state.telegramSite === "betwar";
+  if (elements.telegramAlertAudience) {
+    elements.telegramAlertAudience.hidden = betwarTelegram;
+    elements.telegramAlertAudience.value = betwarTelegram ? "betwar" : "all";
+  }
+  if (elements.telegramEditAudience) {
+    elements.telegramEditAudience.hidden = betwarTelegram;
+  }
+  if (elements.telegramMembershipHeader) {
+    elements.telegramMembershipHeader.textContent =
+      betwarTelegram ? "Alerts from" : "Membership";
   }
 
   if (

@@ -12,6 +12,7 @@ function showTelegramAlertsMessage(message, kind = "success") {
 }
 
 function recipientMembershipText(recipient) {
+  if (state.telegramSite === "betwar") return "BetWar";
   if (recipient.isAcesHigh && recipient.isBetWar) return "All";
   if (recipient.isAcesHigh) return "AcesHigh only";
   if (recipient.isBetWar) return "BetWar only";
@@ -33,6 +34,9 @@ function applyRecipientAudienceUI(selectElement, recipient) {
 }
 
 function getRecipientAudienceValue(isEdit = false) {
+  if (state.telegramSite === "betwar") {
+    return "betwar";
+  }
   const value = String(
     isEdit ? elements.telegramEditAudience?.value : elements.telegramAlertAudience?.value
   ).toLowerCase();
@@ -151,5 +155,4 @@ async function loadTelegramChats() {
   renderTelegramChats();
   return state.telegramChats;
 }
-
 
