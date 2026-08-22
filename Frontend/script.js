@@ -3048,7 +3048,7 @@ function renderTrackedLimits() {
   table.className = "ramp-tracked-table";
   const head = document.createElement("thead");
   const headRow = document.createElement("tr");
-  ["League", "Market", "Pinnacle now", "Your limit", "Last checked", "State", ""]
+  ["League", "Market", "Pinnacle now", "Your limit", "Last checked", "What happened", ""]
     .forEach((label) => {
       const th = document.createElement("th");
       th.textContent = label;
@@ -3100,7 +3100,14 @@ function renderTrackedLimits() {
           ? `${Number(tracker.value).toLocaleString()} (${tracker.scalePercent}%)`
           : `— (${tracker.scalePercent}%)`
       ),
-      comparisonCell(comparisonText(tracker.checkedAt, "not yet")),
+      comparisonCell(
+        /* The date is almost always today; the clock time is the part that
+         * tells you whether the tracker is still running. */
+        comparisonText(
+          String(tracker.checkedAt || "").replace(/^\S+\s/, ""),
+          "not yet"
+        )
+      ),
       comparisonCell(comparisonText(tracker.note, "waiting for first check")),
       stopCell
     );

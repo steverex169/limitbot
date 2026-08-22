@@ -2984,9 +2984,13 @@ dialog h2 {
 /* Leagues and steps side by side. The steps table is three narrow columns and
    on its own row it left two thirds of the page empty beside it, which also
    pushed Create ramp below the fold. */
+/* Stacked, not side by side. The tracked and history tables are seven
+   columns wide and were being squeezed into a 300px slot, where they clipped
+   mid-column; and because a grid child defaults to min-width:auto it could
+   not shrink, so it pushed the whole page sideways instead. */
 .ramp-columns {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px 24px;
   align-items: start;
   max-width: 1100px;
@@ -3165,6 +3169,9 @@ dialog h2 {
 .build-ramp-panel .ramp-columns .ramp-field {
   max-width: none;
   margin-bottom: 0;
+  /* Without this a wide table inside a grid child widens the page rather
+     than scrolling inside its own box. */
+  min-width: 0;
 }
 
 .ramp-builder .button.primary:disabled {
@@ -3281,4 +3288,28 @@ dialog h2 {
 .exposure-table th:nth-child(6),
 .exposure-table td:nth-child(6) {
   border-left: 0;
+}
+
+/* The tables scroll inside their own box, never the page. */
+.ramp-tracked {
+  overflow: auto;
+  max-width: 100%;
+}
+
+.ramp-tracked-table {
+  min-width: 640px;
+}
+
+/* Four limit types fit on one line at this width instead of wrapping to two. */
+.build-ramp-panel .ramp-grid {
+  grid-template-columns:
+    minmax(330px, 1.1fr)
+    minmax(260px, 1fr)
+    minmax(240px, 0.9fr);
+}
+
+@media (max-width: 1100px) {
+  .build-ramp-panel .ramp-grid {
+    grid-template-columns: 1fr;
+  }
 }
