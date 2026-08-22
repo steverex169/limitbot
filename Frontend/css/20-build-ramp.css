@@ -464,11 +464,13 @@
   table-layout: fixed;
 }
 
-/* The dashboard's shared table header is sticky. These compact, internally
-   scrolling tables do not need that behavior; with a transparent ramp header
-   it let the first data row show through and made the labels look doubled. */
+/* Keep the column names visible while this box scrolls. The background must
+   stay opaque or the first data row shows through the sticky header and makes
+   the text look doubled. */
 .ramp-tracked-table thead {
-  position: static;
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 
 .ramp-tracked-table th {
