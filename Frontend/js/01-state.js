@@ -37,6 +37,7 @@ const state = {
   telegramChats: [],
   editingTelegramRecipientId: null,
   partnerName: "Aces High",
+  pinnacleComparisonEnabled: true,
 };
 
 const pendingStorageKey = "aceshighPendingLimitEdits";
@@ -97,4 +98,3 @@ function takePrefetchedLeagues(accountId) {
 
   return prefetch.response;
 }
-

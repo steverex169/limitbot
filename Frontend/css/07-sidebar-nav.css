@@ -33,6 +33,10 @@
     color 120ms ease;
 }
 
+.sidebar-footer a[hidden] {
+  display: none;
+}
+
 .sidebar-footer a:hover,
 .sidebar-footer a:focus-visible {
   background: var(--blue-soft);
@@ -46,4 +50,3 @@
   background: var(--blue-soft);
   color: var(--blue);
 }
-

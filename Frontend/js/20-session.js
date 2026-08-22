@@ -44,8 +44,26 @@ function applyPartnerName(name) {
   document.title = `${name} Limit Control`;
 }
 
+function applyDeploymentFeatures(sessionData) {
+  state.pinnacleComparisonEnabled =
+    sessionData?.pinnacleComparisonEnabled !== false;
+
+  if (elements.pinnacleComparisonLink) {
+    elements.pinnacleComparisonLink.hidden =
+      !state.pinnacleComparisonEnabled;
+  }
+
+  if (
+    !state.pinnacleComparisonEnabled &&
+    isPinnacleComparisonRoute()
+  ) {
+    window.history.replaceState({}, "", "/");
+  }
+}
+
 async function startDashboard(sessionData = null) {
   applyPartnerName(sessionData?.partnerName);
+  applyDeploymentFeatures(sessionData);
   document.body.classList.remove(
     "app-loading"
   );

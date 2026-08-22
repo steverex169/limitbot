@@ -39,7 +39,8 @@ function isTelegramAlertsRoute() {
 
 function applyDashboardRoute() {
   const activityLogsActive = isActivityLogsRoute();
-  const comparisonActive = isPinnacleComparisonRoute();
+  const comparisonActive =
+    state.pinnacleComparisonEnabled && isPinnacleComparisonRoute();
   const tradingActive = isTradingMonitorRoute();
   const telegramAlertsActive = isTelegramAlertsRoute();
   const buildRampActive = isBuildRampRoute();
@@ -237,5 +238,4 @@ function applyDashboardRoute() {
     });
   }
 }
-
 
