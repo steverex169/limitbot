@@ -53,6 +53,22 @@ app_directory = backend_directory.parent / "Frontend"
 # stitch those back into the single index.html, styles.css and script.js the
 # browser asks for. See frontend_assets for why it is composed and not linked.
 composed_assets = frontend_assets.build(app_directory)
+# Routes the shell answers. The dashboard is a single page that swaps sections
+# on navigation, so each of these serves the same composed document and the
+# client-side router decides what to show.
+page_routes = frozenset({
+    "/",
+    "/activity_logs",
+    "/activity_logs/",
+    "/pinnacle_aceshigh",
+    "/pinnacle_aceshigh/",
+    "/trading_monitor",
+    "/trading_monitor/",
+    "/telegram_alerts",
+    "/telegram_alerts/",
+    "/build_ramp",
+    "/build_ramp/",
+})
 # Serialize logins per username only: a slow upstream response for one account
 # must not block every other user's login.
 login_locks_guard = threading.Lock()
@@ -4748,6 +4764,40 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
 
+    def composed_asset(self, path):
+        """Which assembled bundle answers this path, if any.
+
+        The per-page and per-concern sources stay reachable at their own paths
+        for debugging; these are what the shell actually links.
+        """
+        if path == "/styles.css":
+            return composed_assets["css"]
+        if path == "/script.js":
+            return composed_assets["js"]
+        if path in page_routes:
+            return composed_assets["html"]
+        return None
+
+    def do_HEAD(self):
+        """Route HEAD the same way as GET.
+
+        These paths have no file behind them any more, so the inherited
+        do_HEAD would look for one on disk and answer 404. serve() omits the
+        body for a HEAD, so the headers still describe the real response.
+        """
+        path = self.request_path()
+
+        if path == "/index.html":
+            self.redirect("/")
+            return
+
+        asset = self.composed_asset(path)
+        if asset is not None:
+            self.send_composed(asset)
+            return
+
+        super().do_HEAD()
+
     def send_composed(self, asset):
         """Serve one of the assembled Frontend bundles."""
         try:
@@ -5041,31 +5091,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.redirect("/")
             return
 
-        # Composed from the split sources rather than read off disk. The
-        # per-page and per-concern files stay reachable at their own paths for
-        # debugging; these two are what the shell actually links.
-        if path == "/styles.css":
-            self.send_composed(composed_assets["css"])
-            return
-
-        if path == "/script.js":
-            self.send_composed(composed_assets["js"])
-            return
-
-        if path in {
-            "/",
-            "/activity_logs",
-            "/activity_logs/",
-            "/pinnacle_aceshigh",
-            "/pinnacle_aceshigh/",
-            "/trading_monitor",
-            "/trading_monitor/",
-            "/telegram_alerts",
-            "/telegram_alerts/",
-            "/build_ramp",
-            "/build_ramp/",
-        }:
-            self.send_composed(composed_assets["html"])
+        asset = self.composed_asset(path)
+        if asset is not None:
+            self.send_composed(asset)
             return
 
         super().do_GET()
