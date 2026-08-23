@@ -440,10 +440,48 @@ elements.cancelDialogButton?.addEventListener(
   }
 );
 
+function syncAllScheduleDays() {
+  if (!elements.scheduleAllDays) {
+    return;
+  }
+
+  const selectedCount = elements.scheduleDays.filter(
+    (input) => input.checked
+  ).length;
+
+  elements.scheduleAllDays.checked =
+    selectedCount === elements.scheduleDays.length;
+  elements.scheduleAllDays.indeterminate =
+    selectedCount > 0 && selectedCount < elements.scheduleDays.length;
+}
+
+elements.scheduleAllDays?.addEventListener(
+  "change",
+  () => {
+    const checked = elements.scheduleAllDays.checked;
+    elements.scheduleDays.forEach((input) => {
+      input.checked = checked;
+    });
+    elements.scheduleAllDays.indeterminate = false;
+  }
+);
+
+elements.scheduleDays.forEach((input) => {
+  input.addEventListener("change", syncAllScheduleDays);
+});
+
 elements.closeScheduleStatus.addEventListener(
   "click",
+  closeScheduleStatusDialog
+);
+
+elements.scheduleStatusDialog.addEventListener(
+  "close",
   () => {
-    elements.scheduleStatusDialog.close();
+    if (scheduleStatusDismissTimer) {
+      window.clearTimeout(scheduleStatusDismissTimer);
+      scheduleStatusDismissTimer = null;
+    }
   }
 );
 
@@ -465,4 +503,3 @@ elements.scheduleStatusDialog.addEventListener(
 );
 
 applyTheme(getPreferredTheme());
-

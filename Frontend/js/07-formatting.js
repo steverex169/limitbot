@@ -197,6 +197,11 @@ function clearScheduleOptions() {
     input.checked = false;
   });
 
+  if (elements.scheduleAllDays) {
+    elements.scheduleAllDays.checked = false;
+    elements.scheduleAllDays.indeterminate = false;
+  }
+
   if (elements.scheduleHour) {
     elements.scheduleHour.value = "";
   }
@@ -215,4 +220,3 @@ function clearScheduleOptions() {
 
   clearDialogMessage();
 }
-

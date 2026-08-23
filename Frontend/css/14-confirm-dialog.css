@@ -118,6 +118,11 @@
   cursor: pointer;
 }
 
+.schedule-days .schedule-all-days {
+  border-color: color-mix(in srgb, var(--blue) 45%, var(--line));
+  color: var(--blue);
+}
+
 .schedule-days input {
   width: 15px;
   height: 15px;
@@ -215,4 +220,3 @@
 [hidden] {
   display: none !important;
 }
-

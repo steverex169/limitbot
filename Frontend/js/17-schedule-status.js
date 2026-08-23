@@ -1,6 +1,19 @@
 /* 17-schedule-status.js
  * Polling scheduled limit runs and the status dialog that reports them. */
 
+let scheduleStatusDismissTimer = null;
+
+function closeScheduleStatusDialog() {
+  if (scheduleStatusDismissTimer) {
+    window.clearTimeout(scheduleStatusDismissTimer);
+    scheduleStatusDismissTimer = null;
+  }
+
+  if (elements.scheduleStatusDialog?.open) {
+    elements.scheduleStatusDialog.close();
+  }
+}
+
 async function refreshScheduleStatuses() {
   const accountId =
     state.selectedAgentId;
@@ -229,6 +242,11 @@ function showScheduleStatus(
   nextRun = null,
   runNote = null
 ) {
+  if (scheduleStatusDismissTimer) {
+    window.clearTimeout(scheduleStatusDismissTimer);
+    scheduleStatusDismissTimer = null;
+  }
+
   /*
    * A run that completed without changing anything is not a change. Saying
    * "applied successfully" for it would claim a limit moved when it did not.
@@ -307,5 +325,15 @@ function showScheduleStatus(
   } else if (!elements.scheduleStatusDialog.open) {
     elements.scheduleStatusDialog.showModal();
   }
-}
 
+  /*
+   * This dialog is an acknowledgement, not a progress lock. A pending
+   * recurring schedule may not run for days, so leaving a modal open until
+   * then makes the dashboard appear frozen. Keep it long enough to read and
+   * let the status table continue reporting the schedule after it closes.
+   */
+  scheduleStatusDismissTimer = window.setTimeout(
+    closeScheduleStatusDialog,
+    successful || failed || skipped ? 8000 : 5000
+  );
+}

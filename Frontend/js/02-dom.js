@@ -102,6 +102,7 @@ const elements = {
   deleteAllSchedules: document.querySelector("#deleteAllSchedules"),
   clearScheduleOptions: document.querySelector("#clearScheduleOptions"),
   cancelDialogButton: document.querySelector("#cancelDialogButton"),
+  scheduleAllDays: document.querySelector("#scheduleAllDays"),
   scheduleDays: [
     ...document.querySelectorAll('input[name="scheduleDay"]'),
   ],
