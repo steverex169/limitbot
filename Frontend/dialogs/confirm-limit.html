@@ -8,41 +8,47 @@
         <span aria-hidden="true">→</span>
         <strong id="newValue">—</strong>
       </div>
-      <fieldset class="schedule-days">
-        <legend>Repeat every week on</legend>
-        <label class="schedule-all-days"><input id="scheduleAllDays" type="checkbox"> All days</label>
-        <label><input type="checkbox" name="scheduleDay" value="0"> Mon</label>
-        <label><input type="checkbox" name="scheduleDay" value="1"> Tue</label>
-        <label><input type="checkbox" name="scheduleDay" value="2"> Wed</label>
-        <label><input type="checkbox" name="scheduleDay" value="3"> Thu</label>
-        <label><input type="checkbox" name="scheduleDay" value="4"> Fri</label>
-        <label><input type="checkbox" name="scheduleDay" value="5"> Sat</label>
-        <label><input type="checkbox" name="scheduleDay" value="6"> Sun</label>
-      </fieldset>
-      <label class="schedule-field">
-        <span>Time (U.S. Eastern / ET)</span>
-        <div class="schedule-time-picker" aria-label="Schedule time in Eastern time">
-          <select id="scheduleHour" aria-label="Hour">
-            <option value="">HH</option>
-          </select>
-          <select id="scheduleMinute" aria-label="Minute">
-            <option value="">MM</option>
-          </select>
-          <select id="schedulePeriod" aria-label="AM or PM">
-            <option value="">AM/PM</option>
-            <option value="AM">AM</option>
-            <option value="PM">PM</option>
-          </select>
-        </div>
-      </label>
-      <label class="schedule-field">
+      <label class="schedule-field support-agent-field">
         <span>Customer Support Agent (required)</span>
         <input id="customerSupportAgent" type="text" maxlength="100" autocomplete="off" placeholder="Required for every limit change" required aria-required="true">
       </label>
-      <button id="clearScheduleOptions" type="button" class="button secondary">
-        Clear schedule
-      </button>
       <div id="dialogMessage" class="message error" role="alert" hidden></div>
+      <section class="schedule-controls" aria-labelledby="scheduleControlsTitle">
+        <div class="schedule-controls-head">
+          <div>
+            <strong id="scheduleControlsTitle">Schedule for later</strong>
+            <small>Optional · U.S. Eastern time</small>
+          </div>
+          <button id="clearScheduleOptions" type="button" class="schedule-clear">Clear</button>
+        </div>
+        <label class="schedule-field schedule-time-field">
+          <span>Time</span>
+          <div class="schedule-time-picker" aria-label="Schedule time in Eastern time">
+            <select id="scheduleHour" aria-label="Hour">
+              <option value="">HH</option>
+            </select>
+            <select id="scheduleMinute" aria-label="Minute">
+              <option value="">MM</option>
+            </select>
+            <select id="schedulePeriod" aria-label="AM or PM">
+              <option value="">AM/PM</option>
+              <option value="AM">AM</option>
+              <option value="PM">PM</option>
+            </select>
+          </div>
+        </label>
+        <fieldset class="schedule-days">
+          <legend>Repeat every week on</legend>
+          <label class="schedule-all-days"><input id="scheduleAllDays" type="checkbox"> All days</label>
+          <label><input type="checkbox" name="scheduleDay" value="0"> Mon</label>
+          <label><input type="checkbox" name="scheduleDay" value="1"> Tue</label>
+          <label><input type="checkbox" name="scheduleDay" value="2"> Wed</label>
+          <label><input type="checkbox" name="scheduleDay" value="3"> Thu</label>
+          <label><input type="checkbox" name="scheduleDay" value="4"> Fri</label>
+          <label><input type="checkbox" name="scheduleDay" value="5"> Sat</label>
+          <label><input type="checkbox" name="scheduleDay" value="6"> Sun</label>
+        </fieldset>
+      </section>
       <div class="dialog-actions">
         <button id="cancelDialogButton" type="button" value="cancel" class="button secondary">Cancel</button>
         <button id="confirmSchedule" value="default" class="button secondary">Schedule</button>
