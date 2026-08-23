@@ -376,6 +376,7 @@ def build_limit_success_message(
     new_value,
     change_type="Immediate limit",
     outcome_line="Applied successfully",
+    customer_support_agent=None,
 ):
     source_type, schedule_id = current_change_source.get() or (None, None)
     audience_label = change_type
@@ -478,12 +479,18 @@ def build_limit_success_message(
         "total": "Total",
         "teamTotal": "Team total",
     }.get(field, field)
+    support_agent_line = (
+        f"Customer Support Agent: {customer_support_agent}\n"
+        if customer_support_agent
+        else ""
+    )
     return (
         # Both sites can share one bot, so the alert has to name the site it
         # came from. Hardcoding AcesHigh.ag here made every BetWar alert claim
         # to be an AcesHigh one.
         f"Success: {audience_label} saved on {partner_host}\n"
         f"Agent: {agent_name}\n"
+        f"{support_agent_line}"
         f"League: {league_name}\n"
         f"{field_label}: {new_value}\n"
         f"{outcome_line}"
@@ -2086,6 +2093,7 @@ def save_single_limit(
     change_type="Immediate limit",
     telegram_audience="all",
     skip_blue=True,
+    customer_support_agent=None,
 ):
     """Helper function to save a single limit change"""
     # Checked before anything is read or written, so a blocked account cannot
@@ -2294,6 +2302,7 @@ def save_single_limit(
             field,
             new_value,
             change_type=change_type,
+            customer_support_agent=customer_support_agent,
         )
         send_telegram_success_message(
             telegram_message,
@@ -2320,6 +2329,17 @@ def save_limit_change(request_data):
     telegram_audience = normalize_telegram_audience(
         request_data.get("telegramAudience", "all")
     )
+    customer_support_agent = str(
+        request_data.get("customerSupportAgent", "")
+    ).strip()
+    source_type, _ = current_change_source.get() or ("manual", None)
+    if source_type not in {"schedule", "tracker"}:
+        if not customer_support_agent:
+            raise ValueError("Enter the Customer Support Agent name")
+        if len(customer_support_agent) > 100:
+            raise ValueError(
+                "Customer Support Agent name must be 100 characters or fewer"
+            )
 
     try:
         account_id = validate_account_id(safe_int(request_data["accountId"]))
@@ -2378,6 +2398,7 @@ def save_limit_change(request_data):
                 change_type="Early limit" if limit_mode == "early" else "Immediate limit",
                 return_full=True,
                 telegram_audience=telegram_audience,
+                customer_support_agent=customer_support_agent,
             )
 
         successful_updates = []
@@ -2398,6 +2419,7 @@ def save_limit_change(request_data):
                     api_field,
                     change_type="Early limit" if limit_mode == "early" else "Immediate limit",
                     telegram_audience=telegram_audience,
+                    customer_support_agent=customer_support_agent,
                 )
                 target = (
                     skipped_updates
@@ -2470,6 +2492,7 @@ def save_limit_change(request_data):
                 change_type="Early limit" if limit_mode == "early" else "Immediate limit",
                 return_full=True,
                 telegram_audience=telegram_audience,
+                customer_support_agent=customer_support_agent,
             )
         except RuntimeError as e:
             logger.exception("RuntimeError during limit save")

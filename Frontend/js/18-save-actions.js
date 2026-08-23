@@ -2,6 +2,27 @@
  * Writing limits back: saving one change, saving a pending batch, and
  * creating a recurring schedule. */
 
+function getRequiredCustomerSupportAgent() {
+  const customerSupportAgent =
+    elements.customerSupportAgent?.value.trim() || "";
+
+  if (!customerSupportAgent) {
+    showDialogMessage("Enter the Customer Support Agent name.");
+    elements.customerSupportAgent?.focus();
+    return null;
+  }
+
+  if (customerSupportAgent.length > 100) {
+    showDialogMessage(
+      "Customer Support Agent name must be 100 characters or fewer."
+    );
+    elements.customerSupportAgent?.focus();
+    return null;
+  }
+
+  return customerSupportAgent;
+}
+
 async function saveActiveChange() {
   const batch =
     Array.isArray(state.pendingSaveBatch) &&
@@ -12,6 +33,11 @@ async function saveActiveChange() {
         : [];
 
   if (!batch.length) {
+    return;
+  }
+
+  const customerSupportAgent = getRequiredCustomerSupportAgent();
+  if (!customerSupportAgent) {
     return;
   }
 
@@ -52,6 +78,7 @@ async function saveActiveChange() {
           field: change.field,
           value: change.newValue,
           limitMode,
+          customerSupportAgent,
         }),
       }
     );
@@ -133,6 +160,11 @@ async function savePendingBatch() {
     return;
   }
 
+  const customerSupportAgent = getRequiredCustomerSupportAgent();
+  if (!customerSupportAgent) {
+    return;
+  }
+
   elements.confirmSave.disabled = true;
   elements.confirmSave.textContent =
     "Saving...";
@@ -179,6 +211,7 @@ async function savePendingBatch() {
               field: item.field,
               value: item.newValue,
               limitMode,
+              customerSupportAgent,
             }),
           }
         );
@@ -284,13 +317,8 @@ async function scheduleActiveChange() {
       .map((input) => Number(input.value));
 
   const selectedTime = getSelectedScheduleTime();
-  const customerSupportAgent =
-    elements.customerSupportAgent?.value.trim() || "";
-
-  if (customerSupportAgent.length > 100) {
-    showDialogMessage(
-      "Customer Support Agent name must be 100 characters or fewer."
-    );
+  const customerSupportAgent = getRequiredCustomerSupportAgent();
+  if (!customerSupportAgent) {
     return;
   }
 
@@ -300,11 +328,6 @@ async function scheduleActiveChange() {
   }
 
   const oneTimeSchedule = recurrenceDays.length === 0;
-
-  if (!customerSupportAgent) {
-    showDialogMessage("Enter the Customer Support Agent name.");
-    return;
-  }
 
   if (oneTimeSchedule) {
     if (
@@ -420,4 +443,3 @@ async function scheduleActiveChange() {
     elements.confirmSchedule.textContent = "Schedule";
   }
 }
-
