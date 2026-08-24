@@ -137,6 +137,7 @@ class ScheduledLimit(Base):
     status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_run_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    last_run_changed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Why a run did or did not change anything, e.g. "No change needed,
     # already 500". Distinct from `error`, which is only ever a failure.
     run_note: Mapped[str | None] = mapped_column(String(255), nullable=True)

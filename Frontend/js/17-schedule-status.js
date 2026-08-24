@@ -183,7 +183,7 @@ async function refreshScheduleStatuses() {
       row &&
       finishedSchedule.status === "completed" &&
       // A skipped run wrote nothing, so there is nothing to patch in.
-      !finishedSchedule.runNote
+      finishedSchedule.lastRunChanged !== false
     ) {
       const finishedLimitMode =
         finishedSchedule.limitMode === "early"
@@ -227,7 +227,8 @@ async function refreshScheduleStatuses() {
         finishedSchedule.scheduledForUtc ||
         finishedSchedule.scheduledFor
       ),
-      finishedSchedule.runNote
+      finishedSchedule.runNote,
+      finishedSchedule.lastRunChanged
     );
   }
 }
@@ -240,7 +241,8 @@ function showScheduleStatus(
   fieldLabel,
   recurrence = null,
   nextRun = null,
-  runNote = null
+  runNote = null,
+  runChanged = null
 ) {
   if (scheduleStatusDismissTimer) {
     window.clearTimeout(scheduleStatusDismissTimer);
@@ -252,7 +254,7 @@ function showScheduleStatus(
    * "applied successfully" for it would claim a limit moved when it did not.
    */
   const skipped =
-    status === "completed" && Boolean(runNote);
+    status === "completed" && runChanged === false;
 
   const successful =
     status === "completed" && !skipped;
@@ -285,7 +287,7 @@ function showScheduleStatus(
       : skipped
         ? "Limit was not changed"
         : successful
-          ? "Limit has applied successfully"
+          ? "Limit changed successfully"
           : "Limit change scheduled";
 
   elements.scheduleStatusText.textContent =

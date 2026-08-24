@@ -4221,7 +4221,7 @@ def claim_due_jobs():
         return claimed_ids
 
 
-def record_job_result(job_id, error, note=None):
+def record_job_result(job_id, error, note=None, changed=None):
     try:
         with database_session() as db:
             stored_job = db.get(ScheduledLimit, job_id)
@@ -4230,6 +4230,7 @@ def record_job_result(job_id, error, note=None):
             run_at = utc_now_naive()
             stored_job.last_run_at = run_at
             stored_job.last_run_status = "failed" if error else "completed"
+            stored_job.last_run_changed = None if error else changed
             stored_job.error = str(error) if error else None
             stored_job.run_note = None if error else note
             if not error:
@@ -4417,7 +4418,8 @@ def execute_scheduled_job(job_id):
                     "written"
                 ) from retry_error
         note = outcome.get("note") if isinstance(outcome, dict) else None
-        record_job_result(job_id, error=None, note=note)
+        changed = outcome.get("changed") if isinstance(outcome, dict) else None
+        record_job_result(job_id, error=None, note=note, changed=changed)
         logger.info(
             "Scheduled limit completed: %s%s", job_id, f" ({note})" if note else ""
         )
@@ -5039,6 +5041,7 @@ def schedule_status_rows(account_id):
             else None
         ),
         "lastRunStatus": job.last_run_status,
+        "lastRunChanged": getattr(job, "last_run_changed", None),
         "lastRunAt": (
             eastern_timestamp(job.last_run_at.replace(tzinfo=timezone.utc))
             if job.last_run_at
@@ -5889,6 +5892,7 @@ def migrate_schedule_columns():
         "telegram_audience": "VARCHAR(10) NOT NULL DEFAULT 'all'",
         "is_early_limit": "BOOLEAN NOT NULL DEFAULT FALSE",
         "last_run_status": "VARCHAR(20) NULL",
+        "last_run_changed": "BOOLEAN NULL",
         "last_run_at": "DATETIME NULL",
         "customer_support_agent": "VARCHAR(100) NULL",
         "telegram_recipient_name": "VARCHAR(100) NULL",
