@@ -7,21 +7,22 @@
 }
 
 .schedules-table-wrap {
-  max-height: none;
-  overflow-x: auto;
-  overflow-y: visible;
+  max-height: min(72vh, 760px);
+  overflow: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
   border-radius: 0 0 14px 14px;
 }
 
 .schedules-table {
-  min-width: 1180px;
+  min-width: 1420px;
   table-layout: fixed;
 }
 
-/* The page itself scrolls, so a sticky table header only obscures the first
-   schedule row when the browser restores an old inner scroll position. */
 .schedules-table thead {
-  position: static;
+  position: sticky;
+  top: 0;
+  z-index: 4;
 }
 
 .schedules-table th,
@@ -73,15 +74,42 @@
 }
 
 .activity-grid-row > td:nth-child(13) {
-  width: 126px;
+  width: 270px;
   text-align: center;
 }
 
-.activity-row-actions {
+.activity-row-actions-inner {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
+  white-space: nowrap;
+}
+
+/* Wide limit grids scroll in their own panel. The identifying league and the
+   controls remain reachable at either edge of that horizontal scroll. */
+.schedules-table thead th:first-child,
+.activity-grid-row > td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--surface);
+  box-shadow: 1px 0 0 var(--line);
+}
+
+.schedules-table thead th:last-child,
+.activity-grid-row > td:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  width: 270px;
+  background: var(--surface);
+  box-shadow: -1px 0 0 var(--line);
+}
+
+.schedules-table thead th:first-child,
+.schedules-table thead th:last-child {
+  z-index: 3;
 }
 
 .activity-grid-row strong {
@@ -388,6 +416,22 @@
   opacity: 0.55;
 }
 
+.activity-row-actions .schedule-cancel {
+  min-height: 30px;
+  padding: 0 9px;
+  font-size: 11px;
+}
+
+.schedule-cancel-button {
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.schedule-delete-button {
+  border-color: #fda29b;
+  color: var(--red);
+}
+
 .schedule-edit-dialog {
   width: min(660px, calc(100vw - 32px));
   max-height: min(820px, calc(100vh - 32px));
@@ -527,7 +571,7 @@
 
 @media (max-width: 900px) {
   .schedules-table {
-    min-width: 1040px;
+    min-width: 1360px;
   }
 
   .activity-grid-detail {

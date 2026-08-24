@@ -150,6 +150,8 @@ function renderSchedules() {
 
     const detailToggleCell = document.createElement("td");
     detailToggleCell.className = "activity-row-actions";
+    const rowActions = document.createElement("div");
+    rowActions.className = "activity-row-actions-inner";
     if (first.activityType !== "immediate") {
       const quickEdit = document.createElement("button");
       quickEdit.type = "button";
@@ -161,14 +163,15 @@ function renderSchedules() {
         )
       );
       quickEdit.addEventListener("click", () => openScheduleEditor(group));
-      detailToggleCell.append(quickEdit);
+      rowActions.append(quickEdit);
     }
     const detailToggle = document.createElement("button");
     detailToggle.type = "button";
     detailToggle.className = "activity-detail-toggle";
     detailToggle.textContent = "View";
     detailToggle.setAttribute("aria-expanded", "false");
-    detailToggleCell.append(detailToggle);
+    rowActions.append(detailToggle);
+    detailToggleCell.append(rowActions);
     row.append(detailToggleCell);
     elements.scheduleRows.append(row);
 
@@ -214,9 +217,6 @@ function renderSchedules() {
       notes.textContent = "No additional notes.";
     }
     detailContent.append(notes);
-    const action = document.createElement("div");
-    action.className = "activity-detail-actions";
-
     detailToggle.addEventListener("click", () => {
       detailRow.hidden = !detailRow.hidden;
       detailToggle.textContent = detailRow.hidden ? "View" : "Hide";
@@ -239,7 +239,7 @@ function renderSchedules() {
 
     const cancel = document.createElement("button");
     cancel.type = "button";
-    cancel.className = "schedule-cancel";
+    cancel.className = "schedule-cancel schedule-cancel-button";
     cancel.textContent = "Cancel";
     cancel.disabled = !cancellable.length;
 
@@ -276,7 +276,7 @@ function renderSchedules() {
 
     const remove = document.createElement("button");
     remove.type = "button";
-    remove.className = "schedule-cancel";
+    remove.className = "schedule-cancel schedule-delete-button";
     remove.textContent = "Delete";
     remove.disabled = !deletable.length;
 
@@ -329,8 +329,7 @@ function renderSchedules() {
       );
     });
 
-    action.append(cancel, remove);
-    detailContent.append(action);
+    rowActions.append(cancel, remove);
     detailCell.append(detailContent);
     detailRow.append(detailCell);
       elements.scheduleRows.append(detailRow);
