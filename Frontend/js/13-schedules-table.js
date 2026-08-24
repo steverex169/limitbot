@@ -19,7 +19,9 @@ function renderSchedules() {
       return isCancelled;
     }
 
-    return !isCancelled;
+    return ["pending", "running", "failed"].includes(
+      String(schedule.status || "").toLowerCase()
+    );
   });
 
   /*
@@ -29,9 +31,15 @@ function renderSchedules() {
    */
   const table = elements.scheduleRows.closest("table");
   if (table) {
-    table.classList.toggle(
-      "hide-team-total",
-      !schedules.some((schedule) => schedule.field === "teamTotal")
+    const showTeamTotal = schedules.some(
+      (schedule) => schedule.field === "teamTotal"
+    );
+    table.classList.toggle("hide-team-total", !showTeamTotal);
+    table.querySelector(".full-game-heading")?.setAttribute(
+      "colspan", showTeamTotal ? "4" : "3"
+    );
+    table.querySelector(".period-heading")?.setAttribute(
+      "colspan", showTeamTotal ? "4" : "3"
     );
   }
 
@@ -39,7 +47,7 @@ function renderSchedules() {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
 
-    cell.colSpan = 15;
+    cell.colSpan = table?.classList.contains("hide-team-total") ? 11 : 13;
     cell.className = "empty-state";
     cell.textContent =
       statusFilter === "cancelled"
@@ -56,54 +64,98 @@ function renderSchedules() {
   for (const group of groupSchedules(schedules)) {
     const first = group[0];
     const row = document.createElement("tr");
-    const byField = new Map(
-      group.map((schedule) => [schedule.field, schedule])
-    );
+    row.className = "activity-grid-row";
 
-    row.append(
-      createTextCell(
-        formatScheduleDateTime(first.createdAtUtc || first.createdAt)
-      ),
-      createTextCell(
-        first.agentName ||
-        state.agents.find(
-          (agent) => Number(agent.id) === Number(first.accountId)
-        )?.name ||
-        `Agent ${first.accountId}`
-      ),
-      createTextCell(first.customerSupportAgent),
-      createTextCell(first.leagueName || `League ${first.idLeague}`),
-      createTextCell(
-        `${describeSchedulePeriod(first)}${first.limitMode === "early" ? " (Early)" : ""}`
-      )
-    );
-
-    for (const field of scheduleLimitFields) {
-      row.append(createLimitValueCell(byField.get(field), field));
+    const leagueCell = document.createElement("td");
+    const leagueName = document.createElement("strong");
+    leagueName.textContent = first.leagueName || `League ${first.idLeague}`;
+    leagueCell.append(leagueName);
+    if (first.limitMode === "early") {
+      const early = document.createElement("span");
+      early.className = "activity-early-badge";
+      early.textContent = "Early";
+      leagueCell.append(early);
     }
 
+    row.append(leagueCell);
+    for (const periodLimits of [false, true]) {
+      for (const field of scheduleLimitFields) {
+        row.append(createMatrixLimitCell(group, field, periodLimits));
+      }
+    }
     row.append(
+      createTextCell(describeScheduleTiming(first)),
       createTextCell(
-        first.activityType === "immediate"
-          ? "Immediate"
-          : first.recurrence || "One time"
+        first.targetScope === "all_agents" ? "All agents" : "Selected agent"
       ),
-      createTextCell(
-        first.activityType === "immediate"
-          ? "—"
-          : formatScheduleDateTime(first.scheduledForUtc || first.scheduledFor)
-      ),
-      createTextCell(describeGroupLastRun(group)),
-      createGroupStatusCell(group),
-      createGroupDetailCell(group)
+      createGroupStatusCell(group)
     );
 
-    const action = document.createElement("td");
+    const detailToggleCell = document.createElement("td");
+    const detailToggle = document.createElement("button");
+    detailToggle.type = "button";
+    detailToggle.className = "activity-detail-toggle";
+    detailToggle.textContent = "View";
+    detailToggle.setAttribute("aria-expanded", "false");
+    detailToggleCell.append(detailToggle);
+    row.append(detailToggleCell);
+    elements.scheduleRows.append(row);
+
+    const detailRow = document.createElement("tr");
+    detailRow.className = "activity-grid-detail-row";
+    detailRow.hidden = true;
+    const detailCell = document.createElement("td");
+    detailCell.colSpan = table?.classList.contains("hide-team-total") ? 11 : 13;
+    const detailContent = document.createElement("div");
+    detailContent.className = "activity-grid-detail";
+    const agentName =
+      first.agentName ||
+      state.agents.find(
+        (agent) => Number(agent.id) === Number(first.accountId)
+      )?.name ||
+      `Agent ${first.accountId}`;
+    const metadata = [
+      ["Created", formatScheduleDateTime(first.createdAtUtc || first.createdAt)],
+      ["Agent", agentName],
+      ["CS agent", first.customerSupportAgent || "—"],
+      [
+        "Next run",
+        first.activityType === "immediate"
+          ? "—"
+          : formatScheduleDateTime(first.scheduledForUtc || first.scheduledFor),
+      ],
+      ["Last run", describeGroupLastRun(group)],
+    ];
+    for (const [label, value] of metadata) {
+      const item = document.createElement("div");
+      item.className = "activity-detail-item";
+      const term = document.createElement("span");
+      term.textContent = label;
+      const description = document.createElement("strong");
+      description.textContent = value || "—";
+      item.append(term, description);
+      detailContent.append(item);
+    }
+
+    const notes = createGroupDetailCell(group);
+    notes.className = "activity-detail-notes";
+    if (!notes.textContent.trim()) {
+      notes.textContent = "No additional notes.";
+    }
+    detailContent.append(notes);
+    const action = document.createElement("div");
+    action.className = "activity-detail-actions";
+
+    detailToggle.addEventListener("click", () => {
+      detailRow.hidden = !detailRow.hidden;
+      detailToggle.textContent = detailRow.hidden ? "View" : "Hide";
+      detailToggle.setAttribute("aria-expanded", String(!detailRow.hidden));
+    });
+
     if (first.activityType === "immediate") {
-      action.textContent = "—";
-      action.className = "schedule-limit-empty";
-      row.append(action);
-      elements.scheduleRows.append(row);
+      detailCell.append(detailContent);
+      detailRow.append(detailCell);
+      elements.scheduleRows.append(detailRow);
       continue;
     }
 
@@ -156,7 +208,6 @@ function renderSchedules() {
     remove.className = "schedule-cancel";
     remove.textContent = "Delete";
     remove.disabled = !deletable.length;
-    remove.style.marginLeft = "6px";
 
     remove.addEventListener("click", async () => {
       const leagueName = first.leagueName || `League ${first.idLeague}`;
@@ -208,8 +259,10 @@ function renderSchedules() {
     });
 
     action.append(cancel, remove);
-    row.append(action);
-    elements.scheduleRows.append(row);
+    detailContent.append(action);
+    detailCell.append(detailContent);
+    detailRow.append(detailCell);
+    elements.scheduleRows.append(detailRow);
   }
 }
 

@@ -71,17 +71,19 @@ function createStatusCell(status) {
 const scheduleLimitFields = ["spread", "moneyLine", "total", "teamTotal"];
 
 function scheduleGroupKey(schedule) {
+  const created = String(schedule.createdAtUtc || schedule.createdAt || "");
+  const createdMinute = created.includes("T")
+    ? created.slice(0, 16)
+    : created.replace(/:\d{2}(?:\s|$)/, " ").trim();
   return JSON.stringify([
     schedule.activityType || "schedule",
     schedule.accountId,
-    schedule.idOrganization,
     schedule.idLeague,
     schedule.idSportType,
-    schedule.periodNumber || 0,
     schedule.limitMode || "normal",
     schedule.recurrence || "",
     schedule.scheduledForUtc || schedule.scheduledFor || "",
-    schedule.createdAtUtc || schedule.createdAt || "",
+    createdMinute,
     schedule.customerSupportAgent || "",
     schedule.targetScope || "selected",
   ]);
@@ -122,6 +124,53 @@ function createLimitValueCell(schedule, field) {
   cell.textContent = Number(schedule.value).toLocaleString();
   cell.classList.add("schedule-limit-value");
   return cell;
+}
+
+function createMatrixLimitCell(group, field, periodLimits) {
+  const matches = group.filter((schedule) =>
+    schedule.field === field &&
+    (Number(schedule.periodNumber || 0) > 0) === periodLimits
+  );
+  const cell = document.createElement("td");
+
+  if (field === "teamTotal") {
+    cell.classList.add("col-team-total");
+  }
+  if (!matches.length) {
+    cell.textContent = "—";
+    cell.classList.add("schedule-limit-empty");
+    return cell;
+  }
+
+  cell.classList.add("schedule-limit-value");
+  const values = [...new Map(matches.map((schedule) => [
+    `${schedule.periodNumber || 0}:${schedule.value}`,
+    schedule,
+  ])).values()];
+
+  for (const [index, schedule] of values.entries()) {
+    const line = document.createElement("div");
+    line.textContent = periodLimits && values.length > 1
+      ? `P${schedule.periodNumber} ${Number(schedule.value).toLocaleString()}`
+      : Number(schedule.value).toLocaleString();
+    cell.append(line);
+    if (index < values.length - 1) {
+      line.classList.add("schedule-limit-multiple");
+    }
+  }
+  return cell;
+}
+
+function describeScheduleTiming(schedule) {
+  if (schedule.activityType === "immediate") {
+    return "Immediate";
+  }
+  if (schedule.recurrence) {
+    return schedule.recurrence;
+  }
+  return `One time · ${formatScheduleDateTime(
+    schedule.scheduledForUtc || schedule.scheduledFor
+  )}`;
 }
 
 /*

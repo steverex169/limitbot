@@ -2,15 +2,15 @@
       <div class="panel-head">
         <div>
           <p class="eyebrow">AUTOMATION</p>
-          <h2>Activity logs</h2>
-          <p>Review immediate limit changes and upcoming ET schedules.</p>
+          <h2>Current schedules</h2>
+          <p>Review limit values by day and manage upcoming ET schedules.</p>
         </div>
         <div class="filters activity-log-filters">
           <label class="select-field">
             <span>Status</span>
             <select id="scheduleStatusFilter">
-              <option value="all" selected>All</option>
-              <option value="active">Active</option>
+              <option value="active" selected>Current</option>
+              <option value="all">All history</option>
               <option value="cancelled">Cancelled</option>
             </select>
           </label>
@@ -23,27 +23,29 @@
       <div class="table-wrap schedules-table-wrap">
         <table class="schedules-table">
           <thead>
+            <tr class="schedule-heading-groups">
+              <th rowspan="2">League / Sport</th>
+              <th class="full-game-heading" colspan="4">Full game</th>
+              <th class="period-heading" colspan="4">Period / 1H</th>
+              <th rowspan="2">Day / Time (ET)</th>
+              <th rowspan="2">Scope</th>
+              <th rowspan="2">Status</th>
+              <th rowspan="2">Details</th>
+            </tr>
             <tr>
-              <th>Created (EST)</th>
-              <th>Agent</th>
-              <th>CS Agent</th>
-              <th>League</th>
-              <th>Period</th>
               <th>Spread</th>
               <th>Money line</th>
               <th>Total</th>
               <th class="col-team-total">Team total</th>
-              <th>Repeats</th>
-              <th>Next run (EST)</th>
-              <th>Last run (EST)</th>
-              <th>Status</th>
-              <th>Detail</th>
-              <th>Action</th>
+              <th>Spread</th>
+              <th>Money line</th>
+              <th>Total</th>
+              <th class="col-team-total">Team total</th>
             </tr>
           </thead>
           <tbody id="scheduleRows">
             <tr>
-            <td colspan="15" class="empty-state">No scheduled limits.</td>
+            <td colspan="13" class="empty-state">No scheduled limits.</td>
           </tr>
         </tbody>
       </table>

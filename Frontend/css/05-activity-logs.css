@@ -1,6 +1,6 @@
 /* 05-activity-logs.css
-   Activity Logs: schedules panel and its 15-column table, per-status
-   badges, the cycle counter, and the cancel / delete-all buttons. */
+   Current schedules: a compact limits-sheet grid with expandable audit
+   details, status badges and schedule actions. */
 
 .schedules-panel {
   margin-top: 14px;
@@ -10,12 +10,11 @@
   max-height: none;
   overflow-x: auto;
   overflow-y: visible;
+  border-radius: 0 0 14px 14px;
 }
 
 .schedules-table {
-  /* Fifteen columns still need width, but compact timestamps and a hidden
-     Team total keep Status and Detail on screen at laptop widths. */
-  min-width: 1560px;
+  min-width: 1180px;
   table-layout: fixed;
 }
 
@@ -27,72 +26,71 @@
 
 .schedules-table th,
 .schedules-table td {
-  padding: 12px 14px;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
+  padding: 10px 12px;
+  border-right: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  line-height: 1.3;
 }
 
-/* Created, Agent, CS Agent, League, Period, Spread, Money line, Total,
-   Team total, Repeats, Next run, Last run, Status, Detail, Action. Hiding
-   Team total does not renumber these: nth-child counts markup position, not
-   visible position. */
-.schedules-table th:nth-child(1) { width: 7%; }
-.schedules-table th:nth-child(2) { width: 6%; }
-.schedules-table th:nth-child(3) { width: 5%; }
-.schedules-table th:nth-child(4) { width: 9%; }
-.schedules-table th:nth-child(5) { width: 5%; }
-.schedules-table th:nth-child(6) { width: 5%; }
-.schedules-table th:nth-child(7) { width: 5%; }
-.schedules-table th:nth-child(8) { width: 5%; }
-.schedules-table th:nth-child(9) { width: 5%; }
-.schedules-table th:nth-child(10) { width: 9%; }
-.schedules-table th:nth-child(11) { width: 7%; }
-.schedules-table th:nth-child(12) { width: 8%; }
-.schedules-table th:nth-child(13) { width: 6%; }
-.schedules-table th:nth-child(14) { width: 8%; }
-.schedules-table th:nth-child(15) { width: 10%; }
-
-/* Under table-layout: fixed a cell that cannot wrap prints straight over its
-   neighbour, so only genuinely short values are allowed to stay on one line.
-   Timestamps wrap at the space between date and time. */
-.schedules-table td:nth-child(6),
-.schedules-table td:nth-child(7),
-.schedules-table td:nth-child(8),
-.schedules-table td:nth-child(9),
-.schedules-table td:nth-child(15) {
-  white-space: nowrap;
+.schedules-table th:last-child,
+.schedules-table td:last-child {
+  border-right: 0;
 }
 
-/* Nothing may bleed into the next column even if a value outgrows its width. */
-.schedules-table td,
-.schedules-table th {
-  overflow: hidden;
+.schedule-heading-groups th {
+  padding-top: 11px;
+  padding-bottom: 11px;
+  background: color-mix(in srgb, var(--blue-soft) 55%, var(--surface));
+  color: var(--ink);
+  text-align: center;
+  letter-spacing: 0.06em;
 }
 
-/* The four limit columns read as one printed line, so the digits share a
-   width and sit against the same edge. */
-.schedule-limit-value {
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-}
-
-/* Two buttons need to sit side by side without the header word breaking in
-   half, which is what "ACTIO N" was. */
-.schedules-table th:nth-child(15),
-.schedules-table td:nth-child(15) {
-  white-space: nowrap;
+.schedules-table thead tr:last-child th {
+  background: color-mix(in srgb, var(--canvas) 70%, var(--surface));
   text-align: right;
 }
 
-/* Two buttons in one narrow cell: tighter padding, and they wrap onto a
-   second line rather than being clipped by the edge of the table. */
-.schedules-table td:nth-child(15) {
-  white-space: normal;
+.schedules-table th:first-child,
+.schedules-table td:first-child {
+  width: 190px;
+  text-align: left;
 }
 
-.schedules-table td:nth-child(15) .schedule-cancel {
+.activity-grid-row > td:nth-child(n + 2):nth-child(-n + 9) {
+  text-align: right;
+}
+
+.activity-grid-row > td:nth-child(10) {
+  width: 155px;
+}
+
+.activity-grid-row > td:nth-child(11) {
+  width: 100px;
+}
+
+.activity-grid-row > td:nth-child(12) {
+  width: 92px;
+}
+
+.activity-grid-row > td:nth-child(13) {
+  width: 70px;
+  text-align: center;
+}
+
+.activity-grid-row strong {
+  font-size: 13px;
+}
+
+.activity-early-badge {
   display: inline-block;
-  padding: 0 8px;
+  margin-left: 7px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #fff4e5;
+  color: #b54708;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
@@ -107,28 +105,87 @@
   color: var(--muted, #8a94a6);
 }
 
-/* A group whose limits ended in different states shows a badge each. */
-.schedules-table td:nth-child(13) .schedule-status + .schedule-status {
+.schedule-limit-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.schedule-limit-multiple + div,
+.schedule-limit-multiple {
+  margin-top: 3px;
+}
+
+.activity-grid-row .schedule-status + .schedule-status {
   margin-top: 4px;
 }
 
-.schedules-table td:nth-child(13) .schedule-status {
+.activity-grid-row .schedule-status {
   display: inline-block;
 }
 
 /* Per-limit notes stack instead of running together on one line. */
+.activity-detail-toggle {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--blue);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.activity-grid-detail-row td {
+  padding: 0;
+  border-right: 0;
+  background: color-mix(in srgb, var(--canvas) 62%, var(--surface));
+}
+
+.activity-grid-detail {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(110px, 1fr));
+  gap: 12px 18px;
+  padding: 14px 16px;
+  border-left: 3px solid var(--blue);
+}
+
+.activity-detail-item span,
+.activity-detail-item strong {
+  display: block;
+}
+
+.activity-detail-item span {
+  margin-bottom: 3px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.activity-detail-item strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.activity-detail-notes {
+  grid-column: 1 / -2;
+  align-self: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .schedule-detail-line + .schedule-detail-line {
   margin-top: 4px;
 }
 
-
-/* The failure reason is the widest free text in the row and the reason the
-   column exists, so it wraps instead of being clipped. Detail is column 14
-   now that the limits occupy four columns of their own. */
-.schedules-table td:nth-child(14) {
-  color: var(--muted);
-  font-size: 12px;
-  overflow-wrap: anywhere;
+.activity-detail-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
 }
 
 /*
@@ -254,3 +311,21 @@
   opacity: 0.6;
 }
 
+@media (max-width: 900px) {
+  .schedules-table {
+    min-width: 1040px;
+  }
+
+  .activity-grid-detail {
+    grid-template-columns: repeat(2, minmax(130px, 1fr));
+  }
+
+  .activity-detail-notes,
+  .activity-detail-actions {
+    grid-column: 1 / -1;
+  }
+
+  .activity-detail-actions {
+    justify-content: flex-start;
+  }
+}
