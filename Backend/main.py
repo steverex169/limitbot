@@ -258,6 +258,9 @@ api_headers = {
 
 auth_sessions = {}
 auth_sessions_lock = threading.Lock()
+hierarchy_confirmations = {}
+hierarchy_confirmations_lock = threading.Lock()
+hierarchy_confirmation_ttl = timedelta(minutes=5)
 login_attempts = defaultdict(deque)
 login_attempts_lock = threading.Lock()
 current_auth = ContextVar("current_auth", default=None)
@@ -1669,6 +1672,10 @@ def record_limit_change(
     account_id, organization_id, league_id, sport_type_id,
     period_number, field, limit_mode, old_value, new_value,
     customer_support_agent=None,
+    target_scope="selected",
+    affected_agents=None,
+    affected_customers=None,
+    changed_at=None,
 ):
     """Log a limit that actually changed. Never let logging break the save."""
     try:
@@ -1689,6 +1696,10 @@ def record_limit_change(
                 source=source,
                 schedule_id=schedule_id,
                 customer_support_agent=customer_support_agent,
+                target_scope=target_scope,
+                affected_agents=affected_agents,
+                affected_customers=affected_customers,
+                changed_at=changed_at or utc_now_naive(),
             ))
             db.commit()
     except Exception:
@@ -2500,6 +2511,274 @@ def save_limit_change(request_data):
         except RuntimeError as e:
             logger.exception("RuntimeError during limit save")
             raise ValueError(str(e)) from e
+
+
+def normalize_hierarchy_changes(request_data):
+    """Validate a batch for one native all-hierarchy save."""
+    raw_changes = request_data.get("changes")
+    if not isinstance(raw_changes, list) or not raw_changes:
+        raise ValueError("Choose at least one limit to update")
+    if len(raw_changes) > len(allowed_limit_fields):
+        raise ValueError("Too many limits in one update")
+
+    customer_support_agent = str(
+        request_data.get("customerSupportAgent", "")
+    ).strip()
+    if not customer_support_agent:
+        raise ValueError("Enter the Customer Support Agent name")
+    if len(customer_support_agent) > 100:
+        raise ValueError(
+            "Customer Support Agent name must be 100 characters or fewer"
+        )
+
+    normalized = []
+    row_identity = None
+    seen_fields = set()
+    for raw in raw_changes:
+        if not isinstance(raw, dict):
+            raise ValueError("Invalid limit change")
+        field = raw.get("field")
+        if field not in allowed_limit_fields or field in seen_fields:
+            raise ValueError("Unsupported or duplicate limit field")
+        limit_mode = str(raw.get("limitMode", "normal")).strip().lower()
+        if limit_mode not in limit_mode_prefixes:
+            raise ValueError("Unsupported limit mode")
+        try:
+            account_id = validate_account_id(safe_int(raw["accountId"]))
+            organization_id = safe_int(raw["idOrganization"])
+            league_id = safe_int(raw["idLeague"])
+            sport_type_id = safe_int(raw["idSportType"])
+            period_number = safe_int(raw.get("periodNumber", 0))
+            new_value = safe_int(raw["value"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("IDs and limit value must be whole numbers") from error
+        if new_value < 0 or new_value > 1_000_000_000:
+            raise ValueError("Limit must be between 0 and 1,000,000,000")
+
+        identity = (
+            account_id,
+            organization_id,
+            league_id,
+            sport_type_id,
+            period_number,
+            limit_mode,
+        )
+        if row_identity is None:
+            row_identity = identity
+        elif identity != row_identity:
+            raise ValueError("All-agent updates must belong to the same league row")
+
+        matching_row = find_limit_row(
+            account_id,
+            organization_id,
+            league_id,
+            sport_type_id,
+            period_number,
+        )
+        if matching_row is None:
+            raise ValueError("The selected league row is no longer available")
+        if ".Exotics[" in matching_row.get("JsonPath", ""):
+            raise ValueError("Props/Exotics are pending verification")
+
+        api_field = (
+            f"{limit_mode_prefixes[limit_mode]}{allowed_limit_fields[field]}"
+        )
+        old_value = stored_limit_value(
+            matching_row, field, api_field.startswith("Early")
+        )
+        normalized.append({
+            "accountId": account_id,
+            "idOrganization": safe_int(
+                matching_row.get("IdOrganization"), organization_id
+            ),
+            "idLeague": league_id,
+            "idSportType": safe_int(
+                matching_row.get("IdSportType"), sport_type_id
+            ),
+            "periodNumber": period_number,
+            "field": field,
+            "apiField": api_field,
+            "limitMode": limit_mode,
+            "oldValue": old_value,
+            "value": new_value,
+        })
+        seen_fields.add(field)
+
+    return normalized, customer_support_agent
+
+
+def hierarchy_agent_ids():
+    auth = auth_context()
+    ids = [safe_int(auth["id"])]
+    ids.extend(safe_int(agent.get("id")) for agent in load_agents())
+    return sorted({agent_id for agent_id in ids if agent_id > 0})
+
+
+def hierarchy_payload(changes, agent_ids, include_changes):
+    auth = auth_context()
+    first = changes[0]
+    api_change = {
+        "IdOrganization": first["idOrganization"],
+        "IdSportType": first["idSportType"],
+        "Spread": None,
+        "YesNoSpread": None,
+        "MoneyLine": None,
+        "YesNoMoneyLine": None,
+        "Total": None,
+        "YesNoTotal": None,
+        "TeamTotal": None,
+        "YesNoTeamTotal": None,
+        "EarlySpread": None,
+        "EarlyMoneyLine": None,
+        "EarlyTotal": None,
+        "EarlyTeamTotal": None,
+        "TeamTotalPeriod": None,
+        "DetailPeriod": first["periodNumber"] or None,
+    }
+    for change in changes:
+        api_change[change["apiField"]] = change["value"]
+    return {
+        "IdCustomer": str(auth["id"]),
+        "AllPeriods": False,
+        # The native UI previews the explicitly selected agent list, then
+        # enables hierarchy propagation only for the confirmed save.
+        "AllHierarchy": bool(include_changes),
+        "RemoveBlue": False,
+        "RemoveBlueSpecific": False,
+        "UpdateDetails": False,
+        "AllPlayers": False,
+        "BBWagerType": ["S"],
+        "Changes": [api_change] if include_changes else None,
+        "AgentsFilterList": agent_ids,
+        "IdLeague": 0,
+    }
+
+
+def preview_hierarchy_limit_changes(request_data):
+    changes, customer_support_agent = normalize_hierarchy_changes(request_data)
+    agent_ids = hierarchy_agent_ids()
+    if not agent_ids:
+        raise ValueError("No agents are available for this account")
+    if write_allowed_accounts and any(
+        not write_allowed(agent_id) for agent_id in agent_ids
+    ):
+        raise ValueError("The all-agent update includes a restricted account")
+
+    response = api_request(
+        "POST",
+        f"{partner_api}/Backbone/CheckAffectedAccounts/",
+        json=hierarchy_payload(changes, agent_ids, include_changes=False),
+        timeout=30,
+    )
+    response.raise_for_status()
+    data = response.json()
+    if data.get("Errors"):
+        raise RuntimeError(", ".join(data["Errors"]))
+    payload = data.get("Payload") or {}
+    affected_agents = safe_int(payload.get("TotalAgents"), len(agent_ids))
+    affected_customers = safe_int(payload.get("TotalCustomers"), 0)
+
+    auth = auth_context()
+    confirmation_token = secrets.token_urlsafe(32)
+    now = datetime.now(timezone.utc)
+    with hierarchy_confirmations_lock:
+        expired = [
+            token for token, item in hierarchy_confirmations.items()
+            if item["expiresAt"] <= now
+        ]
+        for token in expired:
+            hierarchy_confirmations.pop(token, None)
+        hierarchy_confirmations[confirmation_token] = {
+            "sessionHash": auth.get("sessionHash"),
+            "userId": auth.get("userId"),
+            "changes": changes,
+            "customerSupportAgent": customer_support_agent,
+            "agentIds": agent_ids,
+            "affectedAgents": affected_agents,
+            "affectedCustomers": affected_customers,
+            "expiresAt": now + hierarchy_confirmation_ttl,
+        }
+    return {
+        "confirmationToken": confirmation_token,
+        "affectedAgents": affected_agents,
+        "affectedCustomers": affected_customers,
+        "playersIncluded": False,
+        "expiresInSeconds": int(hierarchy_confirmation_ttl.total_seconds()),
+    }
+
+
+def save_hierarchy_limit_changes(request_data):
+    confirmation_token = str(request_data.get("confirmationToken", "")).strip()
+    if not confirmation_token:
+        raise ValueError("Preview the affected accounts before saving")
+    auth = auth_context()
+    with hierarchy_confirmations_lock:
+        pending = hierarchy_confirmations.pop(confirmation_token, None)
+    if (
+        pending is None
+        or pending["expiresAt"] <= datetime.now(timezone.utc)
+        or pending["sessionHash"] != auth.get("sessionHash")
+        or pending["userId"] != auth.get("userId")
+    ):
+        raise ValueError("The all-agent confirmation expired. Preview it again")
+
+    changes = pending["changes"]
+    agent_ids = pending["agentIds"]
+    response = api_request(
+        "POST",
+        f"{partner_api}/Backbone/save/",
+        json=hierarchy_payload(changes, agent_ids, include_changes=True),
+        timeout=30,
+    )
+    response.raise_for_status()
+    data = response.json()
+    if data.get("Errors"):
+        raise RuntimeError(", ".join(data["Errors"]))
+
+    with data_lock:
+        for agent_id in agent_ids:
+            league_cache.pop(agent_id, None)
+        for cache_key in list(period_cache):
+            if cache_key[0] in agent_ids:
+                period_cache.pop(cache_key, None)
+
+    changed_at = utc_now_naive()
+    for change in changes:
+        record_limit_change(
+            change["accountId"],
+            change["idOrganization"],
+            change["idLeague"],
+            change["idSportType"],
+            change["periodNumber"],
+            change["field"],
+            change["limitMode"],
+            change["oldValue"],
+            change["value"],
+            customer_support_agent=pending["customerSupportAgent"],
+            target_scope="all_agents",
+            affected_agents=pending["affectedAgents"],
+            affected_customers=pending["affectedCustomers"],
+            changed_at=changed_at,
+        )
+
+    fields = ", ".join(
+        limit_field_labels.get(change["field"], change["field"])
+        for change in changes
+    )
+    send_telegram_success_message(
+        f"All-agent immediate limit update\n"
+        f"Fields: {fields}\n"
+        f"Agents affected: {pending['affectedAgents']:,}\n"
+        f"Customers affected: {pending['affectedCustomers']:,}\n"
+        f"Customer Support Agent: {pending['customerSupportAgent']}"
+    )
+    return {
+        "message": "Limits updated for all agents",
+        "changed": True,
+        "affectedAgents": pending["affectedAgents"],
+        "affectedCustomers": pending["affectedCustomers"],
+        "playersIncluded": False,
+    }
 
 
 
@@ -4634,6 +4913,15 @@ def schedule_status_rows(account_id):
             if change.old_value is not None
             else "not set"
         )
+        target_scope = getattr(change, "target_scope", "selected") or "selected"
+        affected_agents = getattr(change, "affected_agents", None)
+        affected_customers = getattr(change, "affected_customers", None)
+        scope_note = ""
+        if target_scope == "all_agents":
+            scope_note = (
+                f" · Pushed to {affected_agents or 0:,} agents; "
+                f"{affected_customers or 0:,} customers affected"
+            )
         manual_rows.append({
             "activityType": "immediate",
             "id": f"change-{change.id}",
@@ -4645,6 +4933,9 @@ def schedule_status_rows(account_id):
                 int(change.account_id), f"Agent {change.account_id}"
             ),
             "customerSupportAgent": change.customer_support_agent,
+            "targetScope": target_scope,
+            "affectedAgents": affected_agents,
+            "affectedCustomers": affected_customers,
             "idOrganization": change.organization_id,
             "idLeague": change.league_id,
             "leagueName": (
@@ -4677,7 +4968,7 @@ def schedule_status_rows(account_id):
             "completedAt": eastern_timestamp(changed_at),
             "error": None,
             "runNote": (
-                f"Changed from {old_value} to {change.new_value:,}"
+                f"Changed from {old_value} to {change.new_value:,}{scope_note}"
             ),
         })
 
@@ -5364,6 +5655,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
         if path not in {
             "/api/limits",
+            "/api/limits/hierarchy/preview",
+            "/api/limits/hierarchy",
             "/api/schedules",
             "/api/schedules/ramp",
             "/api/trackers",
@@ -5384,7 +5677,11 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         try:
             request_data = self.read_json()
             result = (
-                create_limit_trackers(request_data)
+                preview_hierarchy_limit_changes(request_data)
+                if path == "/api/limits/hierarchy/preview"
+                else save_hierarchy_limit_changes(request_data)
+                if path == "/api/limits/hierarchy"
+                else create_limit_trackers(request_data)
                 if path == "/api/trackers"
                 else delete_limit_trackers(request_data)
                 if path == "/api/trackers/delete"
@@ -5453,12 +5750,20 @@ def migrate_limit_change_columns():
     existing = {
         column["name"] for column in inspect(engine).get_columns("limit_changes")
     }
-    if "customer_support_agent" not in existing:
-        with engine.begin() as connection:
+    additions = {
+        "customer_support_agent": "VARCHAR(100) NULL",
+        "target_scope": "VARCHAR(20) NOT NULL DEFAULT 'selected'",
+        "affected_agents": "INTEGER NULL",
+        "affected_customers": "INTEGER NULL",
+    }
+    with engine.begin() as connection:
+        for column_name, column_type in additions.items():
+            if column_name in existing:
+                continue
             connection.execute(
                 text(
                     "ALTER TABLE limit_changes "
-                    "ADD COLUMN customer_support_agent VARCHAR(100) NULL"
+                    f"ADD COLUMN {column_name} {column_type}"
                 )
             )
 

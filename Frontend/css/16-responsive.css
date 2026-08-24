@@ -177,6 +177,10 @@
     gap: 6px;
   }
 
+  .limit-target-scope {
+    grid-template-columns: 1fr;
+  }
+
   .dialog-actions {
     flex-direction: column;
   }

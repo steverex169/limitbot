@@ -12,6 +12,17 @@
         <span>Customer Support Agent (required)</span>
         <input id="customerSupportAgent" type="text" maxlength="100" autocomplete="off" placeholder="Required for every limit change" required aria-required="true">
       </label>
+      <fieldset class="limit-target-scope">
+        <legend>Apply this immediate change to</legend>
+        <label>
+          <input type="radio" name="limitTargetScope" value="selected" checked>
+          <span><strong>Selected agent only</strong><small>Change only the account shown in the table.</small></span>
+        </label>
+        <label>
+          <input type="radio" name="limitTargetScope" value="all">
+          <span><strong>All agents</strong><small>Main agent and every subagent. Player overrides stay untouched.</small></span>
+        </label>
+      </fieldset>
       <div id="dialogMessage" class="message error" role="alert" hidden></div>
       <section class="schedule-controls" aria-labelledby="scheduleControlsTitle">
         <div class="schedule-controls-head">

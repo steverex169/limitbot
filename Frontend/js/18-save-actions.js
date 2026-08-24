@@ -23,6 +23,96 @@ function getRequiredCustomerSupportAgent() {
   return customerSupportAgent;
 }
 
+function getLimitTargetScope() {
+  return elements.limitTargetScopes?.find((input) => input.checked)?.value ||
+    "selected";
+}
+
+function serializeHierarchyChanges(batch) {
+  return batch.map((item) => ({
+    accountId: item.row.accountId,
+    idOrganization: item.row.idOrganization,
+    idLeague: item.row.idLeague,
+    idSportType: item.row.idSportType,
+    periodNumber: item.row.periodNumber || 0,
+    field: item.field,
+    value: item.newValue,
+    limitMode: item.mode === "early" ? "early" : "normal",
+  }));
+}
+
+async function saveHierarchyBatch(batch, customerSupportAgent) {
+  clearDialogMessage();
+  elements.confirmSave.disabled = true;
+  elements.confirmSchedule.disabled = true;
+  elements.confirmSave.textContent = "Checking impact…";
+
+  try {
+    const changes = serializeHierarchyChanges(batch);
+    const previewResponse = await fetch("/api/limits/hierarchy/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ changes, customerSupportAgent }),
+    });
+    const preview = await previewResponse.json();
+    if (!previewResponse.ok) {
+      throw new Error(preview.error || "The affected agents could not be checked");
+    }
+
+    const affectedAgents = Number(preview.affectedAgents || 0);
+    const affectedCustomers = Number(preview.affectedCustomers || 0);
+    const confirmed = window.confirm(
+      `Apply ${batch.length} limit ${batch.length === 1 ? "change" : "changes"} to all agents?\n\n` +
+      `${affectedAgents.toLocaleString()} agents and ${affectedCustomers.toLocaleString()} customers are affected. ` +
+      "The main agent and all subagents are included; player overrides are not overwritten."
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    elements.confirmSave.textContent = "Saving to all agents…";
+    const saveResponse = await fetch("/api/limits/hierarchy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmationToken: preview.confirmationToken }),
+    });
+    const result = await saveResponse.json();
+    if (!saveResponse.ok) {
+      throw new Error(result.error || "The all-agent update failed");
+    }
+
+    leagueDataVersion += 1;
+    batch.forEach((item) => {
+      const savedField = getModeFieldKey(
+        item.field,
+        item.mode === "early" ? "early" : "normal"
+      );
+      applySavedValueToRows(item.row, savedField, item.newValue);
+      setInputValueForChange(item, item.newValue);
+      removePendingChange(item);
+    });
+    state.activeChange = null;
+    state.pendingSaveBatch = [];
+    elements.dialog.close();
+    applyFilters();
+
+    const outcome =
+      `Updated ${batch.length} limit ${batch.length === 1 ? "value" : "values"} for ` +
+      `${Number(result.affectedAgents || affectedAgents).toLocaleString()} agents. ` +
+      "Player overrides were left unchanged.";
+    loadLeagues(false)
+      .catch(() => {})
+      .finally(() => showMessage(outcome, "success"));
+  } catch (error) {
+    showDialogMessage(error.message);
+  } finally {
+    elements.confirmSave.disabled = false;
+    elements.confirmSchedule.disabled = false;
+    elements.confirmSave.textContent =
+      `Save to ${state.partnerName || "Aces High"}`;
+  }
+}
+
 async function saveActiveChange() {
   const batch =
     Array.isArray(state.pendingSaveBatch) &&
@@ -39,6 +129,10 @@ async function saveActiveChange() {
   const customerSupportAgent = getRequiredCustomerSupportAgent();
   if (!customerSupportAgent) {
     return;
+  }
+
+  if (getLimitTargetScope() === "all") {
+    return saveHierarchyBatch(batch, customerSupportAgent);
   }
 
   const change = batch[0];
@@ -163,6 +257,10 @@ async function savePendingBatch() {
   const customerSupportAgent = getRequiredCustomerSupportAgent();
   if (!customerSupportAgent) {
     return;
+  }
+
+  if (getLimitTargetScope() === "all") {
+    return saveHierarchyBatch(batch, customerSupportAgent);
   }
 
   elements.confirmSave.disabled = true;
@@ -308,6 +406,13 @@ async function scheduleActiveChange() {
         : [];
 
   if (!batch.length) {
+    return;
+  }
+
+  if (getLimitTargetScope() === "all") {
+    showDialogMessage(
+      "All agents is available for immediate saves only. Choose Selected agent only to create a schedule."
+    );
     return;
   }
 

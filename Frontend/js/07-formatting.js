@@ -218,5 +218,9 @@ function clearScheduleOptions() {
     elements.customerSupportAgent.value = "";
   }
 
+  elements.limitTargetScopes?.forEach((input) => {
+    input.checked = input.value === "selected";
+  });
+
   clearDialogMessage();
 }

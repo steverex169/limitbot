@@ -77,6 +77,67 @@
   margin-bottom: 16px;
 }
 
+.limit-target-scope {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 0;
+  border: 0;
+}
+
+.limit-target-scope legend {
+  width: 100%;
+  margin-bottom: 7px;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.limit-target-scope label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.limit-target-scope label:has(input:checked) {
+  border-color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 7%, white);
+}
+
+.limit-target-scope input {
+  flex: 0 0 auto;
+  margin: 2px 0 0;
+  accent-color: var(--blue);
+}
+
+.limit-target-scope strong,
+.limit-target-scope small {
+  display: block;
+}
+
+.limit-target-scope strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.limit-target-scope small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+:root[data-theme="dark"] .limit-target-scope label:has(input:checked) {
+  background: color-mix(in srgb, var(--blue) 14%, var(--surface));
+}
+
 .schedule-controls {
   margin-bottom: 16px;
   padding: 14px;

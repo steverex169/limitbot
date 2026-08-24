@@ -99,6 +99,9 @@ const elements = {
   scheduleMinute: document.querySelector("#scheduleMinute"),
   schedulePeriod: document.querySelector("#schedulePeriod"),
   customerSupportAgent: document.querySelector("#customerSupportAgent"),
+  limitTargetScopes: [
+    ...document.querySelectorAll('input[name="limitTargetScope"]'),
+  ],
   deleteAllSchedules: document.querySelector("#deleteAllSchedules"),
   clearScheduleOptions: document.querySelector("#clearScheduleOptions"),
   cancelDialogButton: document.querySelector("#cancelDialogButton"),

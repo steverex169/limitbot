@@ -100,6 +100,9 @@ class LimitChange(Base):
     customer_support_agent: Mapped[str | None] = mapped_column(
         String(100), nullable=True
     )
+    target_scope: Mapped[str] = mapped_column(String(20), default="selected")
+    affected_agents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    affected_customers: Mapped[int | None] = mapped_column(Integer, nullable=True)
     changed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, index=True
     )
