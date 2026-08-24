@@ -97,6 +97,9 @@ class LimitChange(Base):
     # "manual" or "schedule", so a hand edit is distinguishable from automation.
     source: Mapped[str] = mapped_column(String(20), default="manual")
     schedule_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    customer_support_agent: Mapped[str | None] = mapped_column(
+        String(100), nullable=True
+    )
     changed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, index=True
     )

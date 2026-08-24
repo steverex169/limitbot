@@ -44,7 +44,9 @@ function renderSchedules() {
     cell.textContent =
       statusFilter === "cancelled"
         ? "No cancelled schedules."
-        : "No active schedules.";
+        : statusFilter === "all"
+          ? "No activity yet."
+          : "No active activity.";
 
     row.append(cell);
     elements.scheduleRows.append(row);
@@ -81,9 +83,15 @@ function renderSchedules() {
     }
 
     row.append(
-      createTextCell(first.recurrence || "One time"),
       createTextCell(
-        formatScheduleDateTime(first.scheduledForUtc || first.scheduledFor)
+        first.activityType === "immediate"
+          ? "Immediate"
+          : first.recurrence || "One time"
+      ),
+      createTextCell(
+        first.activityType === "immediate"
+          ? "—"
+          : formatScheduleDateTime(first.scheduledForUtc || first.scheduledFor)
       ),
       createTextCell(describeGroupLastRun(group)),
       createGroupStatusCell(group),
@@ -91,6 +99,14 @@ function renderSchedules() {
     );
 
     const action = document.createElement("td");
+    if (first.activityType === "immediate") {
+      action.textContent = "—";
+      action.className = "schedule-limit-empty";
+      row.append(action);
+      elements.scheduleRows.append(row);
+      continue;
+    }
+
     const cancellable = group.filter((schedule) =>
       ["pending", "failed"].includes(schedule.status)
     );
@@ -212,7 +228,10 @@ if (elements.deleteAllSchedules) {
       return;
     }
 
-    const count = state.schedules.length;
+    const scheduledRows = state.schedules.filter(
+      (item) => item.activityType !== "immediate"
+    );
+    const count = scheduledRows.length;
 
     if (!count) {
       showMessage("There are no schedules to delete.", "error");
@@ -254,7 +273,9 @@ if (elements.deleteAllSchedules) {
         throw new Error(data.error || "Could not delete the schedules");
       }
 
-      state.schedules = [];
+      state.schedules = state.schedules.filter(
+        (item) => item.activityType === "immediate"
+      );
       state.schedulesAgentId = null;
       renderSchedules();
       renderRows();
@@ -266,8 +287,7 @@ if (elements.deleteAllSchedules) {
       showMessage(error.message, "error");
     } finally {
       elements.deleteAllSchedules.disabled = false;
-      elements.deleteAllSchedules.textContent = "Delete all";
+      elements.deleteAllSchedules.textContent = "Delete schedules";
     }
   });
 }
-

@@ -1668,6 +1668,7 @@ current_change_source = ContextVar("current_change_source", default=None)
 def record_limit_change(
     account_id, organization_id, league_id, sport_type_id,
     period_number, field, limit_mode, old_value, new_value,
+    customer_support_agent=None,
 ):
     """Log a limit that actually changed. Never let logging break the save."""
     try:
@@ -1687,6 +1688,7 @@ def record_limit_change(
                 new_value=int(new_value),
                 source=source,
                 schedule_id=schedule_id,
+                customer_support_agent=customer_support_agent,
             ))
             db.commit()
     except Exception:
@@ -2285,6 +2287,7 @@ def save_single_limit(
         "early" if api_field.startswith("Early") else "normal",
         previous_value,
         new_value,
+        customer_support_agent=customer_support_agent,
     )
 
     source_type, _ = current_change_source.get() or (None, None)
@@ -4438,6 +4441,19 @@ def schedule_status_rows(account_id):
             ScheduledLimit.account_id == int(account_id)
         )
 
+    # Activity Logs must also include real immediate writes. Scheduled and
+    # tracker writes already have their own views, so only manual changes are
+    # added here; including every LimitChange would duplicate each completed
+    # schedule beside its ScheduledLimit row.
+    manual_query = select(LimitChange).where(
+        LimitChange.user_id == auth["userId"],
+        LimitChange.source == "manual",
+    )
+    if int(account_id) != int(auth["id"]):
+        manual_query = manual_query.where(
+            LimitChange.account_id == int(account_id)
+        )
+
     with database_session() as db:
         jobs = list(
             db.scalars(
@@ -4457,6 +4473,11 @@ def schedule_status_rows(account_id):
                     ),
                     ScheduledLimit.created_at.desc(),
                 )
+            )
+        )
+        manual_changes = list(
+            db.scalars(
+                manual_query.order_by(LimitChange.changed_at.desc())
             )
         )
 
@@ -4485,7 +4506,10 @@ def schedule_status_rows(account_id):
     # league names once per scheduled account so the Activity Logs table does
     # not depend on the currently selected agent's league rows.
     league_names = {}
-    for scheduled_account_id in sorted({int(job.account_id) for job in jobs}):
+    activity_account_ids = {
+        int(item.account_id) for item in [*jobs, *manual_changes]
+    }
+    for scheduled_account_id in sorted(activity_account_ids):
         try:
             account_leagues = get_leagues(scheduled_account_id)
         except Exception as error:
@@ -4527,7 +4551,8 @@ def schedule_status_rows(account_id):
                 league_name,
             )
 
-    return [{
+    schedule_rows = [{
+        "activityType": "schedule",
         "id": job.id,
         "status": job.status,
         "scheduledFor": eastern_timestamp(
@@ -4600,6 +4625,71 @@ def schedule_status_rows(account_id):
         # Why a successful run changed nothing, when that is the case.
         "runNote": getattr(job, "run_note", None),
     } for job in jobs]
+
+    manual_rows = []
+    for change in manual_changes:
+        changed_at = change.changed_at.replace(tzinfo=timezone.utc)
+        old_value = (
+            f"{change.old_value:,}"
+            if change.old_value is not None
+            else "not set"
+        )
+        manual_rows.append({
+            "activityType": "immediate",
+            "id": f"change-{change.id}",
+            "status": "completed",
+            "scheduledFor": None,
+            "scheduledForUtc": None,
+            "accountId": change.account_id,
+            "agentName": agent_names.get(
+                int(change.account_id), f"Agent {change.account_id}"
+            ),
+            "customerSupportAgent": change.customer_support_agent,
+            "idOrganization": change.organization_id,
+            "idLeague": change.league_id,
+            "leagueName": (
+                league_names.get((
+                    int(change.account_id),
+                    int(change.organization_id),
+                    int(change.league_id),
+                    int(change.sport_type_id),
+                ))
+                or league_names.get((
+                    int(change.account_id),
+                    int(change.organization_id),
+                    int(change.league_id),
+                    None,
+                ))
+                or f"League {change.league_id}"
+            ),
+            "idSportType": change.sport_type_id,
+            "periodNumber": change.period_number,
+            "field": change.field,
+            "value": change.new_value,
+            "limitMode": change.limit_mode,
+            "recurring": False,
+            "recurrence": None,
+            "lastRunStatus": "completed",
+            "lastRunAt": eastern_timestamp(changed_at),
+            "lastRunAtUtc": changed_at.isoformat(),
+            "createdAt": eastern_timestamp(changed_at),
+            "createdAtUtc": changed_at.isoformat(),
+            "completedAt": eastern_timestamp(changed_at),
+            "error": None,
+            "runNote": (
+                f"Changed from {old_value} to {change.new_value:,}"
+            ),
+        })
+
+    # Waiting jobs remain at the top. Everything else, including immediate
+    # writes, follows in reverse chronological order.
+    return sorted(
+        [*schedule_rows, *manual_rows],
+        key=lambda row: (
+            0 if row["status"] in {"pending", "running"} else 1,
+            -datetime.fromisoformat(row["createdAtUtc"]).timestamp(),
+        ),
+    )
 
 
 
@@ -5359,6 +5449,20 @@ def migrate_schedule_columns():
                 )
 
 
+def migrate_limit_change_columns():
+    existing = {
+        column["name"] for column in inspect(engine).get_columns("limit_changes")
+    }
+    if "customer_support_agent" not in existing:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE limit_changes "
+                    "ADD COLUMN customer_support_agent VARCHAR(100) NULL"
+                )
+            )
+
+
 def migrate_telegram_recipients():
     with engine.begin() as connection:
         connection.execute(
@@ -5457,6 +5561,7 @@ encryption_cipher()
 Base.metadata.create_all(bind=engine)
 migrate_user_columns()
 migrate_schedule_columns()
+migrate_limit_change_columns()
 migrate_telegram_recipients()
 recover_schedules_on_startup()
 logger.info("Dashboard listening on http://%s:%s", server_host, server_port)

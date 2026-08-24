@@ -67,6 +67,7 @@ const scheduleLimitFields = ["spread", "moneyLine", "total", "teamTotal"];
 
 function scheduleGroupKey(schedule) {
   return JSON.stringify([
+    schedule.activityType || "schedule",
     schedule.accountId,
     schedule.idOrganization,
     schedule.idLeague,
@@ -221,4 +222,3 @@ async function applyToGroup(group, path, extra = () => ({})) {
 
   return { removed, failure };
 }
-
