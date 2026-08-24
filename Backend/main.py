@@ -2664,19 +2664,9 @@ def preview_hierarchy_limit_changes(request_data):
     ):
         raise ValueError("The all-agent update includes a restricted account")
 
-    response = api_request(
-        "POST",
-        f"{partner_api}/Backbone/CheckAffectedAccounts/",
-        json=hierarchy_payload(changes, agent_ids, include_changes=False),
-        timeout=30,
+    affected_agents, affected_customers = check_hierarchy_impact(
+        changes, agent_ids
     )
-    response.raise_for_status()
-    data = response.json()
-    if data.get("Errors"):
-        raise RuntimeError(", ".join(data["Errors"]))
-    payload = data.get("Payload") or {}
-    affected_agents = safe_int(payload.get("TotalAgents"), len(agent_ids))
-    affected_customers = safe_int(payload.get("TotalCustomers"), 0)
 
     auth = auth_context()
     confirmation_token = secrets.token_urlsafe(32)
@@ -2707,10 +2697,24 @@ def preview_hierarchy_limit_changes(request_data):
     }
 
 
-def save_hierarchy_limit_changes(request_data):
-    confirmation_token = str(request_data.get("confirmationToken", "")).strip()
-    if not confirmation_token:
-        raise ValueError("Preview the affected accounts before saving")
+def check_hierarchy_impact(changes, agent_ids):
+    response = api_request(
+        "POST",
+        f"{partner_api}/Backbone/CheckAffectedAccounts/",
+        json=hierarchy_payload(changes, agent_ids, include_changes=False),
+        timeout=30,
+    )
+    response.raise_for_status()
+    data = response.json()
+    if data.get("Errors"):
+        raise RuntimeError(", ".join(data["Errors"]))
+    payload = data.get("Payload") or {}
+    affected_agents = safe_int(payload.get("TotalAgents"), len(agent_ids))
+    affected_customers = safe_int(payload.get("TotalCustomers"), 0)
+    return affected_agents, affected_customers
+
+
+def consume_hierarchy_confirmation(confirmation_token):
     auth = auth_context()
     with hierarchy_confirmations_lock:
         pending = hierarchy_confirmations.pop(confirmation_token, None)
@@ -2721,6 +2725,14 @@ def save_hierarchy_limit_changes(request_data):
         or pending["userId"] != auth.get("userId")
     ):
         raise ValueError("The all-agent confirmation expired. Preview it again")
+    return pending
+
+
+def save_hierarchy_limit_changes(request_data):
+    confirmation_token = str(request_data.get("confirmationToken", "")).strip()
+    if not confirmation_token:
+        raise ValueError("Preview the affected accounts before saving")
+    pending = consume_hierarchy_confirmation(confirmation_token)
 
     changes = pending["changes"]
     agent_ids = pending["agentIds"]
@@ -2778,6 +2790,71 @@ def save_hierarchy_limit_changes(request_data):
         "affectedAgents": pending["affectedAgents"],
         "affectedCustomers": pending["affectedCustomers"],
         "playersIncluded": False,
+    }
+
+
+def run_hierarchy_scheduled_limit(request_data):
+    """Apply one due schedule through the native hierarchy operation."""
+    changes, customer_support_agent = normalize_hierarchy_changes({
+        "changes": [request_data],
+        "customerSupportAgent": request_data.get("customerSupportAgent"),
+    })
+    agent_ids = hierarchy_agent_ids()
+    if write_allowed_accounts and any(
+        not write_allowed(agent_id) for agent_id in agent_ids
+    ):
+        raise ValueError("The all-agent update includes a restricted account")
+    affected_agents, affected_customers = check_hierarchy_impact(
+        changes, agent_ids
+    )
+    response = api_request(
+        "POST",
+        f"{partner_api}/Backbone/save/",
+        json=hierarchy_payload(changes, agent_ids, include_changes=True),
+        timeout=30,
+    )
+    response.raise_for_status()
+    data = response.json()
+    if data.get("Errors"):
+        raise RuntimeError(", ".join(data["Errors"]))
+
+    with data_lock:
+        for agent_id in agent_ids:
+            league_cache.pop(agent_id, None)
+        for cache_key in list(period_cache):
+            if cache_key[0] in agent_ids:
+                period_cache.pop(cache_key, None)
+
+    change = changes[0]
+    record_limit_change(
+        change["accountId"],
+        change["idOrganization"],
+        change["idLeague"],
+        change["idSportType"],
+        change["periodNumber"],
+        change["field"],
+        change["limitMode"],
+        change["oldValue"],
+        change["value"],
+        customer_support_agent=customer_support_agent,
+        target_scope="all_agents",
+        affected_agents=affected_agents,
+        affected_customers=affected_customers,
+    )
+    _, schedule_id = current_change_source.get() or (None, None)
+    if schedule_id:
+        with database_session() as db:
+            stored_job = db.get(ScheduledLimit, schedule_id)
+            if stored_job is not None:
+                stored_job.affected_agents = affected_agents
+                stored_job.affected_customers = affected_customers
+                db.commit()
+    return {
+        "changed": True,
+        "note": (
+            f"Applied to {affected_agents:,} agents; "
+            f"{affected_customers:,} customers affected"
+        ),
     }
 
 
@@ -3065,7 +3142,7 @@ def recurring_description(recurrence_days, recurrence_time):
     return f"{day_text} at {display_time} ET"
 
 
-def create_schedule(request_data):
+def create_schedule(request_data, hierarchy_confirmed=False):
     auth = auth_context()
     try:
         account_id = validate_account_id(int(request_data["accountId"]))
@@ -3084,6 +3161,13 @@ def create_schedule(request_data):
         customer_support_agent = str(
             request_data.get("customerSupportAgent", "")
         ).strip()
+        target_scope = str(
+            request_data.get("targetScope", "selected")
+        ).strip().lower()
+        affected_agents = safe_int(request_data.get("affectedAgents"), 0) or None
+        affected_customers = (
+            safe_int(request_data.get("affectedCustomers"), 0) or None
+        )
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError("Enter a valid limit, weekdays, and Eastern time") from error
 
@@ -3120,6 +3204,10 @@ def create_schedule(request_data):
         raise ValueError("Enter the Customer Support Agent name")
     if len(customer_support_agent) > 100:
         raise ValueError("Customer Support Agent name must be 100 characters or fewer")
+    if target_scope not in {"selected", "all_agents"}:
+        raise ValueError("Unsupported schedule target")
+    if target_scope == "all_agents" and not hierarchy_confirmed:
+        raise ValueError("Preview and confirm the affected agents first")
 
     if not recurrence_days:
         one_time_schedule = True
@@ -3152,6 +3240,10 @@ def create_schedule(request_data):
                 recurrence_time=stored_recurrence_time,
                 telegram_audience=telegram_audience,
                 is_early_limit=limit_mode == "early",
+                customer_support_agent=customer_support_agent or None,
+                target_scope=target_scope,
+                affected_agents=affected_agents,
+                affected_customers=affected_customers,
                 status="pending",
             )
         )
@@ -3177,11 +3269,69 @@ def create_schedule(request_data):
         "limitMode": limit_mode,
         "telegramAudience": telegram_audience,
         "customerSupportAgent": customer_support_agent,
+        "targetScope": target_scope,
+        "affectedAgents": affected_agents,
+        "affectedCustomers": affected_customers,
         "recurrence": (
             recurring_description(recurrence_days, recurrence_time)
             if stored_recurrence_days
             else "Runs once"
         ),
+    }
+
+
+def create_hierarchy_schedules(request_data):
+    confirmation_token = str(request_data.get("confirmationToken", "")).strip()
+    if not confirmation_token:
+        raise ValueError("Preview the affected accounts before scheduling")
+    pending = consume_hierarchy_confirmation(confirmation_token)
+    created_ids = []
+    results = []
+    try:
+        for change in pending["changes"]:
+            result = create_schedule({
+                "accountId": change["accountId"],
+                "idOrganization": change["idOrganization"],
+                "idLeague": change["idLeague"],
+                "idSportType": change["idSportType"],
+                "periodNumber": change["periodNumber"],
+                "field": change["field"],
+                "value": change["value"],
+                "limitMode": change["limitMode"],
+                "recurrenceDays": request_data.get("recurrenceDays", []),
+                "recurrenceTime": request_data.get("recurrenceTime", ""),
+                "oneTimeSchedule": bool(request_data.get("oneTimeSchedule")),
+                "customerSupportAgent": pending["customerSupportAgent"],
+                "targetScope": "all_agents",
+                "affectedAgents": pending["affectedAgents"],
+                "affectedCustomers": pending["affectedCustomers"],
+            }, hierarchy_confirmed=True)
+            created_ids.append(result["id"])
+            results.append(result)
+    except Exception:
+        if created_ids:
+            with database_session() as db:
+                db.execute(
+                    delete(ScheduledLimit).where(
+                        ScheduledLimit.id.in_(created_ids),
+                        ScheduledLimit.status == "pending",
+                    )
+                )
+                db.commit()
+        raise
+
+    first = results[0]
+    return {
+        **first,
+        "message": (
+            f"Scheduled {len(results)} all-agent limit "
+            f"{'change' if len(results) == 1 else 'changes'}"
+        ),
+        "created": len(results),
+        "ids": created_ids,
+        "targetScope": "all_agents",
+        "affectedAgents": pending["affectedAgents"],
+        "affectedCustomers": pending["affectedCustomers"],
     }
 
 
@@ -4134,6 +4284,7 @@ def notify_schedule_outcome(job, request_data, outcome_line):
                 else "Immediate limit"
             ),
             outcome_line=outcome_line,
+            customer_support_agent=request_data.get("customerSupportAgent"),
         )
         send_telegram_success_message(
             message,
@@ -4224,10 +4375,18 @@ def execute_scheduled_job(job_id):
             "value": job.value,
             "limitMode": "early" if job.is_early_limit else "normal",
             "telegramAudience": job.telegram_audience or "all",
+            "customerSupportAgent": job.customer_support_agent,
         }
+        target_scope = getattr(job, "target_scope", "selected") or "selected"
+
+        def write_scheduled_limit():
+            if target_scope == "all_agents":
+                return run_hierarchy_scheduled_limit(request_data)
+            return save_limit_change(request_data)
+
         outcome = None
         try:
-            outcome = save_limit_change(request_data)
+            outcome = write_scheduled_limit()
         except PermissionError:
             # Access tokens are short-lived, while recurring schedules may run
             # days later. Renew securely and retry the write exactly once.
@@ -4246,7 +4405,7 @@ def execute_scheduled_job(job_id):
                 job_id,
             )
             try:
-                outcome = save_limit_change(request_data)
+                outcome = write_scheduled_limit()
             except PermissionError as retry_error:
                 # A token AccessHigh has only just issued being rejected is a
                 # different fault from one that simply aged out, and "log in
@@ -4845,6 +5004,9 @@ def schedule_status_rows(account_id):
             int(job.account_id), f"Agent {job.account_id}"
         ),
         "customerSupportAgent": customer_support_agents.get(str(job.id)),
+        "targetScope": getattr(job, "target_scope", "selected") or "selected",
+        "affectedAgents": getattr(job, "affected_agents", None),
+        "affectedCustomers": getattr(job, "affected_customers", None),
         "idOrganization": job.organization_id,
         "idLeague": job.league_id,
         "leagueName": (
@@ -5658,6 +5820,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             "/api/limits/hierarchy/preview",
             "/api/limits/hierarchy",
             "/api/schedules",
+            "/api/schedules/hierarchy",
             "/api/schedules/ramp",
             "/api/trackers",
             "/api/trackers/delete",
@@ -5687,6 +5850,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 if path == "/api/trackers/delete"
                 else create_schedule_ramp(request_data)
                 if path == "/api/schedules/ramp"
+                else create_hierarchy_schedules(request_data)
+                if path == "/api/schedules/hierarchy"
                 else cancel_schedule(request_data)
                 if path == "/api/schedules/cancel"
                 else delete_schedule(request_data)
@@ -5734,6 +5899,9 @@ def migrate_schedule_columns():
         # a single schedule.
         "telegram_audience": "VARCHAR(10) NOT NULL DEFAULT 'all'",
         "run_note": "VARCHAR(255) NULL",
+        "target_scope": "VARCHAR(20) NOT NULL DEFAULT 'selected'",
+        "affected_agents": "INTEGER NULL",
+        "affected_customers": "INTEGER NULL",
     }
     with engine.begin() as connection:
         for column_name, column_type in additions.items():

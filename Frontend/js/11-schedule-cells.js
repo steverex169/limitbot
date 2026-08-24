@@ -37,7 +37,12 @@ function describeScheduleLastRun(schedule) {
  * to one that did.
  */
 function describeScheduleDetail(schedule) {
-  return schedule.error || schedule.runNote || "";
+  const detail = schedule.error || schedule.runNote || "";
+  if (schedule.targetScope !== "all_agents") {
+    return detail;
+  }
+  const scope = `All agents · ${Number(schedule.affectedAgents || 0).toLocaleString()} agents, ${Number(schedule.affectedCustomers || 0).toLocaleString()} customers`;
+  return detail ? `${scope} · ${detail}` : scope;
 }
 
 /*
@@ -78,6 +83,7 @@ function scheduleGroupKey(schedule) {
     schedule.scheduledForUtc || schedule.scheduledFor || "",
     schedule.createdAtUtc || schedule.createdAt || "",
     schedule.customerSupportAgent || "",
+    schedule.targetScope || "selected",
   ]);
 }
 

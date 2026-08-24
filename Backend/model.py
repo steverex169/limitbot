@@ -128,6 +128,12 @@ class ScheduledLimit(Base):
     recurrence_time: Mapped[str | None] = mapped_column(String(5), nullable=True)
     telegram_audience: Mapped[str] = mapped_column(String(10), default="all")
     is_early_limit: Mapped[bool] = mapped_column(Boolean, default=False)
+    customer_support_agent: Mapped[str | None] = mapped_column(
+        String(100), nullable=True
+    )
+    target_scope: Mapped[str] = mapped_column(String(20), default="selected")
+    affected_agents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    affected_customers: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_run_status: Mapped[str | None] = mapped_column(String(20), nullable=True)

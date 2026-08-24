@@ -396,6 +396,89 @@ async function savePendingBatch() {
   }
 }
 
+async function scheduleHierarchyBatch(
+  batch,
+  customerSupportAgent,
+  recurrenceDays,
+  selectedTime,
+  oneTimeSchedule
+) {
+  clearDialogMessage();
+  elements.confirmSchedule.disabled = true;
+  elements.confirmSave.disabled = true;
+  elements.confirmSchedule.textContent = "Checking impact…";
+
+  try {
+    const changes = serializeHierarchyChanges(batch);
+    const previewResponse = await fetch("/api/limits/hierarchy/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ changes, customerSupportAgent }),
+    });
+    const preview = await previewResponse.json();
+    if (!previewResponse.ok) {
+      throw new Error(preview.error || "The affected agents could not be checked");
+    }
+
+    const affectedAgents = Number(preview.affectedAgents || 0);
+    const affectedCustomers = Number(preview.affectedCustomers || 0);
+    const timing = oneTimeSchedule
+      ? `one time at ${selectedTime} ET`
+      : `on the selected days at ${selectedTime} ET`;
+    const confirmed = window.confirm(
+      `Schedule ${batch.length} limit ${batch.length === 1 ? "change" : "changes"} for all agents ${timing}?\n\n` +
+      `${affectedAgents.toLocaleString()} agents and ${affectedCustomers.toLocaleString()} customers are currently affected. ` +
+      "Each run uses the latest agent hierarchy; player overrides are not overwritten."
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    elements.confirmSchedule.textContent = "Scheduling for all agents…";
+    const response = await fetch("/api/schedules/hierarchy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        confirmationToken: preview.confirmationToken,
+        recurrenceDays,
+        recurrenceTime: selectedTime,
+        oneTimeSchedule,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "The all-agent schedule could not be created");
+    }
+
+    batch.forEach(removePendingChange);
+    state.activeChange = null;
+    state.pendingSaveBatch = [];
+    elements.dialog.close();
+
+    const item = batch[0];
+    showScheduleStatus(
+      "pending",
+      `${item.row.leagueName} · All agents`,
+      item.newValue,
+      formatEasternDateTime(data.scheduledForUtc || data.scheduledFor),
+      fieldLabels[item.field],
+      data.recurrence,
+      formatEasternDateTime(data.scheduledForUtc || data.scheduledFor)
+    );
+    showMessage(
+      `${data.created || batch.length} all-agent limit ${batch.length === 1 ? "change" : "changes"} scheduled. ` +
+      `Current impact: ${affectedAgents.toLocaleString()} agents, ${affectedCustomers.toLocaleString()} customers.`,
+      "success"
+    );
+  } catch (error) {
+    showDialogMessage(error.message);
+  } finally {
+    elements.confirmSchedule.disabled = false;
+    elements.confirmSave.disabled = false;
+    elements.confirmSchedule.textContent = "Schedule";
+  }
+}
+
 async function scheduleActiveChange() {
   const batch =
     Array.isArray(state.pendingSaveBatch) &&
@@ -406,13 +489,6 @@ async function scheduleActiveChange() {
         : [];
 
   if (!batch.length) {
-    return;
-  }
-
-  if (getLimitTargetScope() === "all") {
-    showDialogMessage(
-      "All agents is available for immediate saves only. Choose Selected agent only to create a schedule."
-    );
     return;
   }
 
@@ -434,7 +510,7 @@ async function scheduleActiveChange() {
 
   const oneTimeSchedule = recurrenceDays.length === 0;
 
-  if (oneTimeSchedule) {
+  if (oneTimeSchedule && getLimitTargetScope() !== "all") {
     if (
       !window.confirm(
         `This limit will change one time at ${selectedTime} ET and will not repeat. Continue?`
@@ -442,6 +518,16 @@ async function scheduleActiveChange() {
     ) {
       return;
     }
+  }
+
+  if (getLimitTargetScope() === "all") {
+    return scheduleHierarchyBatch(
+      batch,
+      customerSupportAgent,
+      recurrenceDays,
+      selectedTime,
+      oneTimeSchedule
+    );
   }
 
   clearDialogMessage();
