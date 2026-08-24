@@ -3791,6 +3791,8 @@ def create_schedule_ramp(request_data):
         raise ValueError("Select valid weekdays") from error
     if any(day < 0 or day > 6 for day in recurrence_days):
         raise ValueError("Select valid weekdays")
+    if any(day < 0 or day > 6 for day in recurrence_days):
+        raise ValueError("Select valid weekdays")
 
     # A ramp can take its numbers from the recorded Pinnacle curve instead of
     # by hand. Each step then names a part of the day rather than an amount,
@@ -4103,6 +4105,109 @@ def cancel_schedule(request_data):
                 raise ValueError("This schedule is currently running")
             raise ValueError("This schedule is no longer active")
     return {"message": "Recurring schedule cancelled", "id": schedule_id}
+
+
+def edit_schedules(request_data):
+    """Edit the values and timing of one grouped current schedule."""
+    auth = auth_context()
+    raw_changes = request_data.get("changes")
+    if not isinstance(raw_changes, list) or not raw_changes or len(raw_changes) > 20:
+        raise ValueError("Choose one or more scheduled limits to edit")
+    customer_support_agent = str(
+        request_data.get("customerSupportAgent", "")
+    ).strip()
+    recurrence_time = str(request_data.get("recurrenceTime", "")).strip()
+    try:
+        recurrence_days = sorted({
+            int(day) for day in request_data.get("recurrenceDays", [])
+        })
+    except (TypeError, ValueError) as error:
+        raise ValueError("Select valid weekdays") from error
+    if not customer_support_agent:
+        raise ValueError("Enter the Customer Support Agent name")
+    if len(customer_support_agent) > 100:
+        raise ValueError("Customer Support Agent name must be 100 characters or fewer")
+    if not recurrence_time:
+        raise ValueError("Select an Eastern time")
+
+    values_by_id = {}
+    for raw_change in raw_changes:
+        try:
+            schedule_id = str(raw_change["id"]).strip()
+            value = int(raw_change["value"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("Enter valid scheduled limit values") from error
+        if len(schedule_id) != 32 or schedule_id in values_by_id:
+            raise ValueError("Invalid or duplicate schedule")
+        if value < 0 or value > 1_000_000_000:
+            raise ValueError("Limit must be between 0 and 1,000,000,000")
+        values_by_id[schedule_id] = value
+
+    try:
+        if recurrence_days:
+            scheduled_for = next_recurring_run(recurrence_days, recurrence_time)
+            stored_days = ",".join(str(day) for day in recurrence_days)
+            stored_time = recurrence_time
+            recurrence = recurring_description(recurrence_days, recurrence_time)
+        else:
+            scheduled_for = next_one_time_run(recurrence_time)
+            stored_days = None
+            stored_time = None
+            recurrence = "Runs once"
+    except ValueError as error:
+        raise ValueError("Select a valid Eastern time") from error
+    scheduled_utc = scheduled_for.astimezone(timezone.utc).replace(tzinfo=None)
+
+    with database_session() as db:
+        jobs = list(db.scalars(
+            select(ScheduledLimit)
+            .where(
+                ScheduledLimit.id.in_(list(values_by_id)),
+                ScheduledLimit.user_id == auth["userId"],
+            )
+            .with_for_update()
+        ))
+        if len(jobs) != len(values_by_id):
+            raise ValueError("One or more schedules could not be found")
+        now = utc_now_naive()
+        for job in jobs:
+            if job.status in {"running", "cancelled", "completed"}:
+                raise ValueError(
+                    "Only pending or failed schedules can be edited"
+                )
+            if job.status == "pending" and job.scheduled_for <= now + timedelta(seconds=60):
+                raise ValueError(
+                    "A schedule cannot be edited within 60 seconds of its next run"
+                )
+            if not write_allowed(job.account_id):
+                raise ValueError(
+                    f"Limit changes are restricted on account {job.account_id}"
+                )
+
+        for job in jobs:
+            job.value = values_by_id[job.id]
+            job.scheduled_for = scheduled_utc
+            job.recurrence_days = stored_days
+            job.recurrence_time = stored_time
+            job.customer_support_agent = customer_support_agent
+            job.login_session_id = auth.get("dbSessionId")
+            job.status = "pending"
+            job.error = None
+        db.commit()
+
+    return {
+        "message": (
+            f"Updated {len(jobs)} scheduled "
+            f"{'limit' if len(jobs) == 1 else 'limits'}"
+        ),
+        "ids": list(values_by_id),
+        "scheduledFor": eastern_timestamp(scheduled_for),
+        "scheduledForUtc": scheduled_for.astimezone(timezone.utc).isoformat(),
+        "recurrence": recurrence,
+        "recurrenceDays": recurrence_days,
+        "recurrenceTime": recurrence_time,
+        "customerSupportAgent": customer_support_agent,
+    }
 
 
 def delete_schedule(request_data):
@@ -5032,6 +5137,14 @@ def schedule_status_rows(account_id):
         "value": job.value,
         "limitMode": "early" if job.is_early_limit else "normal",
         "recurring": bool(job.recurrence_days and job.recurrence_time),
+        "recurrenceDays": (
+            [int(day) for day in job.recurrence_days.split(",")]
+            if job.recurrence_days else []
+        ),
+        "recurrenceTime": job.recurrence_time,
+        "scheduledTimeEt": job.scheduled_for.replace(
+            tzinfo=timezone.utc
+        ).astimezone(schedule_timezone).strftime("%H:%M"),
         "recurrence": (
             recurring_description(
                 [int(day) for day in job.recurrence_days.split(",")],
@@ -5828,6 +5941,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             "/api/trackers",
             "/api/trackers/delete",
             "/api/schedules/cancel",
+            "/api/schedules/edit",
             "/api/schedules/delete",
             "/api/schedules/delete-all",
             "/api/telegram-chats",
@@ -5857,6 +5971,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 if path == "/api/schedules/hierarchy"
                 else cancel_schedule(request_data)
                 if path == "/api/schedules/cancel"
+                else edit_schedules(request_data)
+                if path == "/api/schedules/edit"
                 else delete_schedule(request_data)
                 if path == "/api/schedules/delete"
                 else delete_all_schedules(request_data)

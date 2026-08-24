@@ -1,6 +1,8 @@
 /* 13-schedules-table.js
- * Activity Logs table rendering and its status-filter and delete-all
+ * Current schedules table rendering and its status-filter and delete-all
  * controls. */
+
+const expandedScheduleLeagues = new Set();
 
 function renderSchedules() {
   elements.scheduleRows.replaceChildren();
@@ -61,8 +63,63 @@ function renderSchedules() {
     return;
   }
 
+  const groupedByLeague = new Map();
   for (const group of groupSchedules(schedules)) {
     const first = group[0];
+    const leagueKey = JSON.stringify([
+      first.idLeague,
+      first.idSportType,
+      first.leagueName || "",
+    ]);
+    const league = groupedByLeague.get(leagueKey);
+    if (league) {
+      league.groups.push(group);
+    } else {
+      groupedByLeague.set(leagueKey, {
+        name: first.leagueName || `League ${first.idLeague}`,
+        groups: [group],
+      });
+    }
+  }
+
+  for (const [leagueKey, league] of groupedByLeague) {
+    const leagueHeader = document.createElement("tr");
+    leagueHeader.className = "schedule-league-row";
+    const leagueHeaderCell = document.createElement("td");
+    leagueHeaderCell.colSpan = table?.classList.contains("hide-team-total")
+      ? 11
+      : 13;
+    const leagueToggle = document.createElement("button");
+    leagueToggle.type = "button";
+    leagueToggle.className = "schedule-league-toggle";
+    const isExpanded = expandedScheduleLeagues.has(leagueKey);
+    leagueToggle.setAttribute("aria-expanded", String(isExpanded));
+    const chevron = document.createElement("span");
+    chevron.className = "schedule-league-chevron";
+    chevron.textContent = "›";
+    const leagueTitle = document.createElement("strong");
+    leagueTitle.textContent = league.name;
+    const leagueCount = document.createElement("span");
+    leagueCount.textContent = `${league.groups.length} ${league.groups.length === 1 ? "schedule" : "schedules"}`;
+    leagueToggle.append(chevron, leagueTitle, leagueCount);
+    leagueToggle.addEventListener("click", () => {
+      if (expandedScheduleLeagues.has(leagueKey)) {
+        expandedScheduleLeagues.delete(leagueKey);
+      } else {
+        expandedScheduleLeagues.add(leagueKey);
+      }
+      renderSchedules();
+    });
+    leagueHeaderCell.append(leagueToggle);
+    leagueHeader.append(leagueHeaderCell);
+    elements.scheduleRows.append(leagueHeader);
+
+    if (!isExpanded) {
+      continue;
+    }
+
+    for (const group of league.groups) {
+      const first = group[0];
     const row = document.createElement("tr");
     row.className = "activity-grid-row";
 
@@ -92,6 +149,20 @@ function renderSchedules() {
     );
 
     const detailToggleCell = document.createElement("td");
+    detailToggleCell.className = "activity-row-actions";
+    if (first.activityType !== "immediate") {
+      const quickEdit = document.createElement("button");
+      quickEdit.type = "button";
+      quickEdit.className = "schedule-edit-button";
+      quickEdit.textContent = "Edit";
+      quickEdit.disabled = !group.every((schedule) =>
+        ["pending", "failed"].includes(
+          String(schedule.status || "").toLowerCase()
+        )
+      );
+      quickEdit.addEventListener("click", () => openScheduleEditor(group));
+      detailToggleCell.append(quickEdit);
+    }
     const detailToggle = document.createElement("button");
     detailToggle.type = "button";
     detailToggle.className = "activity-detail-toggle";
@@ -262,7 +333,8 @@ function renderSchedules() {
     detailContent.append(action);
     detailCell.append(detailContent);
     detailRow.append(detailCell);
-    elements.scheduleRows.append(detailRow);
+      elements.scheduleRows.append(detailRow);
+    }
   }
 }
 

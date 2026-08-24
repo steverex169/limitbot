@@ -73,8 +73,15 @@
 }
 
 .activity-grid-row > td:nth-child(13) {
-  width: 70px;
+  width: 126px;
   text-align: center;
+}
+
+.activity-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 
 .activity-grid-row strong {
@@ -98,6 +105,58 @@
    layout while no schedule sets one. */
 .schedules-table.hide-team-total .col-team-total {
   display: none;
+}
+
+.schedule-league-row td {
+  padding: 0;
+  border-top: 8px solid var(--canvas);
+  border-right: 0;
+  background: color-mix(in srgb, var(--blue-soft) 52%, var(--surface));
+}
+
+.schedule-league-toggle {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 46px;
+  padding: 0 14px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.schedule-league-toggle:hover {
+  background: color-mix(in srgb, var(--blue-soft) 78%, transparent);
+}
+
+.schedule-league-toggle strong {
+  overflow: hidden;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-league-toggle > span:last-child {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.schedule-league-chevron {
+  color: var(--blue);
+  font-size: 23px;
+  font-weight: 700;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 150ms ease;
+}
+
+.schedule-league-toggle[aria-expanded="true"] .schedule-league-chevron {
+  transform: rotate(90deg);
 }
 
 /* A limit this schedule does not touch, distinct from a limit set to zero. */
@@ -306,6 +365,161 @@
   font-weight: 700;
 }
 
+.schedule-edit-button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid #b2ccff;
+  border-radius: 8px;
+  background: var(--blue-soft);
+  color: var(--blue);
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.activity-row-actions .schedule-edit-button,
+.activity-row-actions .activity-detail-toggle {
+  min-height: 30px;
+  padding: 0 9px;
+  font-size: 11px;
+}
+
+.schedule-edit-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.schedule-edit-dialog {
+  width: min(660px, calc(100vw - 32px));
+  max-height: min(820px, calc(100vh - 32px));
+  padding: 0;
+  overflow: auto;
+}
+
+.schedule-edit-dialog form {
+  display: grid;
+  gap: 20px;
+  padding: 28px;
+}
+
+.schedule-edit-dialog h2,
+.schedule-edit-dialog p {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.schedule-edit-summary,
+.schedule-edit-hint {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.schedule-edit-section-title {
+  display: block;
+  margin-bottom: 9px;
+}
+
+.schedule-edit-values {
+  display: grid;
+  gap: 8px;
+}
+
+.schedule-edit-value {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--canvas) 70%, var(--surface));
+}
+
+.schedule-edit-value span {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-edit-value input,
+.schedule-edit-field input {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.schedule-edit-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 190px;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--canvas) 70%, var(--surface));
+}
+
+.schedule-edit-field {
+  display: grid;
+  gap: 7px;
+}
+
+.schedule-edit-field span,
+.schedule-edit-days legend {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.schedule-edit-days {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.schedule-edit-days legend {
+  margin-bottom: 8px;
+}
+
+.schedule-edit-days label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.schedule-edit-days input {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--blue);
+}
+
+.schedule-edit-all-days {
+  color: var(--blue) !important;
+}
+
+.schedule-edit-hint {
+  grid-column: 1 / -1;
+}
+
 .schedule-cancel:disabled {
   cursor: not-allowed;
   opacity: 0.6;
@@ -327,5 +541,21 @@
 
   .activity-detail-actions {
     justify-content: flex-start;
+  }
+}
+
+@media (max-width: 620px) {
+  .schedule-edit-dialog form {
+    gap: 16px;
+    padding: 20px;
+  }
+
+  .schedule-edit-controls,
+  .schedule-edit-value {
+    grid-template-columns: 1fr;
+  }
+
+  .schedule-edit-days {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

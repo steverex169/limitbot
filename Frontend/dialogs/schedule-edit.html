@@ -1,0 +1,44 @@
+  <dialog id="scheduleEditDialog" class="schedule-edit-dialog">
+    <form id="scheduleEditForm">
+      <p class="eyebrow">CURRENT SCHEDULE</p>
+      <h2>Edit schedule</h2>
+      <p id="scheduleEditSummary" class="schedule-edit-summary"></p>
+
+      <section aria-labelledby="scheduleEditValuesTitle">
+        <strong id="scheduleEditValuesTitle" class="schedule-edit-section-title">Scheduled limits</strong>
+        <div id="scheduleEditValues" class="schedule-edit-values"></div>
+      </section>
+
+      <div class="schedule-edit-controls">
+        <label class="schedule-edit-field">
+          <span>Customer Support Agent (required)</span>
+          <input id="scheduleEditAgent" type="text" maxlength="100" autocomplete="off" required>
+        </label>
+
+        <label class="schedule-edit-field schedule-edit-time">
+          <span>Time (U.S. Eastern / ET)</span>
+          <input id="scheduleEditTime" type="time" required>
+        </label>
+
+        <fieldset class="schedule-edit-days">
+          <legend>Repeat every week on</legend>
+          <label class="schedule-edit-all-days"><input id="scheduleEditAllDays" type="checkbox"> All days</label>
+          <label><input type="checkbox" name="scheduleEditDay" value="0"> Mon</label>
+          <label><input type="checkbox" name="scheduleEditDay" value="1"> Tue</label>
+          <label><input type="checkbox" name="scheduleEditDay" value="2"> Wed</label>
+          <label><input type="checkbox" name="scheduleEditDay" value="3"> Thu</label>
+          <label><input type="checkbox" name="scheduleEditDay" value="4"> Fri</label>
+          <label><input type="checkbox" name="scheduleEditDay" value="5"> Sat</label>
+          <label><input type="checkbox" name="scheduleEditDay" value="6"> Sun</label>
+        </fieldset>
+        <p class="schedule-edit-hint">Leave every day unchecked to run once at the next occurrence of this time.</p>
+      </div>
+
+      <div id="scheduleEditMessage" class="message error" role="alert" hidden></div>
+
+      <div class="dialog-actions">
+        <button id="scheduleEditCancel" class="button secondary" type="button">Cancel</button>
+        <button id="scheduleEditSave" class="button primary" type="submit">Save schedule</button>
+      </div>
+    </form>
+  </dialog>

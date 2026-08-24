@@ -118,4 +118,17 @@ const elements = {
   scheduleStatusText: document.querySelector("#scheduleStatusText"),
   scheduleProgress: document.querySelector("#scheduleProgress"),
   closeScheduleStatus: document.querySelector("#closeScheduleStatus"),
+  scheduleEditDialog: document.querySelector("#scheduleEditDialog"),
+  scheduleEditForm: document.querySelector("#scheduleEditForm"),
+  scheduleEditSummary: document.querySelector("#scheduleEditSummary"),
+  scheduleEditValues: document.querySelector("#scheduleEditValues"),
+  scheduleEditAgent: document.querySelector("#scheduleEditAgent"),
+  scheduleEditTime: document.querySelector("#scheduleEditTime"),
+  scheduleEditAllDays: document.querySelector("#scheduleEditAllDays"),
+  scheduleEditDays: [
+    ...document.querySelectorAll('input[name="scheduleEditDay"]'),
+  ],
+  scheduleEditMessage: document.querySelector("#scheduleEditMessage"),
+  scheduleEditCancel: document.querySelector("#scheduleEditCancel"),
+  scheduleEditSave: document.querySelector("#scheduleEditSave"),
 };
