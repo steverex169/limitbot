@@ -59,6 +59,8 @@ const elements = {
   limitFilter: document.querySelector("#limitFilter"),
   limitModeFilter: document.querySelector("#limitModeFilter"),
   scheduleStatusFilter: document.querySelector("#scheduleStatusFilter"),
+  scheduleDayFilter: document.querySelector("#scheduleDayFilter"),
+  scheduleTimeFilter: document.querySelector("#scheduleTimeFilter"),
   agentSelectButton: document.querySelector("#agentSelectButton"),
   agentTree: document.querySelector("#agentTree"),
   agentSearch: document.querySelector("#agentSearch"),

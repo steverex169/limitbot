@@ -4,12 +4,38 @@
 
 const expandedScheduleLeagues = new Set();
 
+/*
+ * The Time dropdown lists the times something is actually scheduled at, so it
+ * can never offer an hour that matches nothing. The current choice is kept if
+ * it still exists, and reset to "any" if the schedule it belonged to has gone.
+ */
+function populateScheduleTimeFilter(schedules) {
+  const select = elements.scheduleTimeFilter;
+  if (!select) {
+    return;
+  }
+
+  const times = [
+    ...new Set(schedules.map(scheduleTimeOfDay).filter(Boolean)),
+  ].sort();
+
+  const chosen = select.value;
+  select.replaceChildren(new Option("Any time", "all"));
+  for (const time of times) {
+    select.append(new Option(formatScheduleClock(time), time));
+  }
+  select.value = times.includes(chosen) ? chosen : "all";
+}
+
 function renderSchedules() {
   elements.scheduleRows.replaceChildren();
 
   const statusFilter =
     elements.scheduleStatusFilter?.value || "active";
-  const schedules = state.schedules.filter((schedule) => {
+  const dayFilter = elements.scheduleDayFilter?.value || "all";
+  const timeFilter = elements.scheduleTimeFilter?.value || "all";
+
+  const byStatus = state.schedules.filter((schedule) => {
     const isCancelled =
       String(schedule.status || "").toLowerCase() === "cancelled";
 
@@ -24,6 +50,24 @@ function renderSchedules() {
     return ["pending", "running", "failed"].includes(
       String(schedule.status || "").toLowerCase()
     );
+  });
+
+  /* The time list is built from what is actually scheduled rather than a
+   * fixed set of hours, so it only ever offers times that will match
+   * something. Built before the day filter narrows it, or choosing a day
+   * would empty the list the operator is about to pick from. */
+  populateScheduleTimeFilter(byStatus);
+
+  const schedules = byStatus.filter((schedule) => {
+    if (dayFilter !== "all") {
+      if (!scheduleDays(schedule).includes(Number(dayFilter))) {
+        return false;
+      }
+    }
+    if (timeFilter !== "all" && scheduleTimeOfDay(schedule) !== timeFilter) {
+      return false;
+    }
+    return true;
   });
 
   /*
@@ -51,8 +95,10 @@ function renderSchedules() {
 
     cell.colSpan = table?.classList.contains("hide-team-total") ? 11 : 13;
     cell.className = "empty-state";
-    cell.textContent =
-      statusFilter === "cancelled"
+    const filtered = dayFilter !== "all" || timeFilter !== "all";
+    cell.textContent = filtered
+      ? "Nothing scheduled for that day and time. Clear the filters to see the rest."
+      : statusFilter === "cancelled"
         ? "No cancelled schedules."
         : statusFilter === "all"
           ? "No activity yet."
@@ -344,6 +390,17 @@ function renderSchedules() {
 }
 
 if (elements.scheduleStatusFilter) {
+  /* Changing the status can remove the times the Time filter was offering,
+   * so the whole grid re-renders and the list is rebuilt with it. */
+  for (const filter of [
+    elements.scheduleDayFilter,
+    elements.scheduleTimeFilter,
+  ]) {
+    filter?.addEventListener("change", () => {
+      renderSchedules();
+    });
+  }
+
   elements.scheduleStatusFilter.addEventListener("change", () => {
     renderSchedules();
   });

@@ -167,6 +167,40 @@ function scheduleWeekOrder(schedule) {
   ];
 }
 
+/*
+ * Every weekday a schedule runs on, not just the first. The ordering only
+ * needs the earliest; filtering by "show me Wednesday" has to match a
+ * Wed-Sun schedule too.
+ */
+function scheduleDays(schedule) {
+  const days = Array.isArray(schedule.recurrenceDays)
+    ? schedule.recurrenceDays.map(Number).filter((day) => Number.isFinite(day))
+    : [];
+  if (days.length) {
+    return days;
+  }
+  const [day] = scheduleWeekOrder(schedule);
+  return day <= 6 ? [day] : [];
+}
+
+/* The 24-hour ET time a schedule runs at, which is what the filter matches. */
+function scheduleTimeOfDay(schedule) {
+  const [, time] = scheduleWeekOrder(schedule);
+  return time === "99:99" ? "" : time;
+}
+
+/* 24-hour for sorting and matching, 12-hour for reading. */
+function formatScheduleClock(time) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(String(time || ""));
+  if (!match) {
+    return String(time || "");
+  }
+  const hour = Number(match[1]);
+  const suffix = hour < 12 ? "AM" : "PM";
+  const display = hour % 12 === 0 ? 12 : hour % 12;
+  return `${display}:${match[2]} ${suffix}`;
+}
+
 function sortScheduleGroups(groups) {
   return groups
     .map((group, index) => {

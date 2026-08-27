@@ -14,6 +14,25 @@
               <option value="cancelled">Cancelled</option>
             </select>
           </label>
+          <label class="select-field">
+            <span>Day</span>
+            <select id="scheduleDayFilter">
+              <option value="all" selected>Any day</option>
+              <option value="0">Monday</option>
+              <option value="1">Tuesday</option>
+              <option value="2">Wednesday</option>
+              <option value="3">Thursday</option>
+              <option value="4">Friday</option>
+              <option value="5">Saturday</option>
+              <option value="6">Sunday</option>
+            </select>
+          </label>
+          <label class="select-field">
+            <span>Time (ET)</span>
+            <select id="scheduleTimeFilter">
+              <option value="all" selected>Any time</option>
+            </select>
+          </label>
           <button id="deleteAllSchedules" type="button" class="danger-button">
             Delete schedules
           </button>
