@@ -107,6 +107,76 @@ function groupSchedules(schedules) {
   return [...groups.values()];
 }
 
+/*
+ * Reading order through the week: Monday's schedules before Tuesday's, and
+ * within a day the earliest time first. Grouped by creation order, a ramp
+ * built in one go came out in whatever order it happened to be written, which
+ * says nothing about when any of it runs.
+ *
+ * A recurring schedule sorts on its first weekday; a one-off on the weekday it
+ * actually falls on, so the two interleave rather than forming two lists.
+ */
+const scheduleWeekdayOrder = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+function scheduleWeekOrder(schedule) {
+  const days = Array.isArray(schedule.recurrenceDays)
+    ? schedule.recurrenceDays
+        .map(Number)
+        .filter((day) => Number.isFinite(day))
+    : [];
+
+  if (days.length) {
+    return [Math.min(...days), schedule.recurrenceTime || "99:99"];
+  }
+
+  const when = new Date(schedule.scheduledForUtc || schedule.scheduledFor);
+  if (Number.isNaN(when.valueOf())) {
+    return [9, "99:99"];
+  }
+
+  /* Eastern, because that is the clock every schedule is written in. */
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(when);
+  const lookup = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const index = scheduleWeekdayOrder.indexOf(lookup.weekday);
+
+  return [
+    index === -1 ? 8 : index,
+    schedule.recurrenceTime || `${lookup.hour}:${lookup.minute}`,
+  ];
+}
+
+function sortScheduleGroups(groups) {
+  return groups
+    .map((group, index) => {
+      const first = group[0];
+      const [day, time] = scheduleWeekOrder(first);
+      return {
+        group,
+        index,
+        /* Anything still to run stays above anything already finished. */
+        active: ["pending", "running"].includes(
+          String(first.status || "").toLowerCase()
+        ),
+        day,
+        time,
+      };
+    })
+    .sort(
+      (a, b) =>
+        Number(b.active) - Number(a.active) ||
+        a.day - b.day ||
+        String(a.time).localeCompare(String(b.time)) ||
+        a.index - b.index
+    )
+    .map((entry) => entry.group);
+}
+
 function createLimitValueCell(schedule, field) {
   const cell = document.createElement("td");
 

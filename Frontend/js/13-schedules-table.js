@@ -82,6 +82,11 @@ function renderSchedules() {
     }
   }
 
+  /* Within a league, run order rather than the order they were created. */
+  for (const league of groupedByLeague.values()) {
+    league.groups = sortScheduleGroups(league.groups);
+  }
+
   for (const [leagueKey, league] of groupedByLeague) {
     const leagueHeader = document.createElement("tr");
     leagueHeader.className = "schedule-league-row";
