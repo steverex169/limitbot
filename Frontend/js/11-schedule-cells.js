@@ -338,7 +338,15 @@ function describeGroupLastRun(group) {
 function describeGroupRuns(group) {
   const runs = Math.max(...group.map((item) => Number(item.runCount) || 0));
   if (!runs) {
-    return "Never run";
+    /* Counting began when the column was added, so a schedule that ran before
+     * that has a last run but no count. Saying "Never run" beside a completed
+     * run contradicts the row directly above it. */
+    const ranBefore = group.some(
+      (item) => item.lastRunAtUtc || item.lastRunAt
+    );
+    return ranBefore
+      ? "Ran before counting started"
+      : "Never run";
   }
   const changes = Math.max(
     ...group.map((item) => Number(item.changeCount) || 0)

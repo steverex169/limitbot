@@ -7,7 +7,11 @@
 }
 
 .schedules-table-wrap {
-  max-height: min(72vh, 760px);
+  /* Fill whatever the viewport leaves below the header and panel heading. The
+     old 760px ceiling stopped the grid short on a tall screen and left the
+     page half empty under it. */
+  max-height: calc(100vh - 210px);
+  min-height: 320px;
   overflow: auto;
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
