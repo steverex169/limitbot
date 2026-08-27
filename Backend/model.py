@@ -141,6 +141,12 @@ class ScheduledLimit(Base):
     # Why a run did or did not change anything, e.g. "No change needed,
     # already 500". Distinct from `error`, which is only ever a failure.
     run_note: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Every run overwrote the previous one, so a recurring schedule that had
+    # fired forty times looked exactly like one that had fired once. Counted
+    # separately because "it ran" and "it changed something" are different
+    # questions: a healthy schedule often runs and correctly changes nothing.
+    run_count: Mapped[int] = mapped_column(Integer, default=0)
+    change_count: Mapped[int] = mapped_column(Integer, default=0)
     last_run_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

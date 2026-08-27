@@ -204,6 +204,7 @@ function renderSchedules() {
           : formatScheduleDateTime(first.scheduledForUtc || first.scheduledFor),
       ],
       ["Last run", describeGroupLastRun(group)],
+      ["Executed", describeGroupRuns(group)],
     ];
     for (const [label, value] of metadata) {
       const item = document.createElement("div");

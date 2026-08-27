@@ -4334,6 +4334,9 @@ def record_job_result(job_id, error, note=None, changed=None):
                 return
             run_at = utc_now_naive()
             stored_job.last_run_at = run_at
+            stored_job.run_count = (stored_job.run_count or 0) + 1
+            if changed:
+                stored_job.change_count = (stored_job.change_count or 0) + 1
             stored_job.last_run_status = "failed" if error else "completed"
             stored_job.last_run_changed = None if error else changed
             stored_job.error = str(error) if error else None
@@ -5181,6 +5184,10 @@ def schedule_status_rows(account_id):
         "error": job.error,
         # Why a successful run changed nothing, when that is the case.
         "runNote": getattr(job, "run_note", None),
+        # getattr, because an older database may not have been migrated yet
+        # and a missing count must not blank the whole Activity Log.
+        "runCount": getattr(job, "run_count", 0) or 0,
+        "changeCount": getattr(job, "change_count", 0) or 0,
     } for job in jobs]
 
     manual_rows = []
@@ -6019,6 +6026,8 @@ def migrate_schedule_columns():
         # a single schedule.
         "telegram_audience": "VARCHAR(10) NOT NULL DEFAULT 'all'",
         "run_note": "VARCHAR(255) NULL",
+        "run_count": "INT NOT NULL DEFAULT 0",
+        "change_count": "INT NOT NULL DEFAULT 0",
         "target_scope": "VARCHAR(20) NOT NULL DEFAULT 'selected'",
         "affected_agents": "INTEGER NULL",
         "affected_customers": "INTEGER NULL",

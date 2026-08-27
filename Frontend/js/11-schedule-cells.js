@@ -7,6 +7,22 @@ function describeSchedulePeriod(schedule) {
   return periodNumber ? `Period ${periodNumber}` : "Full game";
 }
 
+/*
+ * How many times a schedule has fired, and how often that actually moved a
+ * limit. Both matter and they are different questions: a recurring schedule
+ * doing its job runs every day and correctly changes nothing most of them, so
+ * "ran 40 times, changed 3" is healthy while "ran 40 times, changed 0" is
+ * worth a look and "not run yet" on a past due time is a fault.
+ */
+function describeScheduleRuns(schedule) {
+  const runs = Number(schedule.runCount) || 0;
+  if (!runs) {
+    return "";
+  }
+  const changes = Number(schedule.changeCount) || 0;
+  return `${runs} run${runs === 1 ? "" : "s"} · ${changes} changed`;
+}
+
 function describeScheduleLastRun(schedule) {
   if (!schedule.lastRunAtUtc && !schedule.lastRunAt) {
     return "Not run yet";
@@ -310,6 +326,27 @@ function describeGroupLastRun(group) {
   return [
     ...new Set(group.map((item) => describeScheduleLastRun(item))),
   ].join(" · ");
+}
+
+/*
+ * How many times this group has fired, and how often that moved a limit.
+ * They answer different questions: a recurring schedule doing its job runs
+ * every day and correctly changes nothing on most of them, so "40 runs, 3
+ * changed" is healthy, "40 runs, 0 changed" is worth a look, and "never run"
+ * against a time that has passed is a fault.
+ */
+function describeGroupRuns(group) {
+  const runs = Math.max(...group.map((item) => Number(item.runCount) || 0));
+  if (!runs) {
+    return "Never run";
+  }
+  const changes = Math.max(
+    ...group.map((item) => Number(item.changeCount) || 0)
+  );
+  return (
+    `${runs.toLocaleString()} time${runs === 1 ? "" : "s"}` +
+    ` · changed a limit ${changes.toLocaleString()} of them`
+  );
 }
 
 async function postScheduleAction(path, body) {
