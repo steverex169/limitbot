@@ -4242,6 +4242,12 @@ def edit_schedules(request_data):
                     telegram_audience=getattr(template, "telegram_audience", "all"),
                     status="pending",
                     customer_support_agent=customer_support_agent,
+                    # The grid groups a schedule by, among other things, the
+                    # minute it was created. A row stamped with now would form
+                    # a second line of its own instead of joining the schedule
+                    # it was just added to - which is not a new schedule, it is
+                    # the same one gaining a limit.
+                    created_at=template.created_at,
                 ))
                 created_ids.append(job_id)
         db.commit()
