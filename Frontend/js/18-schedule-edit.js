@@ -46,19 +46,34 @@ function openScheduleEditor(group) {
     `${first.leagueName || `League ${first.idLeague}`} · ${scope}. The destination and league stay fixed.`;
   elements.scheduleEditValues.replaceChildren();
 
-  for (const schedule of group) {
+  /*
+   * Every limit type, not only the ones the schedule already carries. Showing
+   * just the existing rows meant a schedule saved without a Total could never
+   * gain one - the field to type it into did not exist. A blank row is simply
+   * not scheduled; filling it in creates it.
+   */
+  const scheduledByField = new Map(
+    group.map((schedule) => [schedule.field, schedule])
+  );
+  for (const field of ["spread", "moneyLine", "total", "teamTotal"]) {
+    const schedule = scheduledByField.get(field);
     const row = document.createElement("label");
     row.className = "schedule-edit-value";
     const label = document.createElement("span");
-    label.textContent = scheduleEditLimitLabel(schedule);
+    label.textContent = scheduleEditLimitLabel(schedule || { ...first, field });
     const input = document.createElement("input");
     input.type = "number";
     input.min = "0";
     input.max = "1000000000";
     input.step = "1";
-    input.required = true;
-    input.value = String(schedule.value);
-    input.dataset.scheduleId = schedule.id;
+    input.placeholder = schedule ? "" : "Not scheduled";
+    input.value = schedule ? String(schedule.value) : "";
+    if (schedule) {
+      input.dataset.scheduleId = schedule.id;
+    } else {
+      input.dataset.scheduleField = field;
+      row.classList.add("schedule-edit-value-empty");
+    }
     input.setAttribute("aria-label", label.textContent);
     row.append(label, input);
     elements.scheduleEditValues.append(row);
@@ -100,10 +115,22 @@ elements.scheduleEditForm?.addEventListener("submit", async (event) => {
   const valueInputs = [
     ...elements.scheduleEditValues.querySelectorAll('input[type="number"]'),
   ];
-  const changes = valueInputs.map((input) => ({
-    id: input.dataset.scheduleId,
-    value: Number(input.value),
-  }));
+  /* A row with an id is updated; one left blank is skipped; one filled in
+   * without an id is a limit type being added to this schedule. */
+  const changes = valueInputs
+    .filter((input) => input.dataset.scheduleId)
+    .map((input) => ({
+      id: input.dataset.scheduleId,
+      value: Number(input.value),
+    }));
+  const additions = valueInputs
+    .filter(
+      (input) => !input.dataset.scheduleId && input.value.trim() !== ""
+    )
+    .map((input) => ({
+      field: input.dataset.scheduleField,
+      value: Number(input.value),
+    }));
 
   if (!customerSupportAgent) {
     showScheduleEditMessage("Enter the Customer Support Agent name.");
@@ -115,10 +142,14 @@ elements.scheduleEditForm?.addEventListener("submit", async (event) => {
     elements.scheduleEditTime.focus();
     return;
   }
-  if (changes.some((change) =>
+  if ([...changes, ...additions].some((change) =>
     !Number.isInteger(change.value) || change.value < 0 || change.value > 1000000000
   )) {
-    showScheduleEditMessage("Enter a valid whole-number limit for every row.");
+    showScheduleEditMessage("Enter a valid whole-number limit for every row you fill in.");
+    return;
+  }
+  if (!changes.length && !additions.length) {
+    showScheduleEditMessage("Enter at least one limit.");
     return;
   }
 
@@ -130,6 +161,7 @@ elements.scheduleEditForm?.addEventListener("submit", async (event) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         changes,
+        additions,
         customerSupportAgent,
         recurrenceTime,
         recurrenceDays: elements.scheduleEditDays

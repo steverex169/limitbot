@@ -607,3 +607,14 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* A limit type this schedule does not carry yet: offered so it can be added,
+   but visibly not part of the schedule until something is typed in. */
+.schedule-edit-value-empty span {
+  color: var(--muted);
+}
+
+.schedule-edit-value-empty input::placeholder {
+  color: var(--muted);
+  opacity: 0.8;
+}

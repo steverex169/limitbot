@@ -4143,6 +4143,22 @@ def edit_schedules(request_data):
             raise ValueError("Limit must be between 0 and 1,000,000,000")
         values_by_id[schedule_id] = value
 
+    # A limit type the schedule does not carry yet has no id to update, so it
+    # is created instead. Without this a schedule saved without a Total could
+    # never gain one: the dialog only offered the rows that already existed.
+    additions = {}
+    for raw_addition in request_data.get("additions") or []:
+        try:
+            field = str(raw_addition["field"]).strip()
+            value = int(raw_addition["value"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("Enter valid scheduled limit values") from error
+        if field not in allowed_limit_fields or field in additions:
+            raise ValueError("Invalid or duplicate limit type")
+        if value < 0 or value > 1_000_000_000:
+            raise ValueError("Limit must be between 0 and 1,000,000,000")
+        additions[field] = value
+
     try:
         if recurrence_days:
             scheduled_for = next_recurring_run(recurrence_days, recurrence_time)
@@ -4193,13 +4209,54 @@ def edit_schedules(request_data):
             job.login_session_id = auth.get("dbSessionId")
             job.status = "pending"
             job.error = None
+
+        created_ids = []
+        if additions:
+            # The new rows belong to the same league, period and account as
+            # the ones being edited, so they are taken from the group rather
+            # than trusted from the request.
+            template = jobs[0]
+            existing_fields = {job.field for job in jobs}
+            for field, value in additions.items():
+                if field in existing_fields:
+                    raise ValueError(
+                        f"This schedule already has a "
+                        f"{limit_field_labels.get(field, field)} limit"
+                    )
+                job_id = uuid.uuid4().hex
+                db.add(ScheduledLimit(
+                    id=job_id,
+                    user_id=auth["userId"],
+                    login_session_id=auth.get("dbSessionId"),
+                    account_id=template.account_id,
+                    organization_id=template.organization_id,
+                    league_id=template.league_id,
+                    sport_type_id=template.sport_type_id,
+                    period_number=template.period_number,
+                    field=field,
+                    value=value,
+                    scheduled_for=scheduled_utc,
+                    recurrence_days=stored_days,
+                    recurrence_time=stored_time,
+                    is_early_limit=template.is_early_limit,
+                    telegram_audience=getattr(template, "telegram_audience", "all"),
+                    status="pending",
+                    customer_support_agent=customer_support_agent,
+                ))
+                created_ids.append(job_id)
         db.commit()
 
+    parts = [
+        f"Updated {len(jobs)} scheduled "
+        f"{'limit' if len(jobs) == 1 else 'limits'}"
+    ]
+    if additions:
+        parts.append(
+            f"added {len(additions)} "
+            f"{'limit' if len(additions) == 1 else 'limits'}"
+        )
     return {
-        "message": (
-            f"Updated {len(jobs)} scheduled "
-            f"{'limit' if len(jobs) == 1 else 'limits'}"
-        ),
+        "message": ", ".join(parts),
         "ids": list(values_by_id),
         "scheduledFor": eastern_timestamp(scheduled_for),
         "scheduledForUtc": scheduled_for.astimezone(timezone.utc).isoformat(),
