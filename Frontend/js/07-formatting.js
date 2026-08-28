@@ -168,6 +168,35 @@ function populateScheduleTimePicker() {
       elements.scheduleMinute.append(option);
     }
   }
+
+  /*
+   * Nearly every schedule is on the hour, and leaving the minutes empty meant
+   * picking "10" and "AM" still produced "Select an ET time first" - an error
+   * about a field the operator had no reason to think was unfinished. Choosing
+   * an hour fills the minutes, and a different minute can still be chosen.
+   */
+  if (elements.scheduleHour && !elements.scheduleHour.dataset.minuteDefault) {
+    elements.scheduleHour.dataset.minuteDefault = "on";
+    elements.scheduleHour.addEventListener("change", () => {
+      if (elements.scheduleHour.value && !elements.scheduleMinute?.value) {
+        elements.scheduleMinute.value = "00";
+      }
+    });
+
+    /* A complaint about a missing time should go away when a time is given,
+     * rather than sitting there red while the dialog is plainly now valid. */
+    for (const control of [
+      elements.scheduleHour,
+      elements.scheduleMinute,
+      elements.schedulePeriod,
+    ]) {
+      control?.addEventListener("change", () => {
+        if (getSelectedScheduleTime()) {
+          clearDialogMessage();
+        }
+      });
+    }
+  }
 }
 
 function getSelectedScheduleTime() {
