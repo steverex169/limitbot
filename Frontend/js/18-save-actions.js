@@ -114,13 +114,28 @@ async function saveHierarchyBatch(batch, customerSupportAgent) {
 }
 
 async function saveActiveChange() {
-  const batch =
+  const everything =
     Array.isArray(state.pendingSaveBatch) &&
     state.pendingSaveBatch.length
       ? state.pendingSaveBatch
       : state.activeChange
         ? [state.activeChange]
         : [];
+
+  /*
+   * A value that already matches is kept so it can be scheduled, but writing
+   * it now would spend a request to change nothing. Saving skips those.
+   */
+  const batch = everything.filter((change) => !change.unchanged);
+
+  if (!batch.length && everything.length) {
+    showDialogMessage(
+      everything.length === 1
+        ? "That limit is already at this value. Use Schedule to pin it for later."
+        : "Those limits are already at these values. Use Schedule to pin them for later."
+    );
+    return;
+  }
 
   if (!batch.length) {
     return;

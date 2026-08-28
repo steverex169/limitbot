@@ -109,7 +109,7 @@ function createLimitCell(row, field) {
 
     if (
       invalidValue ||
-      typedValue === originalValue ||
+      typedValue === null ||
       (typedValue === null && originalValue == null)
     ) {
       state.pending.delete(key);
@@ -120,6 +120,15 @@ function createLimitCell(row, field) {
         field,
         oldValue: originalValue,
         newValue: typedValue,
+        /*
+         * Typing the value a limit already holds used to be discarded, which
+         * is right for saving now - there is nothing to write - but wrong for
+         * scheduling. "Set Total to 200 at 10am Monday" is meaningful even
+         * when it is 200 today, because a tracker, another schedule or a
+         * person may move it before then; that is what pinning it means. It
+         * is kept and flagged, and only the schedule path uses it.
+         */
+        unchanged: typedValue === originalValue,
         isParentRow: isParentLimitRow(row), // Flag this as a parent update
       });
       state.activeEditRowKey = currentRowKey;
