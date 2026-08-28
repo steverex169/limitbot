@@ -4243,11 +4243,15 @@ def edit_schedules(request_data):
                     status="pending",
                     customer_support_agent=customer_support_agent,
                     # The grid groups a schedule by, among other things, the
-                    # minute it was created. A row stamped with now would form
-                    # a second line of its own instead of joining the schedule
-                    # it was just added to - which is not a new schedule, it is
-                    # the same one gaining a limit.
+                    # minute it was created and whether it targets one agent
+                    # or the whole hierarchy. Anything the key reads has to be
+                    # copied from the schedule being joined, or the new row
+                    # forms a second line of its own instead of filling the
+                    # gap in the one it was added to.
                     created_at=template.created_at,
+                    target_scope=template.target_scope,
+                    affected_agents=template.affected_agents,
+                    affected_customers=template.affected_customers,
                 ))
                 created_ids.append(job_id)
         db.commit()
