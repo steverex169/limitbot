@@ -105,6 +105,15 @@ site cannot reach the other's schedules or limits.
   Pinnacle, not a partner, so both sites recording them stores the same
   numbers twice. `PINNACLE_SAMPLE_MINUTES` (default 60) and
   `PINNACLE_SAMPLE_DAYS` (default 60) control the cadence and retention.
+- `HIERARCHY_WRITE_REFRESH_SECONDS` (default 120): how recently the agent tree
+  must have been rebuilt before an all-agent write uses it. The tree is
+  normally served stale-while-revalidate, which decides who a limit reaches -
+  on 2026-08-31 the first job of a batch wrote to 40 agents off an old tree
+  while the six behind it wrote to 43. One refresh covers a whole batch.
+- `HIERARCHY_SAVE_RETRIES` (default 4): how many times an all-agent write is
+  retried when AccessHigh answers 429, honouring `Retry-After` with jitter.
+  Seven limits across forty agents arrive as one burst, and a rate-limited
+  write previously failed the job outright.
 - `SKIP_BLUE`: refuse to overwrite any blue limit. Defaults to `on`; set
   `off` to write every limit regardless. Blue means the account holds its own
   value rather than inheriting one. Note that writing a limit on a

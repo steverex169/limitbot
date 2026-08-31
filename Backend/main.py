@@ -2607,8 +2607,51 @@ def normalize_hierarchy_changes(request_data):
     return normalized, customer_support_agent
 
 
-def hierarchy_agent_ids():
+# An all-agent batch fires several jobs seconds apart, so one refresh serves
+# the burst rather than each job walking the hierarchy for the same answer.
+hierarchy_refresh_times = {}
+hierarchy_refresh_guard = threading.Lock()
+hierarchy_refresh_window = int(
+    os.getenv("HIERARCHY_WRITE_REFRESH_SECONDS", "120") or 120
+)
+hierarchy_save_retries = max(
+    1, int(os.getenv("HIERARCHY_SAVE_RETRIES", "4") or 4)
+)
+
+
+def hierarchy_agent_ids(force_fresh=False):
+    """Every account an all-agent change reaches.
+
+    The stored tree is served stale-while-revalidate, which is right for
+    drawing a sidebar and wrong for deciding who a limit is written to: on
+    31 August the first job of a batch applied to 40 agents off a
+    fifteen-minute-old tree, while the six behind it, running on the tree that
+    had refreshed in between, applied to 43. Three agents kept their old limit
+    and nothing said so.
+    """
     auth = auth_context()
+    if force_fresh:
+        key = safe_int(auth["id"])
+        now = time.monotonic()
+        with hierarchy_refresh_guard:
+            last = hierarchy_refresh_times.get(key)
+            due = last is None or now - last >= hierarchy_refresh_window
+            if due:
+                hierarchy_refresh_times[key] = now
+        if due:
+            try:
+                load_agents(force=True)
+            except Exception:
+                # A refresh that fails must not stop the write - the stored
+                # tree is still the best answer available.
+                logger.warning(
+                    "Could not refresh the hierarchy before an all-agent write",
+                    exc_info=True,
+                )
+                with hierarchy_refresh_guard:
+                    if hierarchy_refresh_times.get(key) == now:
+                        hierarchy_refresh_times.pop(key, None)
+
     ids = [safe_int(auth["id"])]
     ids.extend(safe_int(agent.get("id")) for agent in load_agents())
     return sorted({agent_id for agent_id in ids if agent_id > 0})
@@ -2656,7 +2699,7 @@ def hierarchy_payload(changes, agent_ids, include_changes):
 
 def preview_hierarchy_limit_changes(request_data):
     changes, customer_support_agent = normalize_hierarchy_changes(request_data)
-    agent_ids = hierarchy_agent_ids()
+    agent_ids = hierarchy_agent_ids(force_fresh=True)
     if not agent_ids:
         raise ValueError("No agents are available for this account")
     if write_allowed_accounts and any(
@@ -2736,12 +2779,25 @@ def save_hierarchy_limit_changes(request_data):
 
     changes = pending["changes"]
     agent_ids = pending["agentIds"]
-    response = api_request(
-        "POST",
-        f"{partner_api}/Backbone/save/",
-        json=hierarchy_payload(changes, agent_ids, include_changes=True),
-        timeout=30,
-    )
+    payload = hierarchy_payload(changes, agent_ids, include_changes=True)
+    # Seven limits across forty-odd agents arrive as one burst, and AccessHigh
+    # answered one of them with a 429 that failed the job outright. The read
+    # path already backs off and retries; the write had nothing.
+    for attempt in range(hierarchy_save_retries):
+        response = api_request(
+            "POST",
+            f"{partner_api}/Backbone/save/",
+            json=payload,
+            timeout=30,
+        )
+        if response.status_code != 429 or attempt == hierarchy_save_retries - 1:
+            break
+        delay = rate_limit_retry_delay(response, attempt)
+        logger.info(
+            "AccessHigh rate limited an all-agent write; retrying in %.1fs",
+            delay,
+        )
+        time.sleep(delay)
     response.raise_for_status()
     data = response.json()
     if data.get("Errors"):
@@ -2799,7 +2855,7 @@ def run_hierarchy_scheduled_limit(request_data):
         "changes": [request_data],
         "customerSupportAgent": request_data.get("customerSupportAgent"),
     })
-    agent_ids = hierarchy_agent_ids()
+    agent_ids = hierarchy_agent_ids(force_fresh=True)
     if write_allowed_accounts and any(
         not write_allowed(agent_id) for agent_id in agent_ids
     ):
@@ -2807,12 +2863,25 @@ def run_hierarchy_scheduled_limit(request_data):
     affected_agents, affected_customers = check_hierarchy_impact(
         changes, agent_ids
     )
-    response = api_request(
-        "POST",
-        f"{partner_api}/Backbone/save/",
-        json=hierarchy_payload(changes, agent_ids, include_changes=True),
-        timeout=30,
-    )
+    payload = hierarchy_payload(changes, agent_ids, include_changes=True)
+    # Seven limits across forty-odd agents arrive as one burst, and AccessHigh
+    # answered one of them with a 429 that failed the job outright. The read
+    # path already backs off and retries; the write had nothing.
+    for attempt in range(hierarchy_save_retries):
+        response = api_request(
+            "POST",
+            f"{partner_api}/Backbone/save/",
+            json=payload,
+            timeout=30,
+        )
+        if response.status_code != 429 or attempt == hierarchy_save_retries - 1:
+            break
+        delay = rate_limit_retry_delay(response, attempt)
+        logger.info(
+            "AccessHigh rate limited an all-agent write; retrying in %.1fs",
+            delay,
+        )
+        time.sleep(delay)
     response.raise_for_status()
     data = response.json()
     if data.get("Errors"):
