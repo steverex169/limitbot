@@ -487,11 +487,26 @@ def build_limit_success_message(
         if customer_support_agent
         else ""
     )
+    # The closing line already says what happened, and it is not always good
+    # news: a blocked write went out reading "Success: ... Blocked: limit
+    # changes are restricted", which contradicts itself in three words. The
+    # headline follows the outcome instead of always claiming success.
+    closing = str(outcome_line or "").strip().casefold()
+    if closing.startswith("blocked"):
+        headline = "Blocked"
+    elif closing.startswith("failed"):
+        headline = "Failed"
+    elif closing.startswith(("skipped", "no change", "held")):
+        headline = "No change"
+    else:
+        headline = "Success"
+
     return (
         # Both sites can share one bot, so the alert has to name the site it
         # came from. Hardcoding AcesHigh.ag here made every BetWar alert claim
         # to be an AcesHigh one.
-        f"Success: {audience_label} saved on {partner_host}\n"
+        f"{headline}: {audience_label} "
+        f"{'saved on' if headline == 'Success' else 'on'} {partner_host}\n"
         f"Agent: {agent_name}\n"
         f"{support_agent_line}"
         f"League: {league_name}\n"
