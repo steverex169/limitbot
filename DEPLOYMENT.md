@@ -98,6 +98,15 @@ site cannot reach the other's schedules or limits.
   `/v4/odds`. The account decides which sports are visible - one enabled for
   Baseball and Football cannot see NBA or NHL, and a tracker on those reports
   that instead of sitting at a dash.
+- `PINNACLE_API_PROXY`: Pinnacle's edge is behind Cloudflare, which refuses a
+  datacenter address with a 403 and an HTML block page - before the account is
+  looked at, so it reads exactly like a wrong password and is not one. Both
+  containers therefore reach the feed through a proxy on an ordinary address.
+  Takes either a full URL or the `host:port:user:password` line proxy vendors
+  hand out. A residential hop costs several seconds per request, which is why
+  the client waits longer and retries more when one is set; a tracker cycle
+  runs every ten minutes, so that is free. Leave it empty when running from a
+  machine Pinnacle already accepts, such as a laptop.
 - `LIMIT_TRACKER`: set `off` to stop the live tracker thread. `TRACKER_INTERVAL_MINUTES`
   (default 10) is how often tracked limits are compared with Pinnacle,
   `TRACKER_WINDOW_HOURS` (default 12) how close to kick-off a fixture must be

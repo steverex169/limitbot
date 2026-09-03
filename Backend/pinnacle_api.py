@@ -26,6 +26,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, Iterable
+from urllib.parse import quote
 
 import requests
 
@@ -43,12 +44,41 @@ API_PASSWORD = (
     os.getenv("PINNACLE_API_PASSWORD") or os.getenv("PS3838_PASSWORD") or ""
 )
 
+# Pinnacle's edge refuses datacenter addresses outright - a 403 and an HTML
+# block page, before the account is ever looked at - so a server deployment
+# reaches the feed through a proxy on an ordinary address. Accepts either a
+# full URL or the host:port:user:password line the proxy vendors hand out,
+# because retyping one of those into a URL is how a password ends up wrong.
+PROXY_SETTING = (
+    os.getenv("PINNACLE_API_PROXY") or os.getenv("PS3838_PROXY") or ""
+).strip()
+
+
+def _proxy_url(setting: str) -> str:
+    if not setting or "://" in setting:
+        return setting
+    parts = setting.split(":")
+    if len(parts) == 4:
+        host, port, user, password = parts
+        return (
+            f"http://{quote(user, safe='')}:{quote(password, safe='')}"
+            f"@{host}:{port}"
+        )
+    if len(parts) == 2:
+        return f"http://{setting}"
+    return setting
+
+
+API_PROXY = _proxy_url(PROXY_SETTING)
+
 # Pinnacle caches a snapshot for 60s server-side, so asking more often than
 # that returns the same bytes. Nothing here needs to be fresher than a minute.
 CACHE_SECONDS = float(os.getenv("PINNACLE_API_CACHE_SECONDS", "45") or 45)
 MIN_REQUEST_INTERVAL = float(os.getenv("PINNACLE_API_MIN_INTERVAL", "1.0") or 1.0)
-REQUEST_TIMEOUT = 25.0
-MAX_RETRIES = 3
+# A residential hop adds seconds to every request and drops one now and then,
+# so the patience and the retry budget both go up when one is in use.
+REQUEST_TIMEOUT = 60.0 if API_PROXY else 25.0
+MAX_RETRIES = 4 if API_PROXY else 3
 
 
 class PinnacleError(RuntimeError):
@@ -207,6 +237,8 @@ def _http() -> requests.Session:
                 "Accept": "application/json",
                 "User-Agent": "limitbot-pinnacle/1.0",
             })
+            if API_PROXY:
+                session.proxies.update({"http": API_PROXY, "https": API_PROXY})
             _session = session
         return _session
 
@@ -269,11 +301,16 @@ def _get(path: str, **params: Any) -> Any:
                 if "Cloudflare" in body or "Attention Required" in body:
                     ray = response.headers.get("CF-RAY", "")
                     raise PinnacleBlocked(
-                        "Pinnacle's edge blocked this server's IP address, so "
-                        "the request never reached the account. Ask the "
-                        "provider to allow the outbound IP"
+                        "Pinnacle's edge blocked the calling IP address, so "
+                        "the request never reached the account. "
+                        + (
+                            "The proxy's exit address is being refused too; "
+                            "try another one."
+                            if API_PROXY
+                            else "Set PINNACLE_API_PROXY, or ask the provider "
+                            "to allow this server's outbound IP."
+                        )
                         + (f" (Cloudflare ray {ray})" if ray else "")
-                        + "."
                     )
                 raise PinnacleAuthError(
                     f"Pinnacle refused the credentials ({response.status_code}). "
