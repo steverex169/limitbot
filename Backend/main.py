@@ -2632,6 +2632,194 @@ hierarchy_save_retries = max(
     1, int(os.getenv("HIERARCHY_SAVE_RETRIES", "4") or 4)
 )
 
+# AccessHigh answers an all-hierarchy save immediately and settles afterwards.
+# On 3 September a College Football spread was written to 10,000 at 10:00 ET
+# and the board still read 5,000 at 10:26, by which time somebody had been
+# told twice that it had gone through. A 200 on the POST is proof the request
+# arrived, not proof the limit changed, so every all-agent write is now read
+# back before it is called applied.
+hierarchy_verify_delay = float(os.getenv("HIERARCHY_VERIFY_DELAY", "5") or 5)
+hierarchy_verify_attempts = int(os.getenv("HIERARCHY_VERIFY_ATTEMPTS", "3") or 3)
+# Ten of these fire in one batch, each propagating across forty-odd agents.
+# Measured from the end of the last one, so the gap is dead time between
+# saves rather than a delay added to every job.
+hierarchy_write_spacing = float(os.getenv("HIERARCHY_WRITE_SPACING", "3") or 3)
+hierarchy_write_lock = threading.Lock()
+hierarchy_last_write_finished = 0.0
+
+
+class LimitNotApplied(RuntimeError):
+    """The save was accepted and the limit still does not read back.
+
+    Its own class so the operator is told what AccessHigh actually holds,
+    rather than the generic "Operation failed" that a person cannot act on -
+    and the difference matters precisely here, because the fault this exists
+    to report is one that used to look like success.
+    """
+
+
+def refresh_limit_row_source(change):
+    """Pull this row's sheet from AccessHigh, bypassing every cache.
+
+    Separate from reading the value because one save carries up to four
+    markets off the same row: refreshing per market would spend four
+    rate-limited requests to answer one question.
+    """
+    account_id = change["accountId"]
+    if safe_int(change.get("periodNumber")):
+        load_period_rows(
+            account_id, change["idOrganization"], change["idLeague"], force=True
+        )
+    else:
+        get_leagues(account_id, force=True)
+
+
+def observe_limit_value(change):
+    """What AccessHigh holds for one limit, from the sheet just refreshed.
+
+    Never call this without refresh_limit_row_source first: the whole point is
+    to find out what they kept, and a cached answer is the number we asked for
+    rather than the number they hold.
+    """
+    account_id = change["accountId"]
+    period_number = safe_int(change.get("periodNumber"))
+    row = find_limit_row(
+        account_id,
+        change["idOrganization"],
+        change["idLeague"],
+        change["idSportType"],
+        period_number,
+    )
+    if row is None:
+        return None
+    return stored_limit_value(
+        row, change["field"], str(change["apiField"]).startswith("Early")
+    )
+
+
+def post_hierarchy_save(payload):
+    """The save itself, with the rate-limit retry the write path used to lack."""
+    for attempt in range(hierarchy_save_retries):
+        response = api_request(
+            "POST",
+            f"{partner_api}/Backbone/save/",
+            json=payload,
+            timeout=30,
+        )
+        if response.status_code != 429 or attempt == hierarchy_save_retries - 1:
+            break
+        delay = rate_limit_retry_delay(response, attempt)
+        logger.info(
+            "AccessHigh rate limited an all-agent write; retrying in %.1fs",
+            delay,
+        )
+        time.sleep(delay)
+    response.raise_for_status()
+    data = response.json()
+    if data.get("Errors"):
+        raise RuntimeError(", ".join(data["Errors"]))
+    return data
+
+
+def invalidate_hierarchy_caches(agent_ids):
+    with data_lock:
+        for agent_id in agent_ids:
+            league_cache.pop(agent_id, None)
+        for cache_key in list(period_cache):
+            if cache_key[0] in agent_ids:
+                period_cache.pop(cache_key, None)
+
+
+def poll_until_settled(changes):
+    """Read the limits back until they match what was asked for, or give up.
+
+    Returns (observed, pending). `pending` is the fields AccessHigh is still
+    not showing at the requested value; empty means the write is confirmed.
+    """
+    observed, pending = {}, [change["field"] for change in changes]
+    for attempt in range(max(1, hierarchy_verify_attempts)):
+        if shutdown_event.wait(hierarchy_verify_delay):
+            # Going down mid-batch. Report "not checked" rather than "did not
+            # land": a redeploy is not evidence about the write, and calling
+            # it one would fail every queued job and alert on all of them.
+            return observed, None
+        observed, pending = {}, []
+        try:
+            # Every market in one save shares a row, so one refresh answers
+            # for all of them.
+            refresh_limit_row_source(changes[0])
+        except Exception:
+            # A read that fails is not proof the write failed, so try again
+            # rather than declaring anything from it.
+            logger.warning(
+                "Could not re-read the row after an all-agent write",
+                exc_info=True,
+            )
+            pending = [change["field"] for change in changes]
+            continue
+        for change in changes:
+            actual = observe_limit_value(change)
+            observed[change["field"]] = actual
+            if actual is None or safe_int(actual, -1) != safe_int(change["value"], -2):
+                pending.append(change["field"])
+        if not pending:
+            break
+    return observed, pending
+
+
+def describe_pending(observed, pending, changes):
+    wanted = {change["field"]: change["value"] for change in changes}
+    return "; ".join(
+        f"{limit_field_labels.get(field, field)} still shows "
+        f"{'nothing' if observed.get(field) is None else format(safe_int(observed.get(field)), ',')}"
+        f" instead of {safe_int(wanted.get(field)):,}"
+        for field in pending
+    )
+
+
+def perform_hierarchy_save(changes, agent_ids, max_writes=2):
+    """Save across the hierarchy, then prove it landed.
+
+    Serialised: ten of these fire seconds apart in a batch and each propagates
+    across forty-odd agents, so letting them overlap is what made a read
+    taken between two of them return a board that was part old and part new.
+
+    Raises when the limits still do not read back at the requested value, so a
+    write that did not take is reported as a failure rather than a success.
+    """
+    global hierarchy_last_write_finished
+    payload = hierarchy_payload(changes, agent_ids, include_changes=True)
+    observed, pending = {}, []
+    with hierarchy_write_lock:
+        for write_attempt in range(max(1, max_writes)):
+            wait = hierarchy_last_write_finished + hierarchy_write_spacing - time.monotonic()
+            if wait > 0:
+                time.sleep(wait)
+            try:
+                post_hierarchy_save(payload)
+            finally:
+                hierarchy_last_write_finished = time.monotonic()
+            invalidate_hierarchy_caches(agent_ids)
+
+            if hierarchy_verify_attempts <= 0:
+                return {"verified": None, "observed": {}}
+            observed, pending = poll_until_settled(changes)
+            if pending is None:
+                # Shut down before the check could finish.
+                return {"verified": None, "observed": observed}
+            if not pending:
+                return {"verified": True, "observed": observed}
+            if write_attempt < max_writes - 1:
+                logger.warning(
+                    "An all-agent write has not landed (%s); writing it again",
+                    describe_pending(observed, pending, changes),
+                )
+    raise LimitNotApplied(
+        "AccessHigh accepted the change but has not applied it: "
+        + describe_pending(observed, pending, changes)
+    )
+
+
 
 def hierarchy_agent_ids(force_fresh=False):
     """Every account an all-agent change reaches.
@@ -2793,36 +2981,7 @@ def save_hierarchy_limit_changes(request_data):
 
     changes = pending["changes"]
     agent_ids = pending["agentIds"]
-    payload = hierarchy_payload(changes, agent_ids, include_changes=True)
-    # Seven limits across forty-odd agents arrive as one burst, and AccessHigh
-    # answered one of them with a 429 that failed the job outright. The read
-    # path already backs off and retries; the write had nothing.
-    for attempt in range(hierarchy_save_retries):
-        response = api_request(
-            "POST",
-            f"{partner_api}/Backbone/save/",
-            json=payload,
-            timeout=30,
-        )
-        if response.status_code != 429 or attempt == hierarchy_save_retries - 1:
-            break
-        delay = rate_limit_retry_delay(response, attempt)
-        logger.info(
-            "AccessHigh rate limited an all-agent write; retrying in %.1fs",
-            delay,
-        )
-        time.sleep(delay)
-    response.raise_for_status()
-    data = response.json()
-    if data.get("Errors"):
-        raise RuntimeError(", ".join(data["Errors"]))
-
-    with data_lock:
-        for agent_id in agent_ids:
-            league_cache.pop(agent_id, None)
-        for cache_key in list(period_cache):
-            if cache_key[0] in agent_ids:
-                period_cache.pop(cache_key, None)
+    perform_hierarchy_save(changes, agent_ids)
 
     changed_at = utc_now_naive()
     for change in changes:
@@ -2877,36 +3036,7 @@ def run_hierarchy_scheduled_limit(request_data):
     affected_agents, affected_customers = check_hierarchy_impact(
         changes, agent_ids
     )
-    payload = hierarchy_payload(changes, agent_ids, include_changes=True)
-    # Seven limits across forty-odd agents arrive as one burst, and AccessHigh
-    # answered one of them with a 429 that failed the job outright. The read
-    # path already backs off and retries; the write had nothing.
-    for attempt in range(hierarchy_save_retries):
-        response = api_request(
-            "POST",
-            f"{partner_api}/Backbone/save/",
-            json=payload,
-            timeout=30,
-        )
-        if response.status_code != 429 or attempt == hierarchy_save_retries - 1:
-            break
-        delay = rate_limit_retry_delay(response, attempt)
-        logger.info(
-            "AccessHigh rate limited an all-agent write; retrying in %.1fs",
-            delay,
-        )
-        time.sleep(delay)
-    response.raise_for_status()
-    data = response.json()
-    if data.get("Errors"):
-        raise RuntimeError(", ".join(data["Errors"]))
-
-    with data_lock:
-        for agent_id in agent_ids:
-            league_cache.pop(agent_id, None)
-        for cache_key in list(period_cache):
-            if cache_key[0] in agent_ids:
-                period_cache.pop(cache_key, None)
+    outcome = perform_hierarchy_save(changes, agent_ids)
 
     change = changes[0]
     record_limit_change(
@@ -2932,11 +3062,17 @@ def run_hierarchy_scheduled_limit(request_data):
                 stored_job.affected_agents = affected_agents
                 stored_job.affected_customers = affected_customers
                 db.commit()
+    confirmed = (
+        # None means verification is switched off, in which case saying
+        # "confirmed" would be the same overclaim this was added to stop.
+        f", confirmed at {safe_int(outcome['observed'].get(change['field'])):,}"
+        if outcome.get("verified") else ""
+    )
     return {
         "changed": True,
         "note": (
             f"Applied to {affected_agents:,} agents; "
-            f"{affected_customers:,} customers affected"
+            f"{affected_customers:,} customers affected{confirmed}"
         ),
     }
 
@@ -6196,6 +6332,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.send_json(400, {"error": str(error)})
         except PermissionError as error:
             self.send_json(401, {"error": str(error)})
+        except LimitNotApplied as error:
+            # The request was valid and reached AccessHigh; what failed is on
+            # their side, and the operator needs the number they are actually
+            # holding rather than a generic failure.
+            logger.warning("All-agent write did not apply: %s", error)
+            self.send_json(409, {"error": str(error)})
         except Exception as error:
             self.server_error("Authenticated operation failed", error, "Operation failed")
 

@@ -88,6 +88,20 @@ site cannot reach the other's schedules or limits.
   a tracker on an account outside the list is refused outright rather than
   failing later at run time. Use it while testing so automation cannot reach a
   live downline.
+- `HIERARCHY_VERIFY_DELAY` (default 5) / `HIERARCHY_VERIFY_ATTEMPTS` (default
+  3) / `HIERARCHY_WRITE_SPACING` (default 3): how an all-agent write is proved
+  to have landed. AccessHigh answers the save immediately and settles
+  afterwards - on 3 September a College Football spread was written to 10,000
+  at 10:00 ET and the board still read 5,000 at 10:26, by which time somebody
+  had twice been told it had gone through. So after each save the row is
+  re-read from AccessHigh, bypassing every cache, until it shows the requested
+  value or the attempts run out; a write that has not landed is saved once
+  more, and if it still has not, the run is reported as **failed** with the
+  number AccessHigh is actually holding. Saves are also serialised and spaced,
+  because ten of them fire in one batch and each propagates across forty-odd
+  agents. Set `HIERARCHY_VERIFY_ATTEMPTS=0` to skip verification entirely -
+  which restores the old behaviour of reporting the request rather than the
+  result, so only do it to rule verification out as a cause.
 - `PINNACLE_API_BASE` / `PINNACLE_API_USERNAME` / `PINNACLE_API_PASSWORD`:
   the Pinnacle betting engine that Build a Ramp follows. Base defaults to
   `https://api.probet42.com`. Both sites need these - the tracker writes on
