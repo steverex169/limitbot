@@ -79,6 +79,15 @@ function rampLeagueGroups() {
     ) {
       continue;
     }
+    /* Only leagues Pinnacle can actually be read for. This account carries
+       Baseball and Football, so the other four were rows somebody could tick,
+       confirm, and only then be told nothing would ever be written to them. */
+    if (
+      state.trackableLeagues &&
+      !state.trackableLeagues.has(rampLeagueLabel(row))
+    ) {
+      continue;
+    }
     const label = tier || "Other leagues";
     if (!groups.has(label)) {
       groups.set(label, []);
@@ -177,10 +186,12 @@ function renderRampLeagues() {
   if (!groups.length) {
     const empty = document.createElement("p");
     empty.className = "ramp-count ramp-empty";
-    empty.textContent =
-      state.selectedAgentId
-        ? "Loading leagues for this agent..."
-        : "Select an agent on the left to load its leagues.";
+    empty.textContent = !state.selectedAgentId
+      ? "Select an agent on the left to load its leagues."
+      : state.trackableLeagues && (state.rows || []).length
+        ? "None of this agent's leagues are ones Pinnacle carries on this " +
+          "account, so there is nothing here to follow."
+        : "Loading leagues for this agent...";
     elements.rampLeagues.append(empty);
     updateRampPreview();
     return;
@@ -201,6 +212,23 @@ function renderRampLeagues() {
 
     section.append(rampGroupHeading(group.label, section), list);
     elements.rampLeagues.append(section);
+  }
+
+  /* Say why the list is short. Four of the seven leagues vanishing without
+     explanation reads as a bug, and the reason is not guessable from here. */
+  if (state.trackableLeagues) {
+    const note = document.createElement("p");
+    note.className = "ramp-count";
+    note.textContent =
+      "Only leagues Pinnacle carries on this account are listed" +
+      (state.trackableLeagues.size
+        ? ` (${[...state.trackableLeagues]
+            .map((name) => name.replace(/ -- .*$/, ""))
+            .sort()
+            .join(", ")}).`
+        : ".") +
+      " Others cannot be tracked because there is nothing to follow.";
+    elements.rampLeagues.append(note);
   }
 
   /* Re-applies the filter box, and updates the preview on its way out. */
@@ -326,6 +354,12 @@ async function loadTrackedLimits() {
     state.trackers = Array.isArray(data.trackers) ? data.trackers : [];
     state.trackerHistory = Array.isArray(data.history) ? data.history : [];
     state.trackerSettings = data;
+    state.trackableLeagues = Array.isArray(data.trackableLeagues)
+      ? new Set(data.trackableLeagues)
+      : null;
+    /* The picker rendered before this arrived, so it is showing every league.
+       Now that the supported set is known, draw it again. */
+    renderRampLeagues();
     renderTrackedLimits();
     renderTrackerHistory();
   } catch (error) {

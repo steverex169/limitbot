@@ -3776,6 +3776,27 @@ def limit_tracker_rows(account_id):
         } for row in rows]
 
 
+def trackable_league_names():
+    """The limit rows Build a Ramp can actually follow, by their own label.
+
+    Returns None when Pinnacle could not be asked, which the page treats as
+    "show everything" rather than "show nothing".
+
+    Worth filtering rather than validating on submit: a row that cannot be
+    tracked is one somebody ticks, confirms, and is then told about after the
+    fact - and on this account that was four of the seven leagues, because it
+    carries Baseball and Football and nothing else.
+    """
+    slugs = pinnacle_api.supported_leagues()
+    if slugs is None:
+        return None
+    return sorted(
+        str(config.get("limitRow", "")).strip()
+        for slug, config in LEAGUE_CONFIGS.items()
+        if slug in slugs and config.get("limitRow")
+    )
+
+
 def pinnacle_period_label(period_description):
     """The label Pinnacle samples are stored under, for an AccessHigh period.
 
@@ -6113,6 +6134,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                         "minChangePercent": tracker_min_change_percent,
                         "basis": tracker_basis,
                         "sourceConfigured": pinnacle_api.configured(),
+                        "trackableLeagues": trackable_league_names(),
                     },
                 )
             except (KeyError, TypeError, ValueError) as error:

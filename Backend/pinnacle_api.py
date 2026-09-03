@@ -196,6 +196,46 @@ def configured() -> bool:
     return bool(API_USERNAME and API_PASSWORD)
 
 
+def available_sports() -> set[str] | None:
+    """Which of our sports this Pinnacle account can see, or None if unknown.
+
+    None is not "none": it means Pinnacle could not be asked. The caller shows
+    everything in that case, because hiding a league on the strength of a
+    failed request would quietly shrink the page whenever the feed hiccups.
+    """
+    try:
+        payload = _get("/v3/sports")
+    except PinnacleError:
+        return None
+    listed = {
+        str(entry.get("name", "")).strip().casefold()
+        for entry in (payload.get("sports") or [])
+    }
+    if not listed:
+        return None
+    return {
+        key for key, sport in SPORTS.items()
+        if sport["name"].casefold() in listed
+    }
+
+
+def supported_leagues() -> set[str] | None:
+    """The league slugs that can be tracked right now, or None if unknown.
+
+    A slug qualifies when this account carries its sport. Leagues inside an
+    enabled sport are not checked one at a time on purpose: that is a request
+    per sport through a proxy, on a page somebody is waiting for, to rule out
+    a case the creation path already reports clearly.
+    """
+    sports = available_sports()
+    if sports is None:
+        return None
+    return {
+        slug for slug, source in LEAGUE_SOURCES.items()
+        if source["sport"] in sports
+    }
+
+
 def period_number(league_slug: str, period_label: str) -> int | None:
     """Pinnacle's period number for one of our period labels, or None."""
     source = LEAGUE_SOURCES.get(league_slug)

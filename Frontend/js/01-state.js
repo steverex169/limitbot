@@ -6,6 +6,10 @@ const state = {
   trackers: [],
   trackerHistory: [],
   trackerSettings: null,
+  /* Which league rows Pinnacle can be read for. null means "not asked yet",
+     which the ramp picker treats as "show everything" - hiding leagues on the
+     strength of an answer that has not arrived would blank the page. */
+  trackableLeagues: null,
   agents: [],
   selectedAgentId: null,
   rows: [],
