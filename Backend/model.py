@@ -174,6 +174,17 @@ class PinnacleLimitSample(Base):
     fixture_id: Mapped[str] = mapped_column(String(64), index=True)
     hours_to_start: Mapped[float] = mapped_column(Float)
     limit_value: Mapped[float] = mapped_column(Float)
+    # The line the limit was posted against - the handicap for a spread, the
+    # points for a total. A limit means something different at -3.5 than at
+    # -10.5, so a reading kept without its line cannot be read back later.
+    line_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Which feed the reading came from. The rows collected through OddsPapi are
+    # not on the same scale as Pinnacle's own - the aggregator reported 937 and
+    # 187 where Pinnacle posts 1,875 and 375, and its baseball readings landed
+    # under a "1st Half" period baseball does not have. Blending the two would
+    # build a ramp from two different books, so the curve reads one source and
+    # the older rows are kept only for reference.
+    source: Mapped[str] = mapped_column(String(16), default="pinnacle", index=True)
     sampled_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), index=True
     )
@@ -200,8 +211,9 @@ class LimitTracker(Base):
     field: Mapped[str] = mapped_column(String(20))
     is_early_limit: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    # Where to read Pinnacle: the OddsPapi league and the period label the
-    # samples are stored under.
+    # Where to read Pinnacle: the league slug and the period label, both of
+    # which pinnacle_api maps onto Pinnacle's own sport, league and period
+    # numbers.
     league_slug: Mapped[str] = mapped_column(String(24), index=True)
     period_label: Mapped[str] = mapped_column(String(32), default="Full Game")
     league_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
@@ -215,6 +227,10 @@ class LimitTracker(Base):
     # What the last cycle saw and did, so the page can show it without
     # re-reading AccessHigh.
     last_pinnacle_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_pinnacle_line: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_pinnacle_event: Mapped[str | None] = mapped_column(
+        String(120), nullable=True
+    )
     last_written_value: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     last_note: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_checked_at: Mapped[datetime | None] = mapped_column(

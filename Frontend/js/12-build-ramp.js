@@ -428,14 +428,20 @@ function renderTrackedLimits() {
     `fixtures starting within ${settings.windowHours || 12} hours. Games already ` +
     `under way are excluded, since Pinnacle's in-play limits are not comparable. ` +
     `A limit is only rewritten once Pinnacle has moved more than ` +
-    `${settings.minChangePercent || 8}%.`;
+    `${settings.minChangePercent || 8}%. Lines and limits come from Pinnacle's ` +
+    `own feed, so this is their whole board, not a sample of it.`;
+  if (settings.sourceConfigured === false) {
+    note.textContent =
+      "The Pinnacle feed is not configured on this deployment, so nothing is " +
+      "being checked. Set PINNACLE_API_USERNAME and PINNACLE_API_PASSWORD.";
+  }
   host.append(note);
 
   const table = document.createElement("table");
   table.className = "ramp-tracked-table ramp-current-table";
   const head = document.createElement("thead");
   const headRow = document.createElement("tr");
-  ["League", "Market", "Pinnacle now", "Your limit", "Last checked", "What happened", ""]
+  ["League", "Market", "Pinnacle line", "Pinnacle now", "Your limit", "Last checked", "What happened", ""]
     .forEach((label) => {
       const th = document.createElement("th");
       th.textContent = label;
@@ -479,6 +485,10 @@ function renderTrackedLimits() {
         `${fieldLabels[tracker.field] || tracker.field}` +
         (tracker.period && tracker.period !== "Full Game" ? ` (${tracker.period})` : "")
       ),
+      /* The line the limit was read against. A 5,000 maximum means something
+       * different at -3.5 than at -10.5, so showing the limit without it
+       * invites the wrong conclusion about how much Pinnacle trusts it. */
+      comparisonCell(comparisonText(tracker.pinnacleLine)),
       comparisonCell(
         tracker.pinnacle ? Number(tracker.pinnacle).toLocaleString() : "—"
       ),

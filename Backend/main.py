@@ -37,14 +37,13 @@ from model import (
     ScheduledLimit,
     User,
 )
+import pinnacle_api
 from odds_comparison import (
     ComparisonError,
     LEAGUE_CONFIGS,
-    RateLimited,
     build_league_comparison,
     build_trading_monitor,
     comparison_leagues,
-    sample_pinnacle_limits,
 )
 
 backend_directory = Path(__file__).resolve().parent
@@ -3458,6 +3457,10 @@ def pinnacle_curve(league_slug=None):
             PinnacleLimitSample.hours_to_start,
             PinnacleLimitSample.limit_value,
         )
+        # Only the readings taken from Pinnacle's own feed. The OddsPapi rows
+        # are a different book on a different scale, and averaging the two
+        # together would produce a curve that describes neither.
+        query = query.where(PinnacleLimitSample.source == "pinnacle")
         if league_slug:
             query = query.where(PinnacleLimitSample.league == league_slug)
         rows = db.execute(query).all()
@@ -3496,10 +3499,11 @@ def pinnacle_curve(league_slug=None):
 
 
 def league_slug_for_row(league_name):
-    """The OddsPapi league a limit row belongs to, or None.
+    """The Pinnacle league a limit row belongs to, or None.
 
-    LEAGUE_CONFIGS carries AccessHigh's own label for each league, so this is
-    an exact match rather than a guess.
+    LEAGUE_CONFIGS carries the partner site's own label for each league, so
+    this is an exact match rather than a guess; pinnacle_api then turns the
+    slug into Pinnacle's sport and league numbers.
     """
     label = str(league_name or "").strip().casefold()
     if not label:
@@ -3619,6 +3623,10 @@ def limit_tracker_rows(account_id):
             "scalePercent": row.scale_percent,
             "enabled": row.enabled,
             "pinnacle": row.last_pinnacle_value,
+            "pinnacleLine": pinnacle_api.describe_line(
+                row.field, row.last_pinnacle_line
+            ),
+            "pinnacleEvent": row.last_pinnacle_event,
             "value": row.last_written_value,
             "note": row.last_note,
             "checkedAt": (
@@ -3726,10 +3734,16 @@ def create_limit_trackers(request_data):
                 continue
 
             period_label = pinnacle_period_label(target.get("periodDescription"))
-            if period_label not in {"Full Game", "1st Half", "2nd Half", "1st 5 Innings"}:
+            # Which periods exist is a property of the sport, not a fixed list.
+            # Pinnacle has no 2nd half in baseball, and no quarter markets on
+            # any board we follow, so asking the mapping is the only way to
+            # avoid creating a tracker that can never find its period.
+            supported = pinnacle_api.supported_periods(slug)
+            if period_label not in supported:
                 skipped.append(
-                    f"{league_label}: Pinnacle limits are not recorded for "
-                    f"the {period_label} period"
+                    f"{league_label}: Pinnacle does not carry the "
+                    f"{period_label} period"
+                    + (f" (it has {', '.join(supported)})" if supported else "")
                 )
                 continue
 
@@ -4743,9 +4757,14 @@ pinnacle_sampling_enabled = (
 
 
 def record_pinnacle_samples():
-    """Take one reading of every league's Pinnacle limits."""
-    api_key = os.getenv("ODDSPAPI_KEY", "").strip()
-    if not api_key:
+    """Take one reading of every league's Pinnacle lines and limits.
+
+    These rows are the history the scheduled ramp is built from, so they are
+    recorded per fixture rather than per league: the curve is about how a
+    single game's limit grows through the day, and averaging the league away
+    before storing would destroy exactly that.
+    """
+    if not pinnacle_api.configured():
         return 0
 
     stored = 0
@@ -4754,13 +4773,21 @@ def record_pinnacle_samples():
         if shutdown_event.is_set():
             break
         try:
-            samples = sample_pinnacle_limits(api_key, league)
-        except RateLimited:
-            # The quota is shared with the comparison page. Give the rest of
-            # this cycle up rather than keep pushing against the limiter
-            # somebody's page load also depends on.
-            logger.info(
-                "Pinnacle sampling stopped early: OddsPapi is rate limiting"
+            # Wider than the tracker's window on purpose. The tracker wants
+            # today's number; this is building a curve, and the quiet end of
+            # it - a game still a day out - is the part a morning limit is set
+            # from.
+            readings = pinnacle_api.league_readings(
+                league, window_hours=max(48.0, tracker_window_hours)
+            )
+        except pinnacle_api.PinnacleNotOffered as error:
+            # A sport this account cannot see, or a league between seasons.
+            # Neither is a fault, and neither should fill the log.
+            logger.debug("No Pinnacle board for %s: %s", league, error)
+            continue
+        except pinnacle_api.PinnacleAuthError:
+            logger.warning(
+                "Pinnacle sampling stopped: the API credentials were refused"
             )
             break
         except Exception:
@@ -4770,24 +4797,26 @@ def record_pinnacle_samples():
                 "Could not sample Pinnacle limits for %s", league, exc_info=True
             )
             continue
-        if not samples:
+        if not readings:
             continue
         try:
             with database_session() as db:
                 db.add_all([
                     PinnacleLimitSample(
-                        league=sample["league"],
-                        period=sample["period"],
-                        field=sample["field"],
-                        fixture_id=sample["fixtureId"],
-                        hours_to_start=sample["hoursToStart"],
-                        limit_value=sample["limit"],
+                        league=reading["league"],
+                        period=reading["period"],
+                        field=reading["field"],
+                        fixture_id=reading["fixtureId"],
+                        hours_to_start=reading["hoursToStart"],
+                        limit_value=reading["limit"],
+                        line_value=reading["line"],
+                        source="pinnacle",
                         sampled_at=now.replace(tzinfo=None),
                     )
-                    for sample in samples
+                    for reading in readings
                 ])
                 db.commit()
-            stored += len(samples)
+            stored += len(readings)
         except Exception:
             logger.warning(
                 "Could not store Pinnacle samples for %s", league, exc_info=True
@@ -4848,10 +4877,14 @@ tracker_enabled = (
 )
 
 
-def tracker_pinnacle_levels(api_key, league_slug):
-    """Pinnacle's current limit per period and market for one league.
+def tracker_pinnacle_levels(league_slug):
+    """Pinnacle's current line and limit per period and market for one league.
 
-    Two rules decide which readings count, and both matter more than they look.
+    Read straight from the Pinnacle engine, so this is the whole league rather
+    than a sample of it: two requests return every fixture on the board with
+    both the main line and the maximum stake accepted on it.
+
+    Two rules decide which fixtures count, and both matter more than they look.
 
     Only fixtures that have not started. Pinnacle's in-play limits behave
     nothing like its pre-game ones - on one board the same market read 6,750
@@ -4867,35 +4900,16 @@ def tracker_pinnacle_levels(api_key, league_slug):
     Pinnacle trusts least; the median leaves you above Pinnacle on exactly
     that game.
     """
-    samples = sample_pinnacle_limits(api_key, league_slug)
-    grouped = {}
-    for sample in samples:
-        hours = sample["hoursToStart"]
-        if hours < 0 or hours > tracker_window_hours:
-            continue
-        grouped.setdefault(
-            (sample["period"], sample["field"]), []
-        ).append(sample["limit"])
-
-    levels = {}
-    for key, values in grouped.items():
-        values.sort()
-        if tracker_basis == "median":
-            middle = len(values) // 2
-            levels[key] = (
-                values[middle]
-                if len(values) % 2
-                else (values[middle - 1] + values[middle]) / 2
-            )
-        else:
-            levels[key] = values[0]
-    return levels
+    return pinnacle_api.league_levels(
+        league_slug,
+        window_hours=tracker_window_hours,
+        basis=tracker_basis,
+    )
 
 
 def run_tracker_cycle():
     """Move every enabled tracked limit to its share of Pinnacle's current one."""
-    api_key = os.getenv("ODDSPAPI_KEY", "").strip()
-    if not api_key:
+    if not pinnacle_api.configured():
         return 0
 
     with database_session() as db:
@@ -4917,6 +4931,7 @@ def run_tracker_cycle():
         return 0
 
     levels_by_slug = {}
+    notes_by_slug = {}
     written = 0
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -4926,17 +4941,29 @@ def run_tracker_cycle():
         slug = tracker["slug"]
         if slug not in levels_by_slug:
             try:
-                levels_by_slug[slug] = tracker_pinnacle_levels(api_key, slug)
-            except RateLimited:
-                logger.info("Tracker cycle stopped early: OddsPapi is rate limiting")
-                break
+                levels_by_slug[slug] = tracker_pinnacle_levels(slug)
+                notes_by_slug[slug] = None
+            except pinnacle_api.PinnacleNotOffered as error:
+                # Not a fault: this account cannot see the sport, or the league
+                # is between seasons. Carry the reason through so the page says
+                # it instead of showing a silent dash.
+                levels_by_slug[slug] = {}
+                notes_by_slug[slug] = str(error)
+            except pinnacle_api.PinnacleAuthError as error:
+                logger.warning("Pinnacle refused the API credentials")
+                levels_by_slug[slug] = {}
+                notes_by_slug[slug] = str(error)
             except Exception:
                 logger.warning(
                     "Could not read Pinnacle for %s", slug, exc_info=True
                 )
                 levels_by_slug[slug] = {}
+                notes_by_slug[slug] = "Could not read Pinnacle"
         levels = levels_by_slug[slug]
-        level = levels.get((tracker["period"], tracker["field"]))
+        reading = levels.get((tracker["period"], tracker["field"]))
+        level = (reading or {}).get("limit")
+        line = (reading or {}).get("line")
+        event_name = (reading or {}).get("event")
 
         note = None
         target = None
@@ -4948,7 +4975,7 @@ def run_tracker_cycle():
             period_has_any = any(
                 key[0] == tracker["period"] for key in levels
             )
-            note = (
+            note = notes_by_slug.get(slug) or (
                 f"Pinnacle is not posting a "
                 f"{limit_field_labels.get(tracker['field'], tracker['field']).lower()} "
                 f"for {tracker['period']} right now"
@@ -4967,6 +4994,8 @@ def run_tracker_cycle():
         if target is not None:
             try:
                 tracker["pinnacle"] = level
+                tracker["line"] = line
+                tracker["event"] = event_name
                 outcome = write_tracked_limit(tracker, target)
                 note = outcome["note"]
                 if outcome["changed"]:
@@ -4982,6 +5011,8 @@ def run_tracker_cycle():
             if row is not None:
                 row.last_checked_at = now
                 row.last_pinnacle_value = level
+                row.last_pinnacle_line = line
+                row.last_pinnacle_event = (event_name or "")[:120] or None
                 row.last_note = (note or "")[:255]
                 if target is not None and note and note.startswith("Set to"):
                     row.last_written_value = target
@@ -5051,7 +5082,16 @@ def write_tracked_limit(tracker, target):
                         outcome_line=(
                             f"Following Pinnacle at {tracker['scale']}%"
                             + (
-                                f" (Pinnacle {tracker['pinnacle']:,.0f})"
+                                f" (Pinnacle {tracker['pinnacle']:,.0f}"
+                                + (
+                                    f" at {pinnacle_api.describe_line(tracker['field'], tracker.get('line'))}"
+                                    if tracker.get("line") is not None else ""
+                                )
+                                + (
+                                    f", {tracker['event']}"
+                                    if tracker.get("event") else ""
+                                )
+                                + ")"
                                 if tracker.get("pinnacle") else ""
                             )
                         ),
@@ -5933,6 +5973,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                         "windowHours": tracker_window_hours,
                         "minChangePercent": tracker_min_change_percent,
                         "basis": tracker_basis,
+                        "sourceConfigured": pinnacle_api.configured(),
                     },
                 )
             except (KeyError, TypeError, ValueError) as error:
@@ -6267,6 +6308,42 @@ def migrate_telegram_recipients():
             )
 
 
+def migrate_pinnacle_columns():
+    """Columns added when the Pinnacle feed started carrying lines too.
+
+    A model column with no entry here exists only on a database somebody
+    altered by hand, which is how BetWar once ended up unable to read a single
+    schedule. Every new column gets an entry the same commit it is added.
+    """
+    tracker_columns = {
+        column["name"] for column in inspect(engine).get_columns("limit_trackers")
+    }
+    sample_columns = {
+        column["name"]
+        for column in inspect(engine).get_columns("pinnacle_limit_samples")
+    }
+    additions = [
+        ("limit_trackers", "last_pinnacle_line", "FLOAT NULL", tracker_columns),
+        ("limit_trackers", "last_pinnacle_event", "VARCHAR(120) NULL", tracker_columns),
+        ("pinnacle_limit_samples", "line_value", "FLOAT NULL", sample_columns),
+        # Every row that exists when this column is added predates the Pinnacle
+        # feed, so the default labels the backlog correctly in one statement.
+        (
+            "pinnacle_limit_samples",
+            "source",
+            "VARCHAR(16) NOT NULL DEFAULT 'oddspapi'",
+            sample_columns,
+        ),
+    ]
+    with engine.begin() as connection:
+        for table, column_name, column_type, existing in additions:
+            if column_name in existing:
+                continue
+            connection.execute(
+                text(f"ALTER TABLE {table} ADD COLUMN {column_name} {column_type}")
+            )
+
+
 def migrate_user_columns():
     existing = {
         column["name"] for column in inspect(engine).get_columns("users")
@@ -6316,6 +6393,7 @@ migrate_user_columns()
 migrate_schedule_columns()
 migrate_limit_change_columns()
 migrate_telegram_recipients()
+migrate_pinnacle_columns()
 recover_schedules_on_startup()
 logger.info("Dashboard listening on http://%s:%s", server_host, server_port)
 

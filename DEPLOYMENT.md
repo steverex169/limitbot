@@ -88,6 +88,16 @@ site cannot reach the other's schedules or limits.
   a tracker on an account outside the list is refused outright rather than
   failing later at run time. Use it while testing so automation cannot reach a
   live downline.
+- `PINNACLE_API_BASE` / `PINNACLE_API_USERNAME` / `PINNACLE_API_PASSWORD`:
+  the Pinnacle betting engine that Build a Ramp follows. Base defaults to
+  `https://api.probet42.com`. Both sites need these - the tracker writes on
+  whichever partner it is deployed for, but the numbers it follows are
+  Pinnacle's and are the same for both. Without them the tracker checks
+  nothing and the page says so, rather than failing quietly. Read-only: the
+  only endpoints called are `/v3/sports`, `/v3/leagues`, `/v3/fixtures` and
+  `/v4/odds`. The account decides which sports are visible - one enabled for
+  Baseball and Football cannot see NBA or NHL, and a tracker on those reports
+  that instead of sitting at a dash.
 - `LIMIT_TRACKER`: set `off` to stop the live tracker thread. `TRACKER_INTERVAL_MINUTES`
   (default 10) is how often tracked limits are compared with Pinnacle,
   `TRACKER_WINDOW_HOURS` (default 12) how close to kick-off a fixture must be

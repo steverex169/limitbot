@@ -777,136 +777,14 @@ def _market_label(key: str) -> str:
     }.get(key, key)
 
 
-# The curve is read across these distances from kick-off, so a cycle always
-# sees both the quiet early market and the busy one near the start.
-TIME_BUCKETS = ((0.0, 3.0), (3.0, 8.0), (8.0, 24.0), (24.0, 1e9))
-
-
-class RateLimited(ComparisonError):
-    """OddsPapi refused because we asked too often."""
-
-
-def sample_pinnacle_limits(
-    api_key: str,
-    league: str,
-    max_fixtures: int = 8,
-) -> list[dict[str, Any]]:
-    """Pinnacle's current limits for one league, with time to kick-off.
-
-    Recorded over days this becomes the intraday curve: how a limit grows as a
-    game absorbs two-way money. The shape is what transfers to a smaller book -
-    the level never does - so this reads only Pinnacle and needs no partner
-    login.
-    """
-    config = LEAGUE_CONFIGS[league]
-    session = requests.Session()
-    session.headers.update(
-        {"Accept": "application/json", "User-Agent": "limitbot-comparison/1.0"}
-    )
-    samples: list[dict[str, Any]] = []
-    now = time.time()
-    try:
-        # OddsPapi's quota is shared with the comparison page, which a person
-        # is waiting on, so only a handful of fixtures are read per cycle.
-        # Which handful matters: taking the nearest ones meant every MLB
-        # reading came from games under three hours out, and the early end of
-        # the curve - the part a morning limit is set from - was never seen.
-        # Spread the budget across the distance instead.
-        upcoming = []
-        for fixture in _league_fixtures(session, api_key, league):
-            try:
-                hours = (float(fixture.get("startTime")) - now) / 3600.0
-            except (TypeError, ValueError):
-                continue
-            if hours < -3:
-                continue
-            upcoming.append((hours, fixture))
-        upcoming.sort(key=lambda item: item[0])
-
-        chosen: list[tuple[float, dict[str, Any]]] = []
-        seen_ids: set[str] = set()
-        for low, high in TIME_BUCKETS:
-            for hours, fixture in upcoming:
-                if len(chosen) >= max_fixtures:
-                    break
-                if not low <= hours < high:
-                    continue
-                fixture_id = str(fixture.get("fixtureId"))
-                if fixture_id in seen_ids:
-                    continue
-                seen_ids.add(fixture_id)
-                chosen.append((hours, fixture))
-                # Two per bucket is enough to see the level without spending
-                # the whole budget on one part of the curve.
-                if sum(1 for h, _ in chosen if low <= h < high) >= 2:
-                    break
-        # Whatever budget the buckets left over goes to the nearest games,
-        # which are the ones still moving.
-        for hours, fixture in upcoming:
-            if len(chosen) >= max_fixtures:
-                break
-            fixture_id = str(fixture.get("fixtureId"))
-            if fixture_id in seen_ids:
-                continue
-            seen_ids.add(fixture_id)
-            chosen.append((hours, fixture))
-
-        for hours_to_start, fixture in chosen:
-            try:
-                payload = _odds_get(
-                    session,
-                    api_key,
-                    "/fixtures/odds",
-                    fixtureId=fixture["fixtureId"],
-                    bookmakers=BOOKMAKER,
-                    mainLine=True,
-                )
-            except ComparisonError as error:
-                if "429" in str(error):
-                    # Stop the whole cycle rather than keep pushing against a
-                    # limiter the page also depends on.
-                    raise RateLimited(str(error)) from None
-                raise
-            quote_map = ((payload.get("odds") or {}).get(BOOKMAKER) or {})
-            quotes = [
-                quote
-                for quote in quote_map.values()
-                if isinstance(quote, dict)
-                and quote.get("active") is True
-                and quote.get("marketActive") is not False
-                and quote.get("limit") is not None
-            ]
-            if not quotes:
-                continue
-            markets = _market_map(session, api_key, quotes)
-            for period_label, odds_period in (
-                ("Full Game", "result"),
-                ("1st Half", "p1"),
-                ("2nd Half", "p2"),
-                ("1st 5 Innings", "p1+p2+p3+p4+p5"),
-            ):
-                for entry in _pinnacle_entries(
-                    payload, quotes, markets, odds_period
-                ):
-                    field = _limit_field(entry.get("marketKey"))
-                    limit = entry.get("limit")
-                    if not field or not isinstance(limit, (int, float)):
-                        continue
-                    samples.append({
-                        "league": league,
-                        "leagueName": config["name"],
-                        "period": period_label,
-                        "field": field,
-                        "fixtureId": str(fixture.get("fixtureId")),
-                        "hoursToStart": round(hours_to_start, 2),
-                        "limit": float(limit),
-                    })
-            # Slower than the page's own throttle: a background reading is
-            # never urgent, and the quota belongs to whoever is waiting.
-            time.sleep(0.5)
-    finally:
-        session.close()
-    return samples
+# Pinnacle's own limits are no longer read here. This file talks to OddsPapi,
+# a scraped aggregator with a shared quota and one request per fixture, which
+# was enough to plot a curve from eight games but never enough to say what the
+# lowest limit in a league actually was. pinnacle_api reads the Pinnacle engine
+# directly - the whole league in two requests, with the line beside each limit
+# - and both the ramp tracker and the sampler use it. What stays here is the
+# comparison page, which needs OddsPapi's fixture matching to line our board up
+# against theirs game by game.
 
 
 def _comparison_section(
