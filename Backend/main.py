@@ -4785,10 +4785,10 @@ def record_pinnacle_samples():
             # Neither is a fault, and neither should fill the log.
             logger.debug("No Pinnacle board for %s: %s", league, error)
             continue
-        except pinnacle_api.PinnacleAuthError:
-            logger.warning(
-                "Pinnacle sampling stopped: the API credentials were refused"
-            )
+        except (pinnacle_api.PinnacleAuthError, pinnacle_api.PinnacleBlocked) as error:
+            # Neither is league-specific, so trying the next league would just
+            # repeat the same rejection.
+            logger.warning("Pinnacle sampling stopped: %s", error)
             break
         except Exception:
             # One league failing must not stop the rest, and a sampling
@@ -4949,8 +4949,11 @@ def run_tracker_cycle():
                 # it instead of showing a silent dash.
                 levels_by_slug[slug] = {}
                 notes_by_slug[slug] = str(error)
-            except pinnacle_api.PinnacleAuthError as error:
-                logger.warning("Pinnacle refused the API credentials")
+            except (
+                pinnacle_api.PinnacleAuthError,
+                pinnacle_api.PinnacleBlocked,
+            ) as error:
+                logger.warning("Tracker could not reach Pinnacle: %s", error)
                 levels_by_slug[slug] = {}
                 notes_by_slug[slug] = str(error)
             except Exception:

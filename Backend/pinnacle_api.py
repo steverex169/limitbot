@@ -59,6 +59,16 @@ class PinnacleAuthError(PinnacleError):
     """Wrong credentials, or API access is not enabled on the account."""
 
 
+class PinnacleBlocked(PinnacleError):
+    """Cloudflare refused the request before Pinnacle ever saw it.
+
+    Worth its own class because it arrives as a 403, which reads as "wrong
+    password" and sends somebody to rotate credentials that were never wrong.
+    The block is on the calling IP, not the account: the same credentials work
+    from a laptop and fail from a datacenter.
+    """
+
+
 class PinnacleNotOffered(PinnacleError):
     """The sport or league is not carried on this account right now.
 
@@ -255,6 +265,16 @@ def _get(path: str, **params: Any) -> Any:
             last_error = error
         else:
             if response.status_code in (401, 403):
+                body = response.text[:2000]
+                if "Cloudflare" in body or "Attention Required" in body:
+                    ray = response.headers.get("CF-RAY", "")
+                    raise PinnacleBlocked(
+                        "Pinnacle's edge blocked this server's IP address, so "
+                        "the request never reached the account. Ask the "
+                        "provider to allow the outbound IP"
+                        + (f" (Cloudflare ray {ray})" if ray else "")
+                        + "."
+                    )
                 raise PinnacleAuthError(
                     f"Pinnacle refused the credentials ({response.status_code}). "
                     "Check the username and password, and that API access is "
