@@ -2,7 +2,7 @@
  * Session bootstrap: login/logout, partner naming, starting the
  * dashboard, and the session poll that keeps it alive. */
 
-function showLogin() {
+function showLogin(message) {
   document.body.classList.remove(
     "app-loading"
   );
@@ -12,7 +12,46 @@ function showLogin() {
   elements.dashboardSidebar.hidden = true;
   elements.dashboardView.hidden = true;
   elements.password.value = "";
+  if (message && elements.loginMessage) {
+    elements.loginMessage.textContent = message;
+    elements.loginMessage.hidden = false;
+  }
 }
+
+/*
+ * A session that expires while the tab is open used to be invisible. Every
+ * poll 401'd into an empty catch, the numbers on screen stayed as they were,
+ * and saving did nothing at all - no request, no error. One tab sat like that
+ * for twelve hours; a College Football schedule was written, saved, and never
+ * existed, and there was no way to tell from the page.
+ *
+ * Wrapping fetch rather than fixing the call sites is deliberate: there are
+ * two dozen of them, several already swallow errors on purpose, and a new one
+ * would have to remember. The session is a property of the page, so the page
+ * handles it in one place.
+ */
+(function watchForExpiredSession() {
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = async function (input, init) {
+    const response = await nativeFetch(input, init);
+    const url = String(
+      (input && input.url) || input || ""
+    );
+    /* Only our own API, and never the login call itself - a wrong password is
+       also a 401, and it has its own message to show. */
+    if (
+      response.status === 401 &&
+      url.includes("/api/") &&
+      !url.includes("/api/login") &&
+      !url.includes("/api/session") &&
+      elements.loginView &&
+      elements.loginView.hidden
+    ) {
+      showLogin("Your session expired. Sign in again to continue.");
+    }
+    return response;
+  };
+})();
 
 /*
  * The same build runs against more than one site, so anything naming the
