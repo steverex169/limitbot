@@ -4,7 +4,12 @@
 
 function describeSchedulePeriod(schedule) {
   const periodNumber = Number(schedule.periodNumber || 0);
-  return periodNumber ? `Period ${periodNumber}` : "Full game";
+  if (!periodNumber) {
+    return "Full game";
+  }
+  /* AccessHigh's own wording where we have it. "Period 98" is not something
+     anybody can act on; it is what they call Quarters. */
+  return schedule.periodDescription || `Period ${periodNumber}`;
 }
 
 /*

@@ -1957,6 +1957,15 @@ def load_period_rows(account_id, organization_id, league_id, force=False):
         row = flatten_values(value)
         rows.append(
             {
+                # The flattened payload goes first so the derived keys below
+                # win. It used to be spread last, and it carries IdLeague: 0 -
+                # a period has no league of its own - which silently replaced
+                # the league this call was made for. Everything downstream then
+                # had a period row belonging to league 0: a schedule saved from
+                # one displayed as "League 0" and could not be found. Only the
+                # league broke because the payload happens to name the
+                # organisation "Id" rather than "IdOrganization".
+                **row,
                 "IdLeague": league_id,
                 "IdOrganization": value.get("Id", organization_id),
                 "IdSportType": value.get("IdSportType", 0),
@@ -1970,7 +1979,6 @@ def load_period_rows(account_id, organization_id, league_id, force=False):
                 "PeriodDescription": value.get("PeriodDescription", ""),
                 "RowType": "Period",
                 "JsonPath": f"Periods[{value.get('PeriodNumber', 0)}]",
-                **row,
             }
         )
 
@@ -5449,6 +5457,40 @@ def schedule_status_rows(account_id):
                 ),
                 league_name,
             )
+            # An organisation belongs to exactly one league row, so this
+            # resolves a schedule whose league id is missing or wrong -
+            # including every one saved from a period row before the id stopped
+            # being overwritten. Without it those read "League 0".
+            league_names.setdefault(
+                (scheduled_account_id, organization_id, None, None),
+                league_name,
+            )
+
+    # Period names, for the schedules that use one. "Period 98" means nothing
+    # to anybody; AccessHigh calls it "Quarters". Resolved only for the
+    # organisations actually scheduled on a period, and served from the period
+    # cache, so a history of full-game schedules costs no extra requests.
+    period_names = {}
+    for job in jobs:
+        key = (int(job.account_id), int(job.organization_id))
+        if not job.period_number or key in period_names:
+            continue
+        period_names[key] = {}
+        try:
+            for period_row in load_period_rows(
+                int(job.account_id), int(job.organization_id), int(job.league_id)
+            ):
+                description = str(period_row.get("PeriodDescription") or "").strip()
+                if description:
+                    period_names[key][safe_int(period_row.get("PeriodNumber"))] = (
+                        description
+                    )
+        except Exception as error:
+            # A name is a nicety; the schedule still has to be listed.
+            logger.warning(
+                "Could not resolve period names for account %s org %s: %s",
+                job.account_id, job.organization_id, error,
+            )
 
     schedule_rows = [{
         "activityType": "schedule",
@@ -5483,10 +5525,19 @@ def schedule_status_rows(account_id):
                 int(job.league_id),
                 None,
             ))
+            or league_names.get((
+                int(job.account_id),
+                int(job.organization_id),
+                None,
+                None,
+            ))
             or f"League {job.league_id}"
         ),
         "idSportType": job.sport_type_id,
         "periodNumber": job.period_number,
+        "periodDescription": period_names.get(
+            (int(job.account_id), int(job.organization_id)), {}
+        ).get(int(job.period_number or 0)),
         "field": job.field,
         "value": job.value,
         "limitMode": "early" if job.is_early_limit else "normal",
