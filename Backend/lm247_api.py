@@ -99,25 +99,44 @@ class LM247WriteRefused(LM247Error):
 # What a circled limit is called on the wire
 # ---------------------------------------------------------------------------
 
-# Read out of LM247's own bundle: the game-line form binds the circled amount
-# to GameLineCircledValue, the grid column is CircledMaxWager, and the save
-# goes through SetGameInfo -> POST Game/Update.
+# Reconstructed from LM247's own bundle (v2, main.ee6edd8c). The game-line save
+# builds this object and posts it to linesmanager/lines/ via UpdateGameLineRequest:
 #
-# UNVERIFIED. These are the names their JavaScript uses internally, which need
-# not be the names their API accepts, and Game/Update almost certainly wants
-# the whole game object rather than these fields alone. Confirm against a real
-# captured request before anything is posted - which is what the template file
-# is for.
-CIRCLED_VALUE_FIELD = "GameLineCircledValue"
-CIRCLED_FLAG_FIELD = "IsCircled"
-UPDATE_PATH = "Game/Update"
+#   {
+#     GameNum, StoreId, Period, ShadeId,
+#     WagerType,                       # the market, per the enum below
+#     Line: {WagerType, Points, Home, Away, Draw},
+#     Autopilot: {AutopilotSelected, AutopilotActive, Adjust},
+#     Options: {KeepOpenMinutes, CircledValue, Status, TeamTotalAutoCalculations},
+#     FollowMaster, ShadeAction,
+#   }
+#
+# The per-game limit is Options.CircledValue. It is per market and per period,
+# not one number for the game: WagerType and Period both select what is being
+# circled.
+#
+# STILL UNVERIFIED ON THE WIRE. This is read from minified code, not observed,
+# and posting the whole object means a wrong field clears something. A write
+# copies a captured body and changes only CircledValue; the shape is here to
+# recognise that capture, not to fabricate one.
+UPDATE_PATH = "linesmanager/lines/"
+CIRCLED_VALUE_KEY = "CircledValue"      # inside Options
+OPTIONS_KEY = "Options"
 
-# Which LM247 market a Pinnacle market writes to. Also unverified.
-MARKET_FIELDS = {
-    "spread": "Spread",
-    "moneyLine": "MoneyLine",
-    "total": "Total",
-    "teamTotal": "TeamTotal",
+# LM247's WagerType enum -> our market names. Values are bit flags in their code.
+WAGER_TYPES = {
+    "spread": 1,        # S
+    "moneyLine": 2,     # M
+    "total": 4,         # T
+    "teamTotalAway": 8,  # TTA
+    "teamTotalHome": 16,  # TTH
+}
+# Pinnacle gives one team-total limit; LM247 splits it home/away. Both get it.
+PINNACLE_TO_WAGER = {
+    "spread": (1,),
+    "moneyLine": (2,),
+    "total": (4,),
+    "teamTotal": (8, 16),
 }
 
 
@@ -275,16 +294,17 @@ class LM247Client:
 
     # ---------------------------------------------------------------- writes
 
-    def set_circled_limit(self, game_payload: dict[str, Any], amount: int) -> Any:
-        """Circle one game at `amount`.
+    def set_circled_limit(self, captured_body: dict[str, Any], amount: int) -> Any:
+        """Circle one game-line at `amount`, off a captured request body.
 
-        Takes the game object as LM247 last returned it and changes only the
-        circled amount, rather than assembling a body from scratch: Game/Update
-        saves a whole game line, so anything omitted is a field being cleared.
+        `captured_body` is a real linesmanager/lines/ payload saved from the UI
+        (see LM247_UPDATE_TEMPLATE). Only Options.CircledValue is changed, so
+        every other field - GameNum, Period, WagerType, Line, ShadeAction -
+        stays exactly as the working request had it. Building the object from
+        scratch is what this deliberately does not do: the save writes a whole
+        game line, and a field left out is a field cleared.
 
-        Refuses unless writes are permitted AND a captured template exists. The
-        field names are read from their minified client, and posting a guess at
-        which field carries a bet limit is not a way to find out.
+        Refuses unless writes are permitted AND a template exists.
         """
         allowed, reason = write_permitted()
         if self._allow_writes is False:
@@ -292,13 +312,17 @@ class LM247Client:
         if not allowed:
             raise LM247WriteRefused(reason)
 
-        body = dict(game_payload)
-        body[CIRCLED_VALUE_FIELD] = int(amount)
-        body[CIRCLED_FLAG_FIELD] = True
+        body = json.loads(json.dumps(captured_body))  # deep copy
+        options = body.get(OPTIONS_KEY)
+        if not isinstance(options, dict):
+            raise LM247Error(
+                f"Captured body has no {OPTIONS_KEY} object to set "
+                f"{CIRCLED_VALUE_KEY} in"
+            )
+        options[CIRCLED_VALUE_KEY] = int(amount)
         logger.info(
-            "LM247 circling game %s at %s",
-            body.get("GameNum") or body.get("gameNum") or "?",
-            amount,
+            "LM247 circling game %s wager %s period %s at %s",
+            body.get("GameNum"), body.get("WagerType"), body.get("Period"), amount,
         )
         return self._request("POST", DATA_API + UPDATE_PATH, json=body)
 
@@ -314,9 +338,10 @@ def describe_state() -> dict[str, Any]:
         "blockedReason": reason,
         "usingProxy": bool(PROXY),
         "updateTemplate": UPDATE_TEMPLATE_PATH or None,
+        "endpoint": DATA_API + UPDATE_PATH,
+        "limitField": f"{OPTIONS_KEY}.{CIRCLED_VALUE_KEY}",
         "unverified": [
-            f"{UPDATE_PATH} payload shape",
-            CIRCLED_VALUE_FIELD,
-            CIRCLED_FLAG_FIELD,
+            f"{UPDATE_PATH} accepted on the wire",
+            "which fields are required vs optional",
         ],
     }
