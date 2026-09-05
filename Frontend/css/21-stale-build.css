@@ -1,0 +1,31 @@
+/* 21-stale-build.css
+ * The notice a page shows when it is running an older build than the
+ * server is serving. See warnIfBuildIsStale in 20-session.js. */
+/* Shown when the running page is older than the deployed build. Fixed to the
+   viewport because a stale tab is usually one nobody has scrolled in days. */
+.stale-build-notice {
+  position: fixed;
+  left: 50%;
+  bottom: 1.25rem;
+  transform: translateX(-50%);
+  z-index: 9999;
+  max-width: min(38rem, calc(100vw - 2rem));
+  padding: 0.75rem 1rem;
+  border-radius: 0.6rem;
+  background: #b45309;
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+.stale-build-notice button {
+  margin-left: 0.5rem;
+  padding: 0.3rem 0.75rem;
+  border: 0;
+  border-radius: 0.4rem;
+  background: #fff;
+  color: #b45309;
+  font-weight: 700;
+  cursor: pointer;
+}

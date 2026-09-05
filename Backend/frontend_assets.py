@@ -107,6 +107,20 @@ def _expand_includes(root, text, depth=0):
     return "".join(out)
 
 
+BUILD_ID_MARKER = re.compile(rb'const APP_BUILD_ID = "([0-9a-f]+)"')
+
+
+def javascript_build_id(asset):
+    """The id stamped into the script a browser would be served right now.
+
+    Read back out of the composed body rather than recomputed, so the server
+    and the page can never disagree about which build is current.
+    """
+    body, _ = asset.current()
+    match = BUILD_ID_MARKER.search(body)
+    return match.group(1).decode("ascii") if match else ""
+
+
 def build(app_directory):
     """Return the composed html/css/js assets for a Frontend directory."""
     root = app_directory
@@ -123,6 +137,24 @@ def build(app_directory):
     def concatenate(paths):
         return "".join(path.read_text(encoding="utf-8") for path in paths)
 
+    def render_js(paths):
+        """The script, stamped with an id derived from its own sources.
+
+        A tab left open runs whatever it loaded, however long ago that was.
+        Cache-Control: no-cache makes a *reload* pick up a new build, but a tab
+        nobody reloads never asks. That is how a worker ended up posting a
+        limit change without the Customer Support Agent field - their script
+        predated it, the server had come to require it, and the save was
+        refused with no clue that the page itself was out of date.
+
+        Stamping the bundle lets the page notice. The id is a hash of the
+        sources, computed before the stamp is prepended, so it cannot depend on
+        itself.
+        """
+        body = concatenate(paths)
+        stamp = hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
+        return f'const APP_BUILD_ID = "{stamp}";\n' + body
+
     return {
         "html": ComposedAsset(
             root, "text/html; charset=utf-8", html_sources, render_html
@@ -137,7 +169,7 @@ def build(app_directory):
             root,
             "text/javascript; charset=utf-8",
             lambda: _ordered(root / "js", ".js"),
-            concatenate,
+            render_js,
         ),
     }
 

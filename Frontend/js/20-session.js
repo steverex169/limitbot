@@ -341,3 +341,48 @@ setInterval(() => {
     () => { }
   );
 }, 5000);
+
+/*
+ * A tab left open runs whatever script it loaded, however long ago. Reloading
+ * picks up a new build; a tab nobody reloads never asks. That is how a limit
+ * change was posted without the Customer Support Agent field - the script
+ * predated it, the server had come to require it, and the save was refused
+ * with nothing on screen to suggest the page itself was the problem.
+ *
+ * The script is stamped with an id built from its own sources. When the server
+ * reports a different one, this page is out of date and says so.
+ */
+function warnIfBuildIsStale(buildId) {
+  if (
+    !buildId ||
+    typeof APP_BUILD_ID === "undefined" ||
+    buildId === APP_BUILD_ID ||
+    document.getElementById("staleBuildNotice")
+  ) {
+    return;
+  }
+  const notice = document.createElement("div");
+  notice.id = "staleBuildNotice";
+  notice.className = "stale-build-notice";
+  notice.setAttribute("role", "alert");
+  notice.textContent =
+    "This page is running an older version and saving may fail. ";
+  const reload = document.createElement("button");
+  reload.type = "button";
+  reload.textContent = "Reload now";
+  reload.addEventListener("click", () => window.location.reload());
+  notice.append(reload);
+  document.body.append(notice);
+}
+
+setInterval(async () => {
+  try {
+    const response = await fetch("/api/session", { cache: "no-store" });
+    if (!response.ok) {
+      return;
+    }
+    warnIfBuildIsStale((await response.json()).buildId);
+  } catch {
+    /* Offline or mid-deploy. The next tick asks again. */
+  }
+}, 60000);

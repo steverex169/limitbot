@@ -5963,6 +5963,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     "pinnacleComparisonEnabled": pinnacle_comparison_enabled,
                     "tradingMonitorEnabled": trading_monitor_enabled,
                     "telegramSite": "betwar" if partner_host == "betwar.ag" else "aceshigh",
+                    # So a tab that has been open across a deploy can tell.
+                    "buildId": frontend_assets.javascript_build_id(
+                        composed_assets["js"]
+                    ),
                 })
             return
 
