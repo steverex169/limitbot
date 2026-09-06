@@ -325,6 +325,7 @@ class LM247Client:
         period: int,
         wager_type: int,
         amount: int,
+        skip_within_percent: float = 0.0,
     ) -> dict[str, Any]:
         """Set one game-line's circled amount to `amount`.
 
@@ -343,6 +344,21 @@ class LM247Client:
             raise LM247WriteRefused(reason)
 
         current = self.game_line(game_number, store_id, period, wager_type)
+        # Already at (or within a whisker of) the target: nothing to do. This
+        # is what stops the autopilot rewriting - and re-logging - the same
+        # number every cycle when the market has not moved.
+        held_now = current.get("CircledValue")
+        if (
+            skip_within_percent > 0
+            and held_now
+            and int(held_now) > 0
+            and abs(int(amount) - int(held_now)) / int(held_now) * 100.0
+            < skip_within_percent
+        ):
+            return {
+                "ok": True, "skipped": True, "previous": held_now,
+                "value": int(amount), "note": None,
+            }
         line = current.get("Line") or {}
         options = current.get("Options")
         # Options in the read is the status list; the writable options live at

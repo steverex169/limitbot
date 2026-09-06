@@ -5318,6 +5318,10 @@ lm_autopilot_min_change_percent = float(
     os.getenv("LM_AUTOPILOT_MIN_CHANGE_PERCENT", "8") or 8
 )
 lm_autopilot_window_hours = float(os.getenv("LM_AUTOPILOT_WINDOW_HOURS", "48") or 48)
+# Remembers the last failure logged per game+market, so a game whose line is
+# closing does not add an identical "failed" row every five minutes. Cleared
+# for a market as soon as it succeeds.
+_lm_last_failure = {}
 
 
 def lm_autopilot_master_enabled():
@@ -5438,23 +5442,33 @@ def run_lm_autopilot_cycle():
                     continue
                 target = limit["target"]
                 for wager in wagers:
+                    dedupe_key = (int(game["gameNumber"]), limit["market"], wager)
                     try:
                         outcome = client.circle_game_line(
                             int(game["gameNumber"]), league["storeId"],
                             lm247_api.DEFAULT_PERIOD, wager, target,
+                            skip_within_percent=lm_autopilot_min_change_percent,
                         )
                     except lm247_api.LM247Error as error:
-                        _log_lm_change(
-                            league, game, limit, target, None, "failed",
-                            str(error)[:200],
-                        )
+                        # Only log a new failure once - not the same one every
+                        # cycle while a game's line is closing.
+                        if _lm_last_failure.get(dedupe_key) != ("error", target):
+                            _log_lm_change(
+                                {**league, "scalePercent": game.get("_share", league["scalePercent"])},
+                                game, limit, target, None, "failed", str(error)[:200],
+                            )
+                            _lm_last_failure[dedupe_key] = ("error", target)
                         continue
+
+                    if outcome.get("skipped"):
+                        # Board already holds the target. Nothing changed, so
+                        # nothing is logged.
+                        continue
+
                     previous = outcome.get("previous")
-                    if previous is not None and previous > 0:
-                        drift = abs(target - previous) / float(previous) * 100.0
-                        if drift < lm_autopilot_min_change_percent:
-                            continue  # not moved enough to be worth a rewrite
                     if outcome.get("ok"):
+                        _lm_last_failure.pop(dedupe_key, None)
+                        # A real change that held - the only thing worth a row.
                         _log_lm_change(
                             {**league, "scalePercent": game.get("_share", league["scalePercent"])},
                             game, limit, target,
@@ -5464,15 +5478,16 @@ def run_lm_autopilot_cycle():
                         applied += 1
                         written += 1
                     elif outcome.get("note"):
-                        # Accepted-but-didn't-hold. Log it as failed with the
-                        # reason so the operator sees the truth, not a silent
-                        # nothing and not a false "applied".
-                        _log_lm_change(
-                            {**league, "scalePercent": game.get("_share", league["scalePercent"])},
-                            game, limit, target,
-                            int(previous) if previous is not None else None,
-                            "failed", outcome["note"],
-                        )
+                        # Accepted but did not hold. Log once, then stay quiet
+                        # until it either succeeds or the reason changes.
+                        if _lm_last_failure.get(dedupe_key) != (outcome["note"], target):
+                            _log_lm_change(
+                                {**league, "scalePercent": game.get("_share", league["scalePercent"])},
+                                game, limit, target,
+                                int(previous) if previous is not None else None,
+                                "failed", outcome["note"],
+                            )
+                            _lm_last_failure[dedupe_key] = (outcome["note"], target)
         _note_lm_league(
             league["id"], now,
             f"{plan['matched']} games matched, {applied} limits moved"
