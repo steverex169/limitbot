@@ -5322,6 +5322,9 @@ lm_autopilot_window_hours = float(os.getenv("LM_AUTOPILOT_WINDOW_HOURS", "48") o
 # closing does not add an identical "failed" row every five minutes. Cleared
 # for a market as soon as it succeeds.
 _lm_last_failure = {}
+# Last Pinnacle value logged per game+market, so the next change row can show
+# where Pinnacle moved from.
+_lm_last_pinnacle = {}
 
 
 def lm_autopilot_master_enabled():
@@ -5468,12 +5471,15 @@ def run_lm_autopilot_cycle():
                     previous = outcome.get("previous")
                     if outcome.get("ok"):
                         _lm_last_failure.pop(dedupe_key, None)
+                        pinny_key = (int(game["gameNumber"]), limit["market"])
+                        pinnacle_prev = _lm_last_pinnacle.get(pinny_key)
+                        _lm_last_pinnacle[pinny_key] = limit["pinnacle"]
                         # A real change that held - the only thing worth a row.
                         _log_lm_change(
                             {**league, "scalePercent": game.get("_share", league["scalePercent"])},
                             game, limit, target,
                             int(previous) if previous is not None else None,
-                            "applied", None,
+                            "applied", None, pinnacle_previous=pinnacle_prev,
                         )
                         applied += 1
                         written += 1
@@ -5512,7 +5518,8 @@ def _note_lm_league(league_id, when, note):
             db.commit()
 
 
-def _log_lm_change(league, game, limit, target, previous, outcome, note):
+def _log_lm_change(league, game, limit, target, previous, outcome, note,
+                   pinnacle_previous=None):
     with database_session() as db:
         db.add(LmAutopilotChange(
             store_id=league["storeId"],
@@ -5523,6 +5530,7 @@ def _log_lm_change(league, game, limit, target, previous, outcome, note):
             market=limit["market"],
             period=lm247_api.DEFAULT_PERIOD,
             pinnacle_limit=limit["pinnacle"],
+            pinnacle_previous=pinnacle_previous,
             scale_percent=league["scalePercent"],
             old_value=previous,
             new_value=int(target),
@@ -5547,6 +5555,7 @@ def lm_autopilot_change_log(limit=80):
             "event": r.event,
             "market": r.market,
             "pinnacle": r.pinnacle_limit,
+            "pinnacleOld": r.pinnacle_previous,
             "scalePercent": r.scale_percent,
             "oldValue": r.old_value,
             "newValue": r.new_value,
@@ -7169,6 +7178,17 @@ def migrate_lm_autopilot_columns():
                 connection.execute(
                     text(f"ALTER TABLE lm_autopilot_leagues ADD COLUMN {name} {ddl}")
                 )
+    try:
+        change_cols = {
+            c["name"] for c in inspect(engine).get_columns("lm_autopilot_changes")
+        }
+    except Exception:
+        change_cols = {"pinnacle_previous"}
+    if "pinnacle_previous" not in change_cols:
+        with engine.begin() as connection:
+            connection.execute(
+                text("ALTER TABLE lm_autopilot_changes ADD COLUMN pinnacle_previous FLOAT NULL")
+            )
 
 
 migrate_lm_autopilot_columns()

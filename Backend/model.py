@@ -327,6 +327,9 @@ class LmAutopilotChange(Base):
     market: Mapped[str] = mapped_column(String(20))
     period: Mapped[int] = mapped_column(Integer, default=0)
     pinnacle_limit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # What Pinnacle was on the previous change, so a row shows the whole move:
+    # "Pinnacle 28,000 -> 30,000" rather than just where it landed.
+    pinnacle_previous: Mapped[float | None] = mapped_column(Float, nullable=True)
     scale_percent: Mapped[int] = mapped_column(Integer)
     old_value: Mapped[int | None] = mapped_column(Integer, nullable=True)
     new_value: Mapped[int | None] = mapped_column(Integer, nullable=True)

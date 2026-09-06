@@ -432,13 +432,20 @@ function renderLmApLog(log) {
   table.className = "ramp-tracked-table";
   const head = document.createElement("thead");
   const hr = document.createElement("tr");
-  ["When", "League", "Game", "Market", "Pinnacle", "Set to", ""].forEach((h) => {
+  ["When", "League", "Game", "Market", "Pinnacle", "Limit set", ""].forEach((h) => {
     const th = document.createElement("th");
     th.textContent = h;
     hr.append(th);
   });
   head.append(hr);
   table.append(head);
+  const num = (v) => (v == null ? null : Number(v).toLocaleString());
+  const move = (from, to) => {
+    const a = num(from);
+    const b = num(to);
+    if (b == null) return "—";
+    return a != null && a !== b ? `${a} → ${b}` : b;
+  };
   const body = document.createElement("tbody");
   for (const row of log) {
     const tr = document.createElement("tr");
@@ -447,8 +454,8 @@ function renderLmApLog(log) {
       row.leagueName,
       row.event,
       LM_AP_MARKET_LABELS[row.market] || row.market,
-      row.pinnacle ? Number(row.pinnacle).toLocaleString() : "—",
-      `${Number(row.newValue).toLocaleString()} (${row.scalePercent}%)`,
+      move(row.pinnacleOld, row.pinnacle),
+      `${move(row.oldValue, row.newValue)} (${row.scalePercent}%)`,
       row.outcome === "failed" ? "failed" : "",
     ];
     for (const value of cells) {
