@@ -270,6 +270,14 @@ class LmAutopilotLeague(Base):
     # (moneyLine, spread, total, teamTotal). Empty means none.
     markets: Mapped[str] = mapped_column(String(80), default="moneyLine")
 
+    # "all" circles every matched game in the league at scale_percent;
+    # "per_game" circles only the games named in selected_games, each at its
+    # own share. Per-game is a curated list of this slate's games, since a game
+    # number belongs to one slate and next week's games carry new ones.
+    mode: Mapped[str] = mapped_column(String(12), default="all")
+    # JSON list for per_game mode: [{"gameNumber", "event", "scalePercent"}].
+    selected_games: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     last_run_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

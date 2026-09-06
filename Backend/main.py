@@ -5327,6 +5327,26 @@ def lm_autopilot_master_enabled():
         return bool(state and state.enabled)
 
 
+def _parse_selected_games(raw):
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    out = []
+    for item in data if isinstance(data, list) else []:
+        try:
+            out.append({
+                "gameNumber": int(item["gameNumber"]),
+                "event": str(item.get("event", ""))[:160],
+                "scalePercent": int(item.get("scalePercent", 70)),
+            })
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
 def lm_autopilot_leagues():
     with database_session() as db:
         rows = db.execute(select(LmAutopilotLeague)).scalars().all()
@@ -5335,6 +5355,8 @@ def lm_autopilot_leagues():
             "lmLeagueId": r.lm_league_id, "leagueName": r.league_name,
             "enabled": r.enabled, "scalePercent": r.scale_percent,
             "markets": [m for m in (r.markets or "").split(",") if m],
+            "mode": r.mode or "all",
+            "selectedGames": _parse_selected_games(r.selected_games),
         } for r in rows]
 
 
@@ -5380,6 +5402,13 @@ def run_lm_autopilot_cycle():
             _note_lm_league(league["id"], now, f"LM247 read failed: {error}")
             continue
 
+        # Per-game mode circles only the games the operator picked, each at
+        # its own share; all-games mode circles the whole slate at one share.
+        per_game = {
+            g["gameNumber"]: g
+            for g in (league.get("selectedGames") or [])
+        } if league.get("mode") == "per_game" else None
+
         plan = per_game_ramp.plan_from_snapshots(
             readings, lm_games,
             scale_percent=league["scalePercent"],
@@ -5388,6 +5417,17 @@ def run_lm_autopilot_cycle():
         )
         applied = 0
         for game in plan["games"]:
+            if per_game is not None:
+                pick = per_game.get(game.get("gameNumber"))
+                if pick is None:
+                    continue
+                # Recompute targets at this game's own share.
+                share = pick["scalePercent"]
+                for limit in game["limits"]:
+                    limit["target"] = per_game_ramp.scale_limit(
+                        limit["pinnacle"], share
+                    )
+                game["_share"] = share
             for limit in game["limits"]:
                 if shutdown_event.is_set():
                     break
@@ -5416,7 +5456,8 @@ def run_lm_autopilot_cycle():
                             continue  # not moved enough to be worth a rewrite
                     if outcome.get("ok"):
                         _log_lm_change(
-                            league, game, limit, target,
+                            {**league, "scalePercent": game.get("_share", league["scalePercent"])},
+                            game, limit, target,
                             int(previous) if previous is not None else None,
                             "applied", None,
                         )
@@ -5529,6 +5570,8 @@ def lm_autopilot_view():
             "enabled": bool(saved and saved["enabled"]),
             "scalePercent": saved["scalePercent"] if saved else 70,
             "markets": saved["markets"] if saved else ["moneyLine"],
+            "mode": saved["mode"] if saved else "all",
+            "selectedGames": saved["selectedGames"] if saved else [],
             "lastNote": None,
         })
     return {
@@ -5587,10 +5630,27 @@ def save_lm_autopilot(request_data):
                     league_name=str(item.get("leagueName", slug))[:120],
                 )
                 db.add(row)
+            mode = str(item.get("mode", "all"))
+            if mode not in {"all", "per_game"}:
+                mode = "all"
+            selected = []
+            for game in item.get("selectedGames") or []:
+                try:
+                    selected.append({
+                        "gameNumber": int(game["gameNumber"]),
+                        "event": str(game.get("event", ""))[:160],
+                        "scalePercent": max(1, min(200, int(
+                            game.get("scalePercent", scale)
+                        ))),
+                    })
+                except (KeyError, TypeError, ValueError):
+                    continue
             row.enabled = bool(item.get("enabled"))
             row.scale_percent = scale
             row.markets = markets
             row.lm_league_id = valid[slug]
+            row.mode = mode
+            row.selected_games = json.dumps(selected) if selected else None
         db.commit()
 
     return {"message": "Autopilot settings saved", "masterEnabled": master}
@@ -7061,6 +7121,28 @@ migrate_limit_change_columns()
 migrate_telegram_recipients()
 migrate_pinnacle_columns()
 Base.metadata.create_all(bind=engine)
+
+
+def migrate_lm_autopilot_columns():
+    try:
+        existing = {
+            c["name"] for c in inspect(engine).get_columns("lm_autopilot_leagues")
+        }
+    except Exception:
+        return
+    additions = {
+        "mode": "VARCHAR(12) NOT NULL DEFAULT 'all'",
+        "selected_games": "TEXT NULL",
+    }
+    with engine.begin() as connection:
+        for name, ddl in additions.items():
+            if name not in existing:
+                connection.execute(
+                    text(f"ALTER TABLE lm_autopilot_leagues ADD COLUMN {name} {ddl}")
+                )
+
+
+migrate_lm_autopilot_columns()
 recover_schedules_on_startup()
 logger.info("Dashboard listening on http://%s:%s", server_host, server_port)
 

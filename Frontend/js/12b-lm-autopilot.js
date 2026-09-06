@@ -38,7 +38,6 @@ async function loadLmAutopilot() {
   state.lmAutopilot = data;
   renderLmApStatus(data);
   renderLmApLeagues(data);
-  renderLmApGameLeagueOptions(data);
   renderLmApLog(data.log || []);
 }
 
@@ -259,8 +258,11 @@ function renderLmApLeagues(data) {
 
   for (const league of data.leagues || []) {
     const row = document.createElement("div");
-    row.className = "lm-ap-league";
+    row.className = "lm-ap-league-wrap";
     row.dataset.slug = league.slug;
+
+    const main = document.createElement("div");
+    main.className = "lm-ap-league";
 
     const enable = document.createElement("label");
     enable.className = "lm-ap-enable";
@@ -277,6 +279,13 @@ function renderLmApLeagues(data) {
       warn.textContent = " not on LM247 right now";
       enable.append(warn);
     }
+
+    // Mode: all games, or per game.
+    const mode = document.createElement("select");
+    mode.className = "lm-ap-mode";
+    mode.append(makeOption("all", "All games"));
+    mode.append(makeOption("per_game", "Per game"));
+    mode.value = league.mode === "per_game" ? "per_game" : "all";
 
     const scaleWrap = document.createElement("label");
     scaleWrap.className = "lm-ap-scale";
@@ -303,8 +312,106 @@ function renderLmApLeagues(data) {
       marketWrap.append(m);
     }
 
-    row.append(enable, scaleWrap, marketWrap);
+    main.append(enable, mode, scaleWrap, marketWrap);
+    row.append(main);
+
+    // The per-game picker, hidden unless mode is per_game.
+    const games = document.createElement("div");
+    games.className = "lm-ap-pergame";
+    games.hidden = mode.value !== "per_game";
+    row.append(games);
+
+    // Remember the saved per-game selection so a first render can pre-check.
+    row._selectedGames = league.selectedGames || [];
+    if (mode.value === "per_game") {
+      loadPerGamePicker(league.slug, games, row._selectedGames, scale.value);
+    }
+    mode.addEventListener("change", () => {
+      const on = mode.value === "per_game";
+      games.hidden = !on;
+      // The share field is the whole-league default in all-games mode; in
+      // per-game mode each game carries its own, so dim the league one.
+      scaleWrap.style.opacity = on ? "0.5" : "1";
+      if (on && !games.dataset.loaded) {
+        loadPerGamePicker(league.slug, games, row._selectedGames, scale.value);
+      }
+    });
+    if (mode.value === "per_game") {
+      scaleWrap.style.opacity = "0.5";
+    }
+
     host.append(row);
+  }
+}
+
+async function loadPerGamePicker(slug, host, selected, defaultShare) {
+  host.dataset.loaded = "1";
+  host.replaceChildren(makeRampCount("Loading games…"));
+  let data;
+  try {
+    const response = await fetch(
+      `/api/lm-autopilot/games?${new URLSearchParams({ slug })}`,
+      { cache: "no-store" }
+    );
+    data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Could not load games");
+    }
+  } catch (error) {
+    host.replaceChildren(makeRampCount(error.message));
+    host.dataset.loaded = "";
+    return;
+  }
+  if (data.ready === false) {
+    host.replaceChildren(
+      makeRampCount("Connect LM247 first — games appear once the switch is live.")
+    );
+    host.dataset.loaded = "";
+    return;
+  }
+  const chosen = new Map(
+    (selected || []).map((g) => [Number(g.gameNumber), g.scalePercent])
+  );
+  host.replaceChildren();
+  const games = data.games || [];
+  if (!games.length) {
+    host.append(makeRampCount("No matched games in the window right now."));
+    return;
+  }
+  for (const game of games) {
+    const line = document.createElement("label");
+    line.className = "lm-ap-pg-row";
+    line.dataset.gameNumber = game.gameNumber;
+    line.dataset.event = game.pinnacleEvent;
+
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.className = "lm-ap-pg-check";
+    box.checked = chosen.has(Number(game.gameNumber));
+
+    const label = document.createElement("span");
+    label.className = "lm-ap-pg-name";
+    label.textContent = game.pinnacleEvent;
+
+    const when = document.createElement("small");
+    when.className = "lm-ap-pg-when";
+    when.textContent = game.hoursToStart != null
+      ? `${Number(game.hoursToStart).toFixed(0)}h` : "";
+
+    const shareWrap = document.createElement("span");
+    shareWrap.className = "lm-ap-pg-share";
+    shareWrap.append(document.createTextNode("% "));
+    const share = document.createElement("input");
+    share.type = "number";
+    share.min = "1";
+    share.max = "200";
+    share.step = "5";
+    share.className = "lm-ap-pg-share-input";
+    share.value = chosen.get(Number(game.gameNumber)) ?? defaultShare ?? 70;
+    shareWrap.append(share);
+
+    line.append(box, label, when, shareWrap);
+    host.append(line);
   }
 }
 
@@ -366,10 +473,20 @@ async function saveLmAutopilot() {
     return;
   }
   const leagues = [];
-  for (const row of elements.lmApLeagues.querySelectorAll(".lm-ap-league")) {
+  for (const row of elements.lmApLeagues.querySelectorAll(".lm-ap-league-wrap")) {
     const source = (state.lmAutopilot?.leagues || []).find(
       (l) => l.slug === row.dataset.slug
     );
+    const mode = row.querySelector(".lm-ap-mode")?.value || "all";
+    const selectedGames = mode === "per_game"
+      ? [...row.querySelectorAll(".lm-ap-pg-row")]
+          .filter((r) => r.querySelector(".lm-ap-pg-check")?.checked)
+          .map((r) => ({
+            gameNumber: Number(r.dataset.gameNumber),
+            event: r.dataset.event,
+            scalePercent: Number(r.querySelector(".lm-ap-pg-share-input")?.value) || 70,
+          }))
+      : [];
     leagues.push({
       slug: row.dataset.slug,
       leagueName: source ? source.leagueName : row.dataset.slug,
@@ -378,6 +495,8 @@ async function saveLmAutopilot() {
       markets: [...row.querySelectorAll(".lm-ap-market")]
         .filter((b) => b.checked)
         .map((b) => b.value),
+      mode,
+      selectedGames,
     });
   }
   const payload = {
@@ -427,16 +546,6 @@ async function saveLmAutopilot() {
 
 if (elements.lmApSave) {
   elements.lmApSave.addEventListener("click", saveLmAutopilot);
-}
-if (elements.lmApGameLeague) {
-  elements.lmApGameLeague.addEventListener("change", (event) => {
-    loadLmApGames(event.target.value).catch(() => { });
-  });
-}
-if (elements.lmApGamePick) {
-  elements.lmApGamePick.addEventListener("change", (event) => {
-    renderLmApOneGame(event.target.value);
-  });
 }
 if (elements.lmApMaster) {
   elements.lmApMaster.addEventListener("change", () => {
