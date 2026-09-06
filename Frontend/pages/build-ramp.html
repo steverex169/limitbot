@@ -7,6 +7,35 @@
         </div>
       </div>
 
+      <div id="lmAutopilot" class="lm-autopilot">
+        <div class="lm-ap-head">
+          <div>
+            <strong>LM247 per-game autopilot</strong>
+            <small id="lmApStatus" class="lm-ap-status">Loading&hellip;</small>
+          </div>
+          <label class="lm-ap-switch">
+            <input id="lmApMaster" type="checkbox">
+            <span class="lm-ap-slider" aria-hidden="true"></span>
+            <span id="lmApMasterLabel">Off</span>
+          </label>
+        </div>
+        <p class="ramp-note">
+          Sets each game&#39;s circled limit in LM247 to your share of Pinnacle&#39;s
+          own per-game number &mdash; the thing Metalic&#39;s one-limit-per-league
+          cannot do. Turn on a league, choose its share and markets. Nothing is
+          written while the master switch is off.
+        </p>
+        <div id="lmApLeagues" class="lm-ap-leagues"></div>
+        <div id="lmApMessage" class="message" role="status" hidden></div>
+        <div class="ramp-actions">
+          <button id="lmApSave" type="button" class="button primary">Save autopilot</button>
+        </div>
+        <div class="lm-ap-log-wrap">
+          <span class="ramp-label">Limit changes it has made</span>
+          <div id="lmApLog" class="lm-ap-log"></div>
+        </div>
+      </div>
+
       <div id="rampBuilder" class="ramp-builder ramp-builder-page">
 
         <div class="ramp-builder-body">

@@ -584,3 +584,42 @@
     min-width: 720px;
   }
 }
+
+/* --- LM247 per-game autopilot panel --- */
+.lm-autopilot {
+  border: 1px solid var(--border, #d9d9d6);
+  border-radius: 12px;
+  padding: 18px;
+  margin-bottom: 22px;
+  background: var(--surface, #fff);
+}
+.lm-ap-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.lm-ap-head strong { font-size: 15px; }
+.lm-ap-status { display: block; color: var(--ink2, #52514e); font-size: 12px; margin-top: 2px; }
+.lm-ap-warn { color: #b45309; }
+.lm-ap-switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600; }
+.lm-ap-switch input { width: 40px; height: 22px; cursor: pointer; }
+.lm-ap-leagues { margin: 14px 0; display: flex; flex-direction: column; gap: 10px; }
+.lm-ap-league {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #e1e0d9);
+  border-radius: 8px;
+}
+.lm-ap-enable { display: inline-flex; align-items: center; gap: 8px; min-width: 200px; }
+.lm-ap-scale { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink2, #52514e); }
+.lm-ap-scale-input { width: 70px; }
+.lm-ap-markets { display: inline-flex; gap: 14px; flex-wrap: wrap; }
+.lm-ap-markets label { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; }
+.lm-ap-log-wrap { margin-top: 16px; }
+.lm-ap-log { margin-top: 8px; overflow-x: auto; }
+.lm-ap-failed td { color: #d03b3b; }

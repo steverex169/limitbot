@@ -32,7 +32,9 @@ import logging
 import os
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from typing import Any
 from urllib.parse import quote
 
@@ -123,6 +125,20 @@ UPDATE_PATH = "linesmanager/lines/"
 CIRCLED_VALUE_KEY = "CircledValue"      # inside Options
 OPTIONS_KEY = "Options"
 
+# Pinnacle league slug -> LM247 league id, confirmed against the live board.
+# Only the leagues this Pinnacle account can actually be read for appear here;
+# basketball and hockey are not enabled on it, so they are absent by design.
+PINNACLE_TO_LM_LEAGUE = {
+    "nfl": 1,
+    "ncaa-football": 2,
+    "mlb": 5,
+}
+# The period we circle. Full game only for now: Pinnacle's per-game read and
+# LM247's board both use period 0 for it, and the halves are a later step.
+DEFAULT_PERIOD = 0
+
+STORE_WAR = 65
+
 # LM247's WagerType enum -> our market names. Values are bit flags in their code.
 WAGER_TYPES = {
     "spread": 1,        # S
@@ -156,14 +172,6 @@ def write_permitted() -> tuple[bool, str]:
         return False, "LM247 credentials are not set"
     if not WRITE_ENABLED:
         return False, "LM247 writes are switched off (set LM247_WRITE=1)"
-    if not UPDATE_TEMPLATE_PATH:
-        return False, (
-            "No captured Game/Update body to build on. Point "
-            "LM247_UPDATE_TEMPLATE at a JSON file saved from a real circle, "
-            "so the payload is a copy of one that worked rather than a guess"
-        )
-    if not Path(UPDATE_TEMPLATE_PATH).is_file():
-        return False, f"LM247_UPDATE_TEMPLATE does not exist: {UPDATE_TEMPLATE_PATH}"
     return True, ""
 
 
@@ -288,9 +296,97 @@ class LM247Client:
         """The board for one league. GET linesmanager/lines/{leagueId}"""
         return self._data(f"linesmanager/lines/{int(league_id)}", **params)
 
-    def game_line(self, game_number: int, period: int = 0) -> Any:
-        """One game's line. GET linesmanager/gameLine/{gameNum}"""
-        return self._data(f"linesmanager/gameLine/{int(game_number)}", period=period)
+    def game_line(
+        self, game_number: int, store_id: int, period: int, wager_type: int
+    ) -> dict[str, Any]:
+        """One game-line's full state, as LM247 returns it.
+
+        GET linesmanager/gameLine?gameNum=&storeId=&period=&wagerType=
+        The Payload carries Line (the current prices), Options (with the
+        CircledValue), Game and more - everything the circle write must echo
+        back so it changes only the amount.
+        """
+        payload = self._request(
+            "GET",
+            DATA_API + "linesmanager/gameLine",
+            params={
+                "gameNum": int(game_number),
+                "storeId": int(store_id),
+                "period": int(period),
+                "wagerType": int(wager_type),
+            },
+        )
+        return payload.get("Payload") or {}
+
+    def circle_game_line(
+        self,
+        game_number: int,
+        store_id: int,
+        period: int,
+        wager_type: int,
+        amount: int,
+    ) -> dict[str, Any]:
+        """Set one game-line's circled amount to `amount`.
+
+        Read-modify-write: the current line is read first so the write echoes
+        its own prices back and changes only CircledValue. A save posts a whole
+        line, so a value left out is a value cleared - reading first is what
+        keeps this from wiping the price while setting the limit.
+
+        The payload shape is the one proven on the wire (a real circle set from
+        the server, confirmed enforced), not a reconstruction.
+        """
+        allowed, reason = write_permitted()
+        if self._allow_writes is False:
+            raise LM247WriteRefused("This client was opened read-only")
+        if not allowed:
+            raise LM247WriteRefused(reason)
+
+        current = self.game_line(game_number, store_id, period, wager_type)
+        line = current.get("Line") or {}
+        options = current.get("Options")
+        # Options in the read is the status list; the writable options live at
+        # the top level of the payload. Build the write block explicitly.
+        body = {
+            "GameNum": int(game_number),
+            "StoreId": int(store_id),
+            "Period": int(period),
+            "ShadeId": current.get("GameActiveShade", -1) if isinstance(current.get("GameActiveShade"), int) else -1,
+            "WagerType": int(wager_type),
+            "Line": {
+                "WagerType": int(wager_type),
+                "Points": line.get("Points", 0) or 0,
+                "Home": line.get("Home", 0) or 0,
+                "Away": line.get("Away", 0) or 0,
+                "Draw": line.get("Draw"),
+            },
+            "Autopilot": {
+                "AutopilotSelected": current.get("AutopilotSelected", 0) or 0,
+                "AutopilotActive": bool(current.get("AutopilotActive", False)),
+                "Adjust": current.get("Adjust", 0) or 0,
+            },
+            "Options": {
+                "KeepOpenMinutes": current.get("KeepOpenMinutes", 0) or 0,
+                "CircledValue": int(amount),
+                "Status": current.get("Status", 1) or 1,
+                "TeamTotalAutoCalculations": bool(
+                    current.get("TeamTotalAutoCalculations", False)
+                ),
+            },
+            "FollowMaster": None,
+            "ShadeAction": None,
+        }
+        previous = current.get("CircledValue")
+        result = self._request("POST", DATA_API + UPDATE_PATH, json=body)
+        logger.info(
+            "LM247 circled game %s wager %s period %s: %s -> %s",
+            game_number, wager_type, period, previous, amount,
+        )
+        return {
+            "ok": bool((result or {}).get("Payload", {}).get("IsSuccess")),
+            "previous": previous,
+            "value": int(amount),
+        }
 
     # ---------------------------------------------------------------- writes
 
@@ -325,6 +421,62 @@ class LM247Client:
             body.get("GameNum"), body.get("WagerType"), body.get("Period"), amount,
         )
         return self._request("POST", DATA_API + UPDATE_PATH, json=body)
+
+
+def open_session(*, allow_writes: bool = False) -> "LM247Client":
+    """A logged-in client, or raise. The worker's single entry point."""
+    client = LM247Client(allow_writes=allow_writes)
+    client.login()
+    return client
+
+
+_EASTERN = ZoneInfo("America/New_York")
+
+
+def _eastern_to_utc_iso(value: object) -> str | None:
+    """A naive US-Eastern timestamp string as UTC ISO, or None."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        naive = datetime.fromisoformat(text.replace("Z", ""))
+    except ValueError:
+        return None
+    aware = naive.replace(tzinfo=_EASTERN) if naive.tzinfo is None else naive
+    return aware.astimezone(timezone.utc).isoformat()
+
+
+def games_for_matching(client: "LM247Client", lm_league_id: int,
+                        store_id: int = STORE_WAR) -> list[dict[str, Any]]:
+    """Every game on one LM247 league board, in the shape the matcher wants.
+
+    typeId=1 is the games view (typeId=0 came back empty); each game carries
+    its rotation-numbered teams and an EventId that is the GameNum the circle
+    write needs.
+    """
+    payload = client._data(
+        f"linesmanager/gamePeriod", leagueid=int(lm_league_id), typeId=1
+    )
+    games = ((payload or {}).get("Payload") or {}).get("Games") or []
+    out = []
+    for game in games:
+        teams = game.get("Teams") or []
+        if len(teams) < 2:
+            continue
+        # LM247 lists visitor first in Teams; Header reads "Away @ Home".
+        away = teams[0].get("TeamName") or teams[0].get("Mascot")
+        home = teams[1].get("TeamName") or teams[1].get("Mascot")
+        out.append({
+            "GameNum": game.get("EventId"),
+            "HomeTeam": home,
+            "AwayTeam": away,
+            # LM247 gives EventDate as naive US Eastern; the matcher compares
+            # against Pinnacle's UTC, so convert here. Parsed as UTC it lands
+            # four hours off and every game misses its match.
+            "GameDateTime": _eastern_to_utc_iso(game.get("EventDate")),
+            "raw": game,
+        })
+    return out
 
 
 def describe_state() -> dict[str, Any]:

@@ -10,6 +10,7 @@ const state = {
      which the ramp picker treats as "show everything" - hiding leagues on the
      strength of an answer that has not arrived would blank the page. */
   trackableLeagues: null,
+  lmAutopilot: null,
   agents: [],
   selectedAgentId: null,
   rows: [],

@@ -121,6 +121,17 @@ site cannot reach the other's schedules or limits.
   the client waits longer and retries more when one is set; a tracker cycle
   runs every ten minutes, so that is free. Leave it empty when running from a
   machine Pinnacle already accepts, such as a laptop.
+- `LM247_ENABLED` / `LM247_WRITE` / `LM247_USERNAME` / `LM247_PASSWORD`: the
+  LM247 per-game autopilot. `LM247_ENABLED=1` lets the worker read and run;
+  `LM247_WRITE=1` lets it write a circled limit. Both off by default. Set these
+  on ONE container only - the autopilot writes to LM247 store 65 (WAR), and two
+  workers would double-write; put them on `betwar-app` and leave them unset on
+  `aceshigh-app`. Even with all four set, nothing is written until the master
+  switch on the Build a Ramp page is turned on and a league is enabled, so the
+  env grants capability and the page is the day-to-day control. The API is
+  IP-allowlisted to the server, so no proxy is needed (`LM247_PROXY` stays
+  empty); `LM_AUTOPILOT_INTERVAL_MINUTES` (default 5), `LM_AUTOPILOT_WINDOW_HOURS`
+  (default 48) and `LM_AUTOPILOT_MIN_CHANGE_PERCENT` (default 8) tune the cycle.
 - `LIMIT_TRACKER`: set `off` to stop the live tracker thread. `TRACKER_INTERVAL_MINUTES`
   (default 10) is how often tracked limits are compared with Pinnacle,
   `TRACKER_WINDOW_HOURS` (default 12) how close to kick-off a fixture must be

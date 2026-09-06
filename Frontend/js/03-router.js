@@ -91,6 +91,9 @@ function applyDashboardRoute() {
      * time the page is opened rather than once at startup. */
     if (buildRampActive) {
       renderRampLeagues();
+      if (typeof loadLmAutopilot === "function") {
+        loadLmAutopilot().catch(() => { });
+      }
     }
   }
 

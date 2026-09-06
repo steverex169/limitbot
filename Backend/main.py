@@ -32,12 +32,17 @@ from model import (
     AgentTreeCache,
     LimitChange,
     LimitTracker,
+    LmAutopilotChange,
+    LmAutopilotLeague,
+    LmAutopilotState,
     LoginSession,
     PinnacleLimitSample,
     ScheduledLimit,
     User,
 )
 import pinnacle_api
+import lm247_api
+import per_game_ramp
 from odds_comparison import (
     ComparisonError,
     LEAGUE_CONFIGS,
@@ -5299,6 +5304,311 @@ def run_limit_tracker():
         shutdown_event.wait(max(60, tracker_interval_minutes * 60))
 
 
+# LM247 per-game autopilot. Sets each game's circled limit to a share of
+# Pinnacle's own per-game number - the thing Metalic's one-per-league limit
+# cannot do. Off unless LM247_ENABLED and its credentials are set AND the
+# master switch on the page is on AND a league is enabled; four locks, and the
+# env ones are the hard stop.
+lm_autopilot_interval_minutes = int(
+    os.getenv("LM_AUTOPILOT_INTERVAL_MINUTES", "5") or 5
+)
+# A limit is only rewritten once Pinnacle has moved it more than this, so a
+# few dollars' drift does not spend a write every cycle.
+lm_autopilot_min_change_percent = float(
+    os.getenv("LM_AUTOPILOT_MIN_CHANGE_PERCENT", "8") or 8
+)
+lm_autopilot_window_hours = float(os.getenv("LM_AUTOPILOT_WINDOW_HOURS", "48") or 48)
+
+
+def lm_autopilot_master_enabled():
+    """The page's master switch. False also when the row does not exist yet."""
+    with database_session() as db:
+        state = db.get(LmAutopilotState, 1)
+        return bool(state and state.enabled)
+
+
+def lm_autopilot_leagues():
+    with database_session() as db:
+        rows = db.execute(select(LmAutopilotLeague)).scalars().all()
+        return [{
+            "id": r.id, "storeId": r.store_id, "slug": r.league_slug,
+            "lmLeagueId": r.lm_league_id, "leagueName": r.league_name,
+            "enabled": r.enabled, "scalePercent": r.scale_percent,
+            "markets": [m for m in (r.markets or "").split(",") if m],
+        } for r in rows]
+
+
+def run_lm_autopilot_cycle():
+    """One pass: for each enabled league, circle every matched game at share.
+
+    Reads Pinnacle per game and LM247's board, matches them, and moves each
+    game's circled limit to its share of Pinnacle's current number. Only a
+    real move is written, and only a real move is logged.
+    """
+    if not lm247_api.enabled():
+        return 0
+    if not lm_autopilot_master_enabled():
+        return 0
+    leagues = [lg for lg in lm_autopilot_leagues() if lg["enabled"] and lg["markets"]]
+    if not leagues:
+        return 0
+
+    try:
+        client = lm247_api.open_session(allow_writes=True)
+    except lm247_api.LM247Error as error:
+        logger.warning("LM247 autopilot could not open a session: %s", error)
+        return 0
+
+    written = 0
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    for league in leagues:
+        if shutdown_event.is_set():
+            break
+        slug = league["slug"]
+        try:
+            readings = pinnacle_api.league_readings(
+                slug, window_hours=lm_autopilot_window_hours
+            )
+        except pinnacle_api.PinnacleError as error:
+            _note_lm_league(league["id"], now, f"Pinnacle read failed: {error}")
+            continue
+        try:
+            lm_games = lm247_api.games_for_matching(
+                client, league["lmLeagueId"], league["storeId"]
+            )
+        except lm247_api.LM247Error as error:
+            _note_lm_league(league["id"], now, f"LM247 read failed: {error}")
+            continue
+
+        plan = per_game_ramp.plan_from_snapshots(
+            readings, lm_games,
+            scale_percent=league["scalePercent"],
+            period="Full Game",
+            markets=set(league["markets"]),
+        )
+        applied = 0
+        for game in plan["games"]:
+            for limit in game["limits"]:
+                if shutdown_event.is_set():
+                    break
+                # One Pinnacle market can be several LM247 wagers: a team total
+                # is home and away separately, so both get the same number.
+                wagers = lm247_api.PINNACLE_TO_WAGER.get(limit["market"])
+                if not wagers or not game["gameNumber"]:
+                    continue
+                target = limit["target"]
+                for wager in wagers:
+                    try:
+                        outcome = client.circle_game_line(
+                            int(game["gameNumber"]), league["storeId"],
+                            lm247_api.DEFAULT_PERIOD, wager, target,
+                        )
+                    except lm247_api.LM247Error as error:
+                        _log_lm_change(
+                            league, game, limit, target, None, "failed",
+                            str(error)[:200],
+                        )
+                        continue
+                    previous = outcome.get("previous")
+                    if previous is not None and previous > 0:
+                        drift = abs(target - previous) / float(previous) * 100.0
+                        if drift < lm_autopilot_min_change_percent:
+                            continue  # not moved enough to be worth a rewrite
+                    if outcome.get("ok"):
+                        _log_lm_change(
+                            league, game, limit, target,
+                            int(previous) if previous is not None else None,
+                            "applied", None,
+                        )
+                        applied += 1
+                        written += 1
+        _note_lm_league(
+            league["id"], now,
+            f"{plan['matched']} games matched, {applied} limits moved"
+            + (f", {plan['unmatched']} unmatched" if plan["unmatched"] else ""),
+        )
+
+    try:
+        client.close() if hasattr(client, "close") else None
+    except Exception:
+        pass
+    if written:
+        logger.info("LM247 autopilot moved %d limits", written)
+    return written
+
+
+def _note_lm_league(league_id, when, note):
+    with database_session() as db:
+        row = db.get(LmAutopilotLeague, league_id)
+        if row is not None:
+            row.last_run_at = when
+            row.last_note = (note or "")[:255]
+            db.commit()
+
+
+def _log_lm_change(league, game, limit, target, previous, outcome, note):
+    with database_session() as db:
+        db.add(LmAutopilotChange(
+            store_id=league["storeId"],
+            league_slug=league["slug"],
+            league_name=league["leagueName"],
+            game_number=int(game["gameNumber"]),
+            event=str(game["pinnacleEvent"])[:160],
+            market=limit["market"],
+            period=lm247_api.DEFAULT_PERIOD,
+            pinnacle_limit=limit["pinnacle"],
+            scale_percent=league["scalePercent"],
+            old_value=previous,
+            new_value=int(target),
+            outcome=outcome,
+            note=note,
+        ))
+        db.commit()
+
+
+def lm_autopilot_change_log(limit=80):
+    with database_session() as db:
+        rows = db.execute(
+            select(LmAutopilotChange)
+            .order_by(LmAutopilotChange.changed_at.desc())
+            .limit(limit)
+        ).scalars().all()
+        return [{
+            "changedAt": eastern_timestamp(
+                r.changed_at.replace(tzinfo=timezone.utc)
+            ),
+            "leagueName": r.league_name,
+            "event": r.event,
+            "market": r.market,
+            "pinnacle": r.pinnacle_limit,
+            "scalePercent": r.scale_percent,
+            "oldValue": r.old_value,
+            "newValue": r.new_value,
+            "outcome": r.outcome,
+            "note": r.note,
+        } for r in rows]
+
+
+def lm_autopilot_available_leagues():
+    """Leagues that can be autopiloted: carried on LM247 AND read from Pinnacle.
+
+    Resolved live from LM247's own league list, so a league it stops carrying
+    drops out rather than erroring at write time. The Pinnacle side is the
+    fixed map, since only some sports are enabled on that account.
+    """
+    out = []
+    try:
+        client = lm247_api.open_session(allow_writes=False)
+        payload = client._data("Sport/Leagues")
+        lm_leagues = {
+            int(l.get("LeagueId")): l.get("LeagueName")
+            for l in (payload.get("Payload") or [])
+        }
+    except lm247_api.LM247Error:
+        lm_leagues = {}
+    for slug, lm_id in lm247_api.PINNACLE_TO_LM_LEAGUE.items():
+        name = lm_leagues.get(lm_id) or pinnacle_api.LEAGUE_SOURCES.get(
+            slug, {}
+        ).get("label", slug)
+        out.append({
+            "slug": slug, "lmLeagueId": lm_id, "leagueName": name,
+            "carried": lm_id in lm_leagues if lm_leagues else None,
+        })
+    return out
+
+
+def lm_autopilot_view():
+    """Everything the Build a Ramp autopilot panel needs in one response."""
+    configured = {lg["slug"]: lg for lg in lm_autopilot_leagues()}
+    available = lm_autopilot_available_leagues()
+    leagues = []
+    for league in available:
+        saved = configured.get(league["slug"])
+        leagues.append({
+            **league,
+            "enabled": bool(saved and saved["enabled"]),
+            "scalePercent": saved["scalePercent"] if saved else 70,
+            "markets": saved["markets"] if saved else ["moneyLine"],
+            "lastNote": None,
+        })
+    return {
+        "masterEnabled": lm_autopilot_master_enabled(),
+        "ready": lm247_api.enabled(),
+        "state": lm247_api.describe_state(),
+        "storeId": lm247_api.STORE_WAR,
+        "markets": ["moneyLine", "spread", "total", "teamTotal"],
+        "intervalMinutes": lm_autopilot_interval_minutes,
+        "minChangePercent": lm_autopilot_min_change_percent,
+        "windowHours": lm_autopilot_window_hours,
+        "leagues": leagues,
+        "log": lm_autopilot_change_log(),
+    }
+
+
+def save_lm_autopilot(request_data):
+    """Save the master switch and per-league settings from the page."""
+    auth_context()  # require a logged-in operator
+    allowed_markets = {"moneyLine", "spread", "total", "teamTotal"}
+    master = bool(request_data.get("masterEnabled"))
+    leagues = request_data.get("leagues") or []
+
+    with database_session() as db:
+        state = db.get(LmAutopilotState, 1)
+        if state is None:
+            state = LmAutopilotState(id=1, enabled=master)
+            db.add(state)
+        else:
+            state.enabled = master
+
+        by_slug = {
+            row.league_slug: row
+            for row in db.execute(select(LmAutopilotLeague)).scalars().all()
+        }
+        valid = lm247_api.PINNACLE_TO_LM_LEAGUE
+        for item in leagues:
+            slug = str(item.get("slug", ""))
+            if slug not in valid:
+                continue
+            try:
+                scale = int(item.get("scalePercent", 70))
+            except (TypeError, ValueError):
+                scale = 70
+            scale = max(1, min(200, scale))
+            markets = ",".join(
+                m for m in (item.get("markets") or []) if m in allowed_markets
+            )
+            row = by_slug.get(slug)
+            if row is None:
+                row = LmAutopilotLeague(
+                    id=uuid.uuid4().hex,
+                    store_id=lm247_api.STORE_WAR,
+                    league_slug=slug,
+                    lm_league_id=valid[slug],
+                    league_name=str(item.get("leagueName", slug))[:120],
+                )
+                db.add(row)
+            row.enabled = bool(item.get("enabled"))
+            row.scale_percent = scale
+            row.markets = markets
+            row.lm_league_id = valid[slug]
+        db.commit()
+
+    return {"message": "Autopilot settings saved", "masterEnabled": master}
+
+
+def run_lm_autopilot():
+    if not lm247_api.enabled():
+        logger.info("LM247 autopilot disabled (LM247 not enabled)")
+        return
+    shutdown_event.wait(60)
+    while not shutdown_event.is_set():
+        try:
+            run_lm_autopilot_cycle()
+        except Exception:
+            logger.exception("LM247 autopilot cycle failed")
+        shutdown_event.wait(max(60, lm_autopilot_interval_minutes * 60))
+
+
 def run_schedule_worker():
     # Any exception escaping this loop silently stops all scheduled limits
     # until a restart, so every iteration must survive failures.
@@ -6202,6 +6512,18 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 )
             return
 
+        if path == "/api/lm-autopilot":
+            try:
+                self.send_json(200, lm_autopilot_view())
+            except PermissionError as error:
+                self.send_json(401, {"error": str(error)})
+            except Exception as error:
+                self.server_error(
+                    "LM247 autopilot load failed", error,
+                    "The autopilot view is unavailable",
+                )
+            return
+
         if path == "/api/schedules":
             try:
                 account_id = validate_account_id(int(query["accountId"][0]))
@@ -6353,6 +6675,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             "/api/schedules",
             "/api/schedules/hierarchy",
             "/api/schedules/ramp",
+            "/api/lm-autopilot",
             "/api/trackers",
             "/api/trackers/delete",
             "/api/schedules/cancel",
@@ -6376,6 +6699,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 if path == "/api/limits/hierarchy/preview"
                 else save_hierarchy_limit_changes(request_data)
                 if path == "/api/limits/hierarchy"
+                else save_lm_autopilot(request_data)
+                if path == "/api/lm-autopilot"
                 else create_limit_trackers(request_data)
                 if path == "/api/trackers"
                 else delete_limit_trackers(request_data)
@@ -6616,6 +6941,7 @@ migrate_schedule_columns()
 migrate_limit_change_columns()
 migrate_telegram_recipients()
 migrate_pinnacle_columns()
+Base.metadata.create_all(bind=engine)
 recover_schedules_on_startup()
 logger.info("Dashboard listening on http://%s:%s", server_host, server_port)
 
@@ -6625,6 +6951,8 @@ pinnacle_sampler = threading.Thread(target=run_pinnacle_sampler, daemon=True)
 pinnacle_sampler.start()
 limit_tracker = threading.Thread(target=run_limit_tracker, daemon=True)
 limit_tracker.start()
+lm_autopilot = threading.Thread(target=run_lm_autopilot, daemon=True)
+lm_autopilot.start()
 server = ThreadingHTTPServer((server_host, server_port), DashboardHandler)
 
 def stop_server(_signum, _frame):

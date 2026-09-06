@@ -240,3 +240,88 @@ class LimitTracker(Base):
         DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class LmAutopilotLeague(Base):
+    """One league LM247's per-game autopilot follows Pinnacle on.
+
+    Distinct from LimitTracker, which sets Metalic's one-per-league limit.
+    This sets LM247's per-game circled amount, one row per game, from
+    Pinnacle's own per-game number - the thing Metalic cannot express. There
+    is a row per (store, league); the markets and the share are chosen here,
+    and the games come and go on their own as the slate changes.
+    """
+
+    __tablename__ = "lm_autopilot_leagues"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    store_id: Mapped[int] = mapped_column(Integer, index=True)
+    # The Pinnacle league to read, and the LM247 league to write. Kept as two
+    # fields because the mapping is by name and a name can change on either
+    # side; storing both means a rename breaks loudly rather than silently
+    # writing to the wrong board.
+    league_slug: Mapped[str] = mapped_column(String(24), index=True)
+    lm_league_id: Mapped[int] = mapped_column(Integer)
+    league_name: Mapped[str] = mapped_column(String(120))
+
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    scale_percent: Mapped[int] = mapped_column(Integer, default=70)
+    # Which markets to circle, as a comma list of our field names
+    # (moneyLine, spread, total, teamTotal). Empty means none.
+    markets: Mapped[str] = mapped_column(String(80), default="moneyLine")
+
+    last_run_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_note: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class LmAutopilotState(Base):
+    """The master switch, one row. Off means the whole autopilot is idle.
+
+    A single well-known row rather than a config file, so the on/off is
+    changed from the page and survives a redeploy. The env kill-switch is a
+    separate, harder stop for emergencies; this is the everyday control.
+    """
+
+    __tablename__ = "lm_autopilot_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class LmAutopilotChange(Base):
+    """One circled-limit change the autopilot actually made.
+
+    The log the operator watches. Written only when a limit truly moved, so a
+    cycle that finds everything already correct adds nothing - the same rule
+    the Telegram tracker alerts follow, for the same reason: a log that
+    records every no-op buries the changes that matter.
+    """
+
+    __tablename__ = "lm_autopilot_changes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
+    store_id: Mapped[int] = mapped_column(Integer, index=True)
+    league_slug: Mapped[str] = mapped_column(String(24), index=True)
+    league_name: Mapped[str] = mapped_column(String(120))
+    game_number: Mapped[int] = mapped_column(BigInteger)
+    event: Mapped[str] = mapped_column(String(160))
+    market: Mapped[str] = mapped_column(String(20))
+    period: Mapped[int] = mapped_column(Integer, default=0)
+    pinnacle_limit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    scale_percent: Mapped[int] = mapped_column(Integer)
+    old_value: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    new_value: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # "applied", "failed"; skips are not recorded.
+    outcome: Mapped[str] = mapped_column(String(16), default="applied")
+    note: Mapped[str | None] = mapped_column(String(255), nullable=True)
