@@ -377,15 +377,42 @@ class LM247Client:
             "ShadeAction": None,
         }
         previous = current.get("CircledValue")
+        has_line = (line.get("Home") is not None) or (line.get("Points") is not None)
         result = self._request("POST", DATA_API + UPDATE_PATH, json=body)
+        accepted = bool((result or {}).get("Payload", {}).get("IsSuccess"))
+
+        # IsSuccess means the request was accepted, not that the limit stuck.
+        # A game that follows the master has no local line to circle, so the
+        # value reads back unchanged - read it back and only call it done when
+        # the board actually holds the number.
+        held = False
+        note = None
+        if accepted:
+            try:
+                after = self.game_line(game_number, store_id, period, wager_type)
+                held = int(after.get("CircledValue") or 0) == int(amount)
+                if not held:
+                    note = (
+                        "accepted but did not hold - this game has no line on "
+                        "the store to circle (it follows the master)"
+                        if not has_line else
+                        "accepted but the value did not read back"
+                    )
+            except LM247Error:
+                note = "written, but could not read back to confirm"
+        else:
+            note = "LM247 did not accept the write"
+
         logger.info(
-            "LM247 circled game %s wager %s period %s: %s -> %s",
-            game_number, wager_type, period, previous, amount,
+            "LM247 circle game %s wager %s period %s: %s -> %s (held=%s)",
+            game_number, wager_type, period, previous, amount, held,
         )
         return {
-            "ok": bool((result or {}).get("Payload", {}).get("IsSuccess")),
+            "ok": held,
             "previous": previous,
             "value": int(amount),
+            "note": note,
+            "hasLine": has_line,
         }
 
     # ---------------------------------------------------------------- writes

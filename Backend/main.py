@@ -5463,6 +5463,16 @@ def run_lm_autopilot_cycle():
                         )
                         applied += 1
                         written += 1
+                    elif outcome.get("note"):
+                        # Accepted-but-didn't-hold. Log it as failed with the
+                        # reason so the operator sees the truth, not a silent
+                        # nothing and not a false "applied".
+                        _log_lm_change(
+                            {**league, "scalePercent": game.get("_share", league["scalePercent"])},
+                            game, limit, target,
+                            int(previous) if previous is not None else None,
+                            "failed", outcome["note"],
+                        )
         _note_lm_league(
             league["id"], now,
             f"{plan['matched']} games matched, {applied} limits moved"
