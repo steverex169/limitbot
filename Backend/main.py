@@ -5645,7 +5645,11 @@ def save_lm_autopilot(request_data):
                     })
                 except (KeyError, TypeError, ValueError):
                     continue
-            row.enabled = bool(item.get("enabled"))
+            # Picking games in per-game mode enables the league on its own,
+            # so a ticked game never sits dead behind an unchecked league box.
+            row.enabled = bool(item.get("enabled")) or (
+                mode == "per_game" and bool(selected)
+            )
             row.scale_percent = scale
             row.markets = markets
             row.lm_league_id = valid[slug]
