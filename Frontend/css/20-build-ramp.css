@@ -698,3 +698,29 @@
   .lm-ap-league { grid-template-columns: 1fr; gap: 10px; }
   .lm-ap-markets { justify-content: flex-start; }
 }
+
+/* --- Per-game manual override --- */
+.lm-ap-manual { margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--grid, #ecebe4); }
+.lm-ap-manual-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.lm-ap-manual-head .ramp-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink2, #52514e); }
+.lm-ap-league-select { min-width: 200px; }
+.lm-ap-games { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.lm-ap-game { border: 1px solid var(--grid, #e6e5de); border-radius: 10px; padding: 12px 14px; }
+.lm-ap-game-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.lm-ap-game-head strong { font-size: 14px; }
+.lm-ap-game-head small { color: var(--muted, #898781); font-size: 12px; }
+.lm-ap-game-market {
+  display: grid;
+  grid-template-columns: 110px 1fr 100px auto;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 0;
+}
+.lm-ap-gm-name { font-size: 13px; font-weight: 600; }
+.lm-ap-gm-pinny { font-size: 13px; color: var(--ink2, #52514e); font-variant-numeric: tabular-nums; }
+.lm-ap-gm-input { width: 100%; text-align: right; font-variant-numeric: tabular-nums; }
+.lm-ap-gm-set { padding: 6px 16px; }
+@media (max-width: 620px) {
+  .lm-ap-game-market { grid-template-columns: 1fr auto; grid-auto-flow: row; }
+  .lm-ap-gm-pinny { grid-column: 1 / -1; }
+}

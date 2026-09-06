@@ -98,6 +98,8 @@ const elements = {
   lmApMessage: document.querySelector("#lmApMessage"),
   lmApSave: document.querySelector("#lmApSave"),
   lmApLog: document.querySelector("#lmApLog"),
+  lmApGameLeague: document.querySelector("#lmApGameLeague"),
+  lmApGames: document.querySelector("#lmApGames"),
   message: document.querySelector("#message"),
   dialog: document.querySelector("#confirmDialog"),
   confirmTitle: document.querySelector("#confirmTitle"),

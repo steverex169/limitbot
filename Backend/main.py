@@ -5596,6 +5596,108 @@ def save_lm_autopilot(request_data):
     return {"message": "Autopilot settings saved", "masterEnabled": master}
 
 
+def lm_autopilot_games(slug):
+    """Every matched game in one league, with Pinnacle's number per market.
+
+    Fast on purpose: it matches Pinnacle to LM247 and computes the target at
+    the league's saved share, but does not read each game's current LM247
+    circled value - that would be dozens of throttled calls on a page load.
+    The operator sets one from here when they want to override a single game.
+    """
+    if slug not in lm247_api.PINNACLE_TO_LM_LEAGUE:
+        raise ValueError("Unknown league")
+    if not lm247_api.enabled():
+        return {"ready": False, "games": [], "scalePercent": 70}
+
+    saved = {lg["slug"]: lg for lg in lm_autopilot_leagues()}.get(slug)
+    scale = saved["scalePercent"] if saved else 70
+
+    try:
+        readings = pinnacle_api.league_readings(
+            slug, window_hours=lm_autopilot_window_hours
+        )
+        client = lm247_api.open_session(allow_writes=False)
+        lm_games = lm247_api.games_for_matching(
+            client, lm247_api.PINNACLE_TO_LM_LEAGUE[slug], lm247_api.STORE_WAR
+        )
+    except (pinnacle_api.PinnacleError, lm247_api.LM247Error) as error:
+        raise ValueError(str(error))
+
+    plan = per_game_ramp.plan_from_snapshots(
+        readings, lm_games, scale_percent=scale, period="Full Game",
+    )
+    return {
+        "ready": True,
+        "slug": slug,
+        "scalePercent": scale,
+        "storeId": lm247_api.STORE_WAR,
+        "games": plan["games"],
+        "unmatched": plan["skipped"],
+    }
+
+
+def set_game_limit(request_data):
+    """Circle one game-line by hand. A deliberate operator override.
+
+    Works whether or not the master autopilot is on - it is a manual action,
+    like circling a game in LM247 directly - but still needs the LM247 write
+    capability the deployment grants. Logged alongside the autopilot's own
+    changes, marked manual.
+    """
+    auth_context()
+    ok, reason = lm247_api.write_permitted()
+    if not ok:
+        raise ValueError(reason)
+    try:
+        game_number = int(request_data["gameNumber"])
+        amount = int(request_data["amount"])
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("A game and a whole-number amount are required")
+    if amount < 0 or amount > 10_000_000:
+        raise ValueError("Amount is out of range")
+    market = str(request_data.get("market", ""))
+    wagers = lm247_api.PINNACLE_TO_WAGER.get(market)
+    if not wagers:
+        raise ValueError("Unknown market")
+    store_id = int(request_data.get("storeId", lm247_api.STORE_WAR))
+    slug = str(request_data.get("slug", ""))
+    event = str(request_data.get("event", ""))[:160]
+    pinnacle = request_data.get("pinnacle")
+
+    client = lm247_api.open_session(allow_writes=True)
+    results = []
+    for wager in wagers:
+        outcome = client.circle_game_line(
+            game_number, store_id, lm247_api.DEFAULT_PERIOD, wager, amount
+        )
+        results.append(outcome)
+        with database_session() as db:
+            db.add(LmAutopilotChange(
+                store_id=store_id,
+                league_slug=slug,
+                league_name={
+                    lg["slug"]: lg["leagueName"]
+                    for lg in lm_autopilot_available_leagues()
+                }.get(slug, slug),
+                game_number=game_number,
+                event=event,
+                market=market,
+                period=lm247_api.DEFAULT_PERIOD,
+                pinnacle_limit=float(pinnacle) if pinnacle else None,
+                scale_percent=0,
+                old_value=(int(outcome["previous"])
+                           if outcome.get("previous") is not None else None),
+                new_value=amount,
+                outcome="applied" if outcome.get("ok") else "failed",
+                note="manual",
+            ))
+            db.commit()
+    return {
+        "message": f"Set {event or game_number} {market} to {amount:,}",
+        "applied": all(r.get("ok") for r in results),
+    }
+
+
 def run_lm_autopilot():
     if not lm247_api.enabled():
         logger.info("LM247 autopilot disabled (LM247 not enabled)")
@@ -6512,6 +6614,20 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 )
             return
 
+        if path == "/api/lm-autopilot/games":
+            try:
+                slug = (query.get("slug") or [""])[0]
+                self.send_json(200, lm_autopilot_games(slug))
+            except (KeyError, TypeError, ValueError) as error:
+                self.send_json(400, {"error": str(error)})
+            except PermissionError as error:
+                self.send_json(401, {"error": str(error)})
+            except Exception as error:
+                self.server_error(
+                    "LM247 games load failed", error, "Games are unavailable"
+                )
+            return
+
         if path == "/api/lm-autopilot":
             try:
                 self.send_json(200, lm_autopilot_view())
@@ -6676,6 +6792,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             "/api/schedules/hierarchy",
             "/api/schedules/ramp",
             "/api/lm-autopilot",
+            "/api/lm-autopilot/set-game",
             "/api/trackers",
             "/api/trackers/delete",
             "/api/schedules/cancel",
@@ -6699,6 +6816,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 if path == "/api/limits/hierarchy/preview"
                 else save_hierarchy_limit_changes(request_data)
                 if path == "/api/limits/hierarchy"
+                else set_game_limit(request_data)
+                if path == "/api/lm-autopilot/set-game"
                 else save_lm_autopilot(request_data)
                 if path == "/api/lm-autopilot"
                 else create_limit_trackers(request_data)

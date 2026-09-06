@@ -38,7 +38,160 @@ async function loadLmAutopilot() {
   state.lmAutopilot = data;
   renderLmApStatus(data);
   renderLmApLeagues(data);
+  renderLmApGameLeagueOptions(data);
   renderLmApLog(data.log || []);
+}
+
+function renderLmApGameLeagueOptions(data) {
+  const select = elements.lmApGameLeague;
+  if (!select) {
+    return;
+  }
+  const current = select.value;
+  select.replaceChildren();
+  const first = document.createElement("option");
+  first.value = "";
+  first.textContent = "Choose a league…";
+  select.append(first);
+  for (const league of data.leagues || []) {
+    const opt = document.createElement("option");
+    opt.value = league.slug;
+    opt.textContent = league.leagueName;
+    select.append(opt);
+  }
+  select.value = current;
+}
+
+async function loadLmApGames(slug) {
+  const host = elements.lmApGames;
+  if (!host) {
+    return;
+  }
+  if (!slug) {
+    host.replaceChildren();
+    return;
+  }
+  host.replaceChildren(makeRampCount("Loading games…"));
+  let data;
+  try {
+    const response = await fetch(
+      `/api/lm-autopilot/games?${new URLSearchParams({ slug })}`,
+      { cache: "no-store" }
+    );
+    data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Could not load games");
+    }
+  } catch (error) {
+    host.replaceChildren(makeRampCount(error.message));
+    return;
+  }
+  renderLmApGames(data);
+}
+
+function makeRampCount(text) {
+  const p = document.createElement("p");
+  p.className = "ramp-count";
+  p.textContent = text;
+  return p;
+}
+
+function renderLmApGames(data) {
+  const host = elements.lmApGames;
+  host.replaceChildren();
+  const games = data.games || [];
+  if (!games.length) {
+    host.append(makeRampCount("No matched games in the window right now."));
+    return;
+  }
+  for (const game of games) {
+    const card = document.createElement("div");
+    card.className = "lm-ap-game";
+
+    const head = document.createElement("div");
+    head.className = "lm-ap-game-head";
+    const title = document.createElement("strong");
+    title.textContent = game.pinnacleEvent;
+    head.append(title);
+    if (game.hoursToStart != null) {
+      const when = document.createElement("small");
+      when.textContent = `${Number(game.hoursToStart).toFixed(1)}h to start`;
+      head.append(when);
+    }
+    card.append(head);
+
+    for (const limit of game.limits) {
+      const row = document.createElement("div");
+      row.className = "lm-ap-game-market";
+
+      const label = document.createElement("span");
+      label.className = "lm-ap-gm-name";
+      label.textContent = LM_AP_MARKET_LABELS[limit.market] || limit.market;
+
+      const pinny = document.createElement("span");
+      pinny.className = "lm-ap-gm-pinny";
+      pinny.textContent = `Pinnacle ${Number(limit.pinnacle).toLocaleString()}` +
+        (limit.line ? ` (${limit.line})` : "");
+
+      const input = document.createElement("input");
+      input.type = "number";
+      input.min = "0";
+      input.step = "100";
+      input.value = limit.target;
+      input.className = "lm-ap-gm-input";
+      input.setAttribute("aria-label",
+        `${LM_AP_MARKET_LABELS[limit.market] || limit.market} limit`);
+
+      const set = document.createElement("button");
+      set.type = "button";
+      set.className = "button secondary lm-ap-gm-set";
+      set.textContent = "Set";
+      set.addEventListener("click", () =>
+        applyLmApGameLimit(set, {
+          slug: data.slug,
+          storeId: data.storeId,
+          gameNumber: game.gameNumber,
+          event: game.pinnacleEvent,
+          market: limit.market,
+          pinnacle: limit.pinnacle,
+          amount: Number(input.value),
+        })
+      );
+
+      row.append(label, pinny, input, set);
+      card.append(row);
+    }
+    host.append(card);
+  }
+}
+
+async function applyLmApGameLimit(button, payload) {
+  if (!Number.isFinite(payload.amount) || payload.amount < 0) {
+    setLmApMessage("Enter a valid amount.", "error");
+    return;
+  }
+  button.disabled = true;
+  const original = button.textContent;
+  button.textContent = "Setting…";
+  try {
+    const response = await fetch("/api/lm-autopilot/set-game", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Could not set the limit");
+    }
+    setLmApMessage(data.message, "success");
+    button.textContent = "Set ✓";
+    setTimeout(() => { button.textContent = original; button.disabled = false; }, 1500);
+    loadLmAutopilot().catch(() => { });
+  } catch (error) {
+    setLmApMessage(error.message, "error");
+    button.textContent = original;
+    button.disabled = false;
+  }
 }
 
 function renderLmApStatus(data) {
@@ -240,6 +393,11 @@ async function saveLmAutopilot() {
 
 if (elements.lmApSave) {
   elements.lmApSave.addEventListener("click", saveLmAutopilot);
+}
+if (elements.lmApGameLeague) {
+  elements.lmApGameLeague.addEventListener("change", (event) => {
+    loadLmApGames(event.target.value).catch(() => { });
+  });
 }
 if (elements.lmApMaster) {
   elements.lmApMaster.addEventListener("change", () => {
