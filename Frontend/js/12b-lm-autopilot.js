@@ -97,7 +97,7 @@ async function loadLmApGames(slug) {
        rather than letting an empty list read as "no games today". */
     pick.replaceChildren(makeOption("", "Choose a game…"));
     host.replaceChildren(
-      makeRampCount("Connect LM247 first — games appear once the switch is live.")
+      makeRampCount("LM247 is not connected yet — once its login is added on the server, games appear here (the master switch can stay off while you pick them).")
     );
     return;
   }
@@ -364,7 +364,7 @@ async function loadPerGamePicker(slug, host, selected, defaultShare) {
   }
   if (data.ready === false) {
     host.replaceChildren(
-      makeRampCount("Connect LM247 first — games appear once the switch is live.")
+      makeRampCount("LM247 is not connected yet — once its login is added on the server, games appear here (the master switch can stay off while you pick them).")
     );
     host.dataset.loaded = "";
     return;
