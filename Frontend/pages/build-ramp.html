@@ -31,7 +31,13 @@
           <button id="lmApSave" type="button" class="button primary">Save autopilot</button>
         </div>
         <div class="lm-ap-log-wrap">
-          <span class="ramp-label">Limit changes it has made</span>
+          <div class="lm-ap-log-head">
+            <span class="ramp-label">Limit changes it has made</span>
+            <label class="lm-ap-sound" title="Play a chime here when a new limit is applied">
+              <input id="lmApSound" type="checkbox" checked>
+              <span>&#128276; Sound on new limit</span>
+            </label>
+          </div>
           <div id="lmApLog" class="lm-ap-log"></div>
         </div>
       </div>

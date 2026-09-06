@@ -416,10 +416,81 @@ async function loadPerGamePicker(slug, host, selected, defaultShare) {
   }
 }
 
+/*
+ * A chime when a new limit lands, on this page only. Browsers refuse to play
+ * sound until the person has interacted with the page, so the audio context
+ * is created on the first click or key and simply resumed after that; a
+ * change arriving before any interaction is still shown, just silently.
+ * The tone is synthesised rather than a file, so nothing has to be served.
+ */
+let lmApAudio = null;
+let lmApLastSeenKey = null;
+
+function lmApSoundEnabled() {
+  return !elements.lmApSound || elements.lmApSound.checked;
+}
+
+function lmApUnlockAudio() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) {
+      return;
+    }
+    if (!lmApAudio) {
+      lmApAudio = new Ctx();
+    }
+    if (lmApAudio.state === "suspended") {
+      lmApAudio.resume().catch(() => { });
+    }
+  } catch {
+    /* no audio available - the log still updates */
+  }
+}
+
+function lmApChime() {
+  if (!lmApSoundEnabled()) {
+    return;
+  }
+  lmApUnlockAudio();
+  if (!lmApAudio || lmApAudio.state !== "running") {
+    return;
+  }
+  /* Two rising notes, twice - reads as an alert rather than a click. */
+  const ctx = lmApAudio;
+  const start = ctx.currentTime;
+  [[880, 0], [1320, 0.16], [880, 0.5], [1320, 0.66]].forEach(([freq, at]) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, start + at);
+    gain.gain.exponentialRampToValueAtTime(0.35, start + at + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + at + 0.15);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(start + at);
+    osc.stop(start + at + 0.16);
+  });
+}
+
+function lmApLogKey(row) {
+  return row
+    ? `${row.changedAt}|${row.event}|${row.market}|${row.newValue}`
+    : "";
+}
+
 function renderLmApLog(log) {
   const host = elements.lmApLog;
   if (!host) {
     return;
+  }
+  /* First render sets the baseline silently; after that, a different newest
+     row means a limit landed since we last looked. */
+  const newestKey = lmApLogKey(log[0]);
+  if (lmApLastSeenKey === null) {
+    lmApLastSeenKey = newestKey;
+  } else if (newestKey && newestKey !== lmApLastSeenKey) {
+    lmApLastSeenKey = newestKey;
+    lmApChime();
   }
   host.replaceChildren();
   if (!log.length) {
@@ -574,6 +645,27 @@ async function refreshLmApLogLive() {
   }
 }
 setInterval(refreshLmApLogLive, 20000);
+
+["click", "keydown", "touchstart"].forEach((type) =>
+  document.addEventListener(type, lmApUnlockAudio, { passive: true })
+);
+if (elements.lmApSound) {
+  try {
+    const saved = localStorage.getItem("lmApSound");
+    if (saved !== null) {
+      elements.lmApSound.checked = saved === "1";
+    }
+  } catch { /* storage unavailable - default stays on */ }
+  elements.lmApSound.addEventListener("change", () => {
+    try {
+      localStorage.setItem("lmApSound", elements.lmApSound.checked ? "1" : "0");
+    } catch { /* ignore */ }
+    /* Ticking it on is itself a click, so this doubles as a test chime. */
+    if (elements.lmApSound.checked) {
+      lmApChime();
+    }
+  });
+}
 
 if (elements.lmApSave) {
   elements.lmApSave.addEventListener("click", saveLmAutopilot);
