@@ -5321,7 +5321,6 @@ lm_autopilot_window_hours = float(os.getenv("LM_AUTOPILOT_WINDOW_HOURS", "48") o
 # Remembers the last failure logged per game+market, so a game whose line is
 # closing does not add an identical "failed" row every five minutes. Cleared
 # for a market as soon as it succeeds.
-_lm_last_failure = {}
 # Last Pinnacle value logged per game+market, so the next change row can show
 # where Pinnacle moved from.
 _lm_last_pinnacle = {}
@@ -5430,6 +5429,7 @@ def run_lm_autopilot_cycle():
             markets=set(league["markets"]),
         )
         applied = 0
+        skipped_games = 0
         for game in plan["games"]:
             if per_game is not None:
                 pick = per_game.get(_norm_event(game.get("pinnacleEvent")))
@@ -5452,7 +5452,6 @@ def run_lm_autopilot_cycle():
                     continue
                 target = limit["target"]
                 for wager in wagers:
-                    dedupe_key = (int(game["gameNumber"]), limit["market"], wager)
                     try:
                         outcome = client.circle_game_line(
                             int(game["gameNumber"]), league["storeId"],
@@ -5460,50 +5459,36 @@ def run_lm_autopilot_cycle():
                             skip_within_percent=lm_autopilot_min_change_percent,
                         )
                     except lm247_api.LM247Error as error:
-                        # Only log a new failure once - not the same one every
-                        # cycle while a game's line is closing.
-                        if _lm_last_failure.get(dedupe_key) != ("error", target):
-                            _log_lm_change(
-                                {**league, "scalePercent": game.get("_share", league["scalePercent"])},
-                                game, limit, target, None, "failed", str(error)[:200],
-                            )
-                            _lm_last_failure[dedupe_key] = ("error", target)
+                        # A read/write error is a status, not a change - the
+                        # league note carries it, the change log stays clean.
+                        skipped_games += 1
                         continue
 
                     if outcome.get("skipped"):
-                        # Board already holds the target. Nothing changed, so
-                        # nothing is logged.
+                        continue  # board already holds it - nothing changed
+                    if not outcome.get("ok"):
+                        # Accepted but did not hold (e.g. a game whose line has
+                        # closed). Not a change, so it never touches the log -
+                        # only successful moves are recorded.
+                        skipped_games += 1
                         continue
 
                     previous = outcome.get("previous")
-                    if outcome.get("ok"):
-                        _lm_last_failure.pop(dedupe_key, None)
-                        pinny_key = (int(game["gameNumber"]), limit["market"])
-                        pinnacle_prev = _lm_last_pinnacle.get(pinny_key)
-                        _lm_last_pinnacle[pinny_key] = limit["pinnacle"]
-                        # A real change that held - the only thing worth a row.
-                        _log_lm_change(
-                            {**league, "scalePercent": game.get("_share", league["scalePercent"])},
-                            game, limit, target,
-                            int(previous) if previous is not None else None,
-                            "applied", None, pinnacle_previous=pinnacle_prev,
-                        )
-                        applied += 1
-                        written += 1
-                    elif outcome.get("note"):
-                        # Accepted but did not hold. Log once, then stay quiet
-                        # until it either succeeds or the reason changes.
-                        if _lm_last_failure.get(dedupe_key) != (outcome["note"], target):
-                            _log_lm_change(
-                                {**league, "scalePercent": game.get("_share", league["scalePercent"])},
-                                game, limit, target,
-                                int(previous) if previous is not None else None,
-                                "failed", outcome["note"],
-                            )
-                            _lm_last_failure[dedupe_key] = (outcome["note"], target)
+                    pinny_key = (_norm_event(game.get("pinnacleEvent")), limit["market"])
+                    pinnacle_prev = _lm_last_pinnacle.get(pinny_key)
+                    _lm_last_pinnacle[pinny_key] = limit["pinnacle"]
+                    _log_lm_change(
+                        {**league, "scalePercent": game.get("_share", league["scalePercent"])},
+                        game, limit, target,
+                        int(previous) if previous is not None else None,
+                        "applied", None, pinnacle_previous=pinnacle_prev,
+                    )
+                    applied += 1
+                    written += 1
         _note_lm_league(
             league["id"], now,
             f"{plan['matched']} games matched, {applied} limits moved"
+            + (f", {skipped_games} not circleable" if skipped_games else "")
             + (f", {plan['unmatched']} unmatched" if plan["unmatched"] else ""),
         )
 
@@ -6717,6 +6702,15 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self.server_error(
                     "Tracker load failed", error, "Tracked limits are unavailable"
                 )
+            return
+
+        if path == "/api/lm-autopilot/log":
+            try:
+                self.send_json(200, {"log": lm_autopilot_change_log()})
+            except PermissionError as error:
+                self.send_json(401, {"error": str(error)})
+            except Exception as error:
+                self.server_error("Log load failed", error, "Log unavailable")
             return
 
         if path == "/api/lm-autopilot/games":

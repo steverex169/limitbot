@@ -552,6 +552,29 @@ async function saveLmAutopilot() {
   }
 }
 
+/*
+ * The log updates on its own while the page is open, so a new circle appears
+ * without a manual refresh. Polls the cheap log-only endpoint (no LM247 call)
+ * every 20s, and only while the Build a Ramp view is actually visible.
+ */
+async function refreshLmApLogLive() {
+  const view = elements.buildRampView;
+  if (!view || view.hidden || !elements.lmApLog) {
+    return;
+  }
+  try {
+    const response = await fetch("/api/lm-autopilot/log", { cache: "no-store" });
+    if (!response.ok) {
+      return;
+    }
+    const data = await response.json();
+    renderLmApLog(data.log || []);
+  } catch {
+    /* transient - the next tick tries again */
+  }
+}
+setInterval(refreshLmApLogLive, 20000);
+
 if (elements.lmApSave) {
   elements.lmApSave.addEventListener("click", saveLmAutopilot);
 }
