@@ -5334,6 +5334,10 @@ def lm_autopilot_master_enabled():
         return bool(state and state.enabled)
 
 
+def _norm_event(name):
+    return " ".join(str(name or "").split()).casefold()
+
+
 def _parse_selected_games(raw):
     if not raw:
         return []
@@ -5411,8 +5415,11 @@ def run_lm_autopilot_cycle():
 
         # Per-game mode circles only the games the operator picked, each at
         # its own share; all-games mode circles the whole slate at one share.
+        # Matched by event name, not game number: LM247 keeps more than one
+        # entry per matchup and which number a game gets can change between
+        # cycles, so the number is not a stable identity - the teams are.
         per_game = {
-            g["gameNumber"]: g
+            _norm_event(g.get("event")): g
             for g in (league.get("selectedGames") or [])
         } if league.get("mode") == "per_game" else None
 
@@ -5425,7 +5432,7 @@ def run_lm_autopilot_cycle():
         applied = 0
         for game in plan["games"]:
             if per_game is not None:
-                pick = per_game.get(game.get("gameNumber"))
+                pick = per_game.get(_norm_event(game.get("pinnacleEvent")))
                 if pick is None:
                     continue
                 # Recompute targets at this game's own share.

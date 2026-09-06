@@ -369,8 +369,9 @@ async function loadPerGamePicker(slug, host, selected, defaultShare) {
     host.dataset.loaded = "";
     return;
   }
+  const norm = (e) => String(e || "").trim().replace(/\s+/g, " ").toLowerCase();
   const chosen = new Map(
-    (selected || []).map((g) => [Number(g.gameNumber), g.scalePercent])
+    (selected || []).map((g) => [norm(g.event), g.scalePercent])
   );
   host.replaceChildren();
   const games = data.games || [];
@@ -387,7 +388,7 @@ async function loadPerGamePicker(slug, host, selected, defaultShare) {
     const box = document.createElement("input");
     box.type = "checkbox";
     box.className = "lm-ap-pg-check";
-    box.checked = chosen.has(Number(game.gameNumber));
+    box.checked = chosen.has(norm(game.pinnacleEvent));
 
     const label = document.createElement("span");
     label.className = "lm-ap-pg-name";
@@ -407,7 +408,7 @@ async function loadPerGamePicker(slug, host, selected, defaultShare) {
     share.max = "200";
     share.step = "5";
     share.className = "lm-ap-pg-share-input";
-    share.value = chosen.get(Number(game.gameNumber)) ?? defaultShare ?? 70;
+    share.value = chosen.get(norm(game.pinnacleEvent)) ?? defaultShare ?? 70;
     shareWrap.append(share);
 
     line.append(box, label, when, shareWrap);
