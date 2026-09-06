@@ -266,20 +266,20 @@ class LM247Client:
             raise LM247Error(f"LM247 returned non-JSON from {url}") from error
 
     def login(self) -> None:
+        # Field names and the token key are LM247's own, confirmed on the wire:
+        # POST auth/ with {UserLogin, Password} returns {AccessToken}. The
+        # wrong casing comes back 200 with an empty expiry and no token, which
+        # is how a bad login reads too, so treat a missing token as auth-failed.
         payload = self._request(
-            "POST", IDENT_API, json={"userName": USERNAME, "password": PASSWORD}
+            "POST", IDENT_API, json={"UserLogin": USERNAME, "Password": PASSWORD}
         )
-        token = (
-            payload.get("token")
-            or payload.get("accessToken")
-            or (payload.get("data") or {}).get("token")
-            if isinstance(payload, dict) else None
-        )
+        token = payload.get("AccessToken") if isinstance(payload, dict) else None
         if not token:
-            raise LM247AuthError(
-                "LM247 accepted the login but no token was found in the "
-                f"response: {json.dumps(payload)[:200]}"
-            )
+            message = (
+                payload.get("ErrorMessage")
+                if isinstance(payload, dict) else None
+            ) or "no token in the response"
+            raise LM247AuthError(f"LM247 login failed: {message}")
         self._token = str(token)
         self.session.headers["Authorization"] = f"Bearer {self._token}"
 
