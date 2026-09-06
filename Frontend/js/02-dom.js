@@ -99,6 +99,7 @@ const elements = {
   lmApSave: document.querySelector("#lmApSave"),
   lmApLog: document.querySelector("#lmApLog"),
   lmApGameLeague: document.querySelector("#lmApGameLeague"),
+  lmApGamePick: document.querySelector("#lmApGamePick"),
   lmApGames: document.querySelector("#lmApGames"),
   message: document.querySelector("#message"),
   dialog: document.querySelector("#confirmDialog"),

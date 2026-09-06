@@ -63,15 +63,20 @@ function renderLmApGameLeagueOptions(data) {
 }
 
 async function loadLmApGames(slug) {
+  const pick = elements.lmApGamePick;
   const host = elements.lmApGames;
-  if (!host) {
+  if (!pick || !host) {
     return;
   }
+  host.replaceChildren();
+  pick.disabled = true;
+  pick.replaceChildren(makeOption("", "Choose a game…"));
+  state.lmApGamesBySlug = null;
   if (!slug) {
-    host.replaceChildren();
     return;
   }
-  host.replaceChildren(makeRampCount("Loading games…"));
+  pick.replaceChildren(makeOption("", "Loading games…"));
+
   let data;
   try {
     const response = await fetch(
@@ -83,10 +88,38 @@ async function loadLmApGames(slug) {
       throw new Error(data.error || "Could not load games");
     }
   } catch (error) {
+    pick.replaceChildren(makeOption("", "Choose a game…"));
     host.replaceChildren(makeRampCount(error.message));
     return;
   }
-  renderLmApGames(data);
+
+  if (data.ready === false) {
+    /* The games can only be matched once LM247 is connected. Say that plainly
+       rather than letting an empty list read as "no games today". */
+    pick.replaceChildren(makeOption("", "Choose a game…"));
+    host.replaceChildren(
+      makeRampCount("Connect LM247 first — games appear once the switch is live.")
+    );
+    return;
+  }
+
+  const games = data.games || [];
+  state.lmApGamesData = data;
+  pick.replaceChildren(makeOption("", `Choose a game… (${games.length})`));
+  games.forEach((game, index) => {
+    pick.append(makeOption(String(index), game.pinnacleEvent));
+  });
+  pick.disabled = games.length === 0;
+  if (!games.length) {
+    host.replaceChildren(makeRampCount("No matched games in the window right now."));
+  }
+}
+
+function makeOption(value, text) {
+  const opt = document.createElement("option");
+  opt.value = value;
+  opt.textContent = text;
+  return opt;
 }
 
 function makeRampCount(text) {
@@ -96,73 +129,74 @@ function makeRampCount(text) {
   return p;
 }
 
-function renderLmApGames(data) {
+function renderLmApOneGame(index) {
   const host = elements.lmApGames;
+  const data = state.lmApGamesData;
   host.replaceChildren();
-  const games = data.games || [];
-  if (!games.length) {
-    host.append(makeRampCount("No matched games in the window right now."));
+  if (!data || index === "" || index == null) {
     return;
   }
-  for (const game of games) {
-    const card = document.createElement("div");
-    card.className = "lm-ap-game";
-
-    const head = document.createElement("div");
-    head.className = "lm-ap-game-head";
-    const title = document.createElement("strong");
-    title.textContent = game.pinnacleEvent;
-    head.append(title);
-    if (game.hoursToStart != null) {
-      const when = document.createElement("small");
-      when.textContent = `${Number(game.hoursToStart).toFixed(1)}h to start`;
-      head.append(when);
-    }
-    card.append(head);
-
-    for (const limit of game.limits) {
-      const row = document.createElement("div");
-      row.className = "lm-ap-game-market";
-
-      const label = document.createElement("span");
-      label.className = "lm-ap-gm-name";
-      label.textContent = LM_AP_MARKET_LABELS[limit.market] || limit.market;
-
-      const pinny = document.createElement("span");
-      pinny.className = "lm-ap-gm-pinny";
-      pinny.textContent = `Pinnacle ${Number(limit.pinnacle).toLocaleString()}` +
-        (limit.line ? ` (${limit.line})` : "");
-
-      const input = document.createElement("input");
-      input.type = "number";
-      input.min = "0";
-      input.step = "100";
-      input.value = limit.target;
-      input.className = "lm-ap-gm-input";
-      input.setAttribute("aria-label",
-        `${LM_AP_MARKET_LABELS[limit.market] || limit.market} limit`);
-
-      const set = document.createElement("button");
-      set.type = "button";
-      set.className = "button secondary lm-ap-gm-set";
-      set.textContent = "Set";
-      set.addEventListener("click", () =>
-        applyLmApGameLimit(set, {
-          slug: data.slug,
-          storeId: data.storeId,
-          gameNumber: game.gameNumber,
-          event: game.pinnacleEvent,
-          market: limit.market,
-          pinnacle: limit.pinnacle,
-          amount: Number(input.value),
-        })
-      );
-
-      row.append(label, pinny, input, set);
-      card.append(row);
-    }
-    host.append(card);
+  const game = (data.games || [])[Number(index)];
+  if (!game) {
+    return;
   }
+  const card = document.createElement("div");
+  card.className = "lm-ap-game";
+
+  const head = document.createElement("div");
+  head.className = "lm-ap-game-head";
+  const title = document.createElement("strong");
+  title.textContent = game.pinnacleEvent;
+  head.append(title);
+  if (game.hoursToStart != null) {
+    const when = document.createElement("small");
+    when.textContent = `${Number(game.hoursToStart).toFixed(1)}h to start`;
+    head.append(when);
+  }
+  card.append(head);
+
+  for (const limit of game.limits) {
+    const row = document.createElement("div");
+    row.className = "lm-ap-game-market";
+
+    const label = document.createElement("span");
+    label.className = "lm-ap-gm-name";
+    label.textContent = LM_AP_MARKET_LABELS[limit.market] || limit.market;
+
+    const pinny = document.createElement("span");
+    pinny.className = "lm-ap-gm-pinny";
+    pinny.textContent = `Pinnacle ${Number(limit.pinnacle).toLocaleString()}` +
+      (limit.line ? ` (${limit.line})` : "");
+
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = "0";
+    input.step = "100";
+    input.value = limit.target;
+    input.className = "lm-ap-gm-input";
+    input.setAttribute("aria-label",
+      `${LM_AP_MARKET_LABELS[limit.market] || limit.market} limit`);
+
+    const set = document.createElement("button");
+    set.type = "button";
+    set.className = "button secondary lm-ap-gm-set";
+    set.textContent = "Set";
+    set.addEventListener("click", () =>
+      applyLmApGameLimit(set, {
+        slug: data.slug,
+        storeId: data.storeId,
+        gameNumber: game.gameNumber,
+        event: game.pinnacleEvent,
+        market: limit.market,
+        pinnacle: limit.pinnacle,
+        amount: Number(input.value),
+      })
+    );
+
+    row.append(label, pinny, input, set);
+    card.append(row);
+  }
+  host.append(card);
 }
 
 async function applyLmApGameLimit(button, payload) {
@@ -397,6 +431,11 @@ if (elements.lmApSave) {
 if (elements.lmApGameLeague) {
   elements.lmApGameLeague.addEventListener("change", (event) => {
     loadLmApGames(event.target.value).catch(() => { });
+  });
+}
+if (elements.lmApGamePick) {
+  elements.lmApGamePick.addEventListener("change", (event) => {
+    renderLmApOneGame(event.target.value);
   });
 }
 if (elements.lmApMaster) {
