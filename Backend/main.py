@@ -5973,11 +5973,11 @@ def _placed_utc(raw):
         return None
 
 
-def bet_alert_message(row, cents):
+def bet_alert_message(row, cents=None):
     money = lambda v: f"${float(v):,.0f}" if v not in (None, "") else "?"
     who = row["player"] + (f" ({row['playerName']})" if row.get("playerName") else "")
     lines = [
-        f"BET ALERT - move the line {cents}c",
+        "BET ALERT",
         f"Agent: {row['agentName']} | Player: {who}",
         f"{row['description']} | {row['market']} | {row['wagerType']}"
         + (f" ({row['legs']} legs)" if row.get("legs", 0) > 1 else ""),

@@ -81,18 +81,6 @@ function baRuleRow(rule) {
   name.textContent = rule.agentName;
   enable.append(box, name);
 
-  const cents = document.createElement("label");
-  cents.className = "ba-field";
-  cents.append(document.createTextNode("move "));
-  const centsIn = document.createElement("input");
-  centsIn.type = "number";
-  centsIn.min = "1";
-  centsIn.max = "100";
-  centsIn.step = "5";
-  centsIn.value = rule.cents ?? 10;
-  centsIn.className = "ba-cents";
-  cents.append(centsIn, document.createTextNode("¢"));
-
   const min = document.createElement("label");
   min.className = "ba-field";
   min.append(document.createTextNode("min risk $"));
@@ -124,7 +112,7 @@ function baRuleRow(rule) {
     });
   });
 
-  row.append(enable, cents, min, note, remove);
+  row.append(enable, min, note, remove);
   return row;
 }
 
@@ -159,7 +147,7 @@ function addBaAgent() {
   if (empty) {
     empty.remove();
   }
-  host.append(baRuleRow({ agentId: agent.id, agentName: agent.name, cents: 10, minRisk: 0, enabled: true }));
+  host.append(baRuleRow({ agentId: agent.id, agentName: agent.name, minRisk: 0, enabled: true }));
   pick.value = "";
   renderBaAgentPick({
     ...state.betAlerts,
@@ -171,7 +159,6 @@ async function saveBetAlerts() {
   const rules = [...(elements.baRules?.querySelectorAll(".ba-rule") || [])].map((r) => ({
     agentId: Number(r.dataset.agentId),
     agentName: r.dataset.agentName,
-    cents: Number(r.querySelector(".ba-cents")?.value) || 10,
     minRisk: Number(r.querySelector(".ba-min")?.value) || 0,
     enabled: r.querySelector(".ba-enabled")?.checked !== false,
   }));
@@ -219,7 +206,7 @@ function renderBaLog(log) {
   table.className = "ramp-tracked-table";
   const head = document.createElement("thead");
   const hr = document.createElement("tr");
-  ["When", "Agent", "Player", "Bet", "Game", "Risk / Win", "Move", ""].forEach((h) => {
+  ["When", "Agent", "Player", "Bet", "Game", "Risk / Win", ""].forEach((h) => {
     const th = document.createElement("th");
     th.textContent = h;
     hr.append(th);
@@ -236,7 +223,6 @@ function renderBaLog(log) {
       `${row.description}${row.market ? ` · ${row.market}` : ""}${row.wagerType && row.wagerType !== "Straight" ? ` · ${row.wagerType}` : ""}`,
       `${row.league ? row.league + ": " : ""}${row.matchup || ""}${row.gameTime ? ` (${row.gameTime})` : ""}`,
       `${money(row.risk)} / ${money(row.toWin)}`,
-      `${row.cents}¢`,
       row.notified ? "sent" : "not sent",
     ].forEach((value) => {
       const td = document.createElement("td");
