@@ -646,6 +646,39 @@ async function refreshLmApLogLive() {
 }
 setInterval(refreshLmApLogLive, 20000);
 
+/*
+ * The game lists refresh themselves as well, so a slate that comes onto the
+ * board mid-week appears without a reload. Every five minutes each open
+ * per-game picker is re-fetched; whatever is already ticked, and the share
+ * typed next to it, is read off the page first and carried over, so a
+ * refresh never undoes work in progress.
+ */
+function lmApPickerState(host) {
+  return [...host.querySelectorAll(".lm-ap-pg-row")]
+    .filter((r) => r.querySelector(".lm-ap-pg-check")?.checked)
+    .map((r) => ({
+      event: r.dataset.event,
+      scalePercent: Number(r.querySelector(".lm-ap-pg-share-input")?.value) || 70,
+    }));
+}
+
+async function refreshLmApPickers() {
+  const view = elements.buildRampView;
+  if (!view || view.hidden || !elements.lmApLeagues) {
+    return;
+  }
+  for (const row of elements.lmApLeagues.querySelectorAll(".lm-ap-league-wrap")) {
+    const host = row.querySelector(".lm-ap-pergame");
+    const mode = row.querySelector(".lm-ap-mode")?.value;
+    if (!host || host.hidden || mode !== "per_game" || !host.dataset.loaded) {
+      continue;
+    }
+    const share = row.querySelector(".lm-ap-scale-input")?.value;
+    await loadPerGamePicker(row.dataset.slug, host, lmApPickerState(host), share);
+  }
+}
+setInterval(refreshLmApPickers, 5 * 60 * 1000);
+
 ["click", "keydown", "touchstart"].forEach((type) =>
   document.addEventListener(type, lmApUnlockAudio, { passive: true })
 );
