@@ -32,6 +32,9 @@ from model import (
     AgentTreeCache,
     LimitChange,
     LimitTracker,
+    BetAlertEvent,
+    BetAlertRule,
+    BetAlertSeen,
     LmAutopilotChange,
     LmAutopilotLeague,
     LmAutopilotState,
@@ -72,6 +75,8 @@ page_routes = frozenset({
     "/telegram_alerts/",
     "/build_ramp",
     "/build_ramp/",
+    "/bet_alerts",
+    "/bet_alerts/",
 })
 # Serialize logins per username only: a slow upstream response for one account
 # must not block every other user's login.
@@ -5436,69 +5441,86 @@ def run_lm_autopilot_cycle():
             period="Full Game",
             markets=set(league["markets"]),
         )
+
+        # The board's resolved lines, read once. The circled amount that
+        # actually holds is IsCircledAmount here - the per-store gameLine reads
+        # zero while the store follows the master, which is why an applied
+        # circle looked like it had failed.
+        try:
+            board = lm247_api.league_lines(
+                client, league["lmLeagueId"], league["storeId"]
+            )
+        except lm247_api.LM247Error:
+            logger.warning("LM247 autopilot could not read %s board", slug, exc_info=True)
+            board = {}
+
         applied = 0
         skipped_games = 0
-        waiting = []   # games with no LM247 line to circle yet
+        waiting = []   # games with no line holding our circle yet
+        pending = []   # writes posted this cycle, to be verified below
         for game in plan["games"]:
             if per_game is not None:
                 pick = per_game.get(_norm_event(game.get("pinnacleEvent")))
                 if pick is None:
                     continue
-                # Recompute targets at this game's own share.
                 share = pick["scalePercent"]
                 for limit in game["limits"]:
                     limit["target"] = per_game_ramp.scale_limit(
                         limit["pinnacle"], share
                     )
                 game["_share"] = share
+            gid = safe_int(game.get("gameNumber"))
             for limit in game["limits"]:
                 if shutdown_event.is_set():
                     break
-                # One Pinnacle market can be several LM247 wagers: a team total
-                # is home and away separately, so both get the same number.
                 wagers = lm247_api.PINNACLE_TO_WAGER.get(limit["market"])
-                if not wagers or not game["gameNumber"]:
+                if not wagers or not gid:
                     continue
                 target = limit["target"]
                 for wager in wagers:
+                    current = board.get((gid, lm247_api.DEFAULT_PERIOD, wager)) or {}
+                    have = current.get("amount") or 0
+                    if have and abs(target - have) / have * 100.0 < lm_autopilot_min_change_percent:
+                        continue  # already at the target, nothing to do
                     try:
-                        outcome = client.circle_game_line(
-                            int(game["gameNumber"]), league["storeId"],
-                            lm247_api.DEFAULT_PERIOD, wager, target,
-                            skip_within_percent=lm_autopilot_min_change_percent,
+                        lm247_api.post_circle(
+                            client, gid, league["storeId"],
+                            lm247_api.DEFAULT_PERIOD, wager, target, current,
                         )
-                    except lm247_api.LM247Error as error:
-                        # A read/write error is a status, not a change - the
-                        # league note carries it, the change log stays clean.
+                    except lm247_api.LM247Error:
                         skipped_games += 1
                         continue
+                    pending.append((game, limit, wager, target, have))
 
-                    if outcome.get("skipped"):
-                        continue  # board already holds it - nothing changed
-                    if not outcome.get("ok"):
-                        # Accepted but did not hold - almost always a game LM247
-                        # has no line on yet (it follows the master until close
-                        # to game day). Not a change, so it never touches the
-                        # log; the league note names it so the page can say
-                        # "waiting for a line" rather than nothing at all.
-                        skipped_games += 1
-                        name = str(game.get("pinnacleEvent") or "")
-                        if name and name not in waiting:
-                            waiting.append(name)
-                        continue
-
-                    previous = outcome.get("previous")
+        # Read the board again: only what actually holds is a change.
+        if pending:
+            try:
+                after = lm247_api.league_lines(
+                    client, league["lmLeagueId"], league["storeId"]
+                )
+            except lm247_api.LM247Error:
+                after = {}
+            for game, limit, wager, target, previous in pending:
+                gid = safe_int(game.get("gameNumber"))
+                got = (after.get((gid, lm247_api.DEFAULT_PERIOD, wager)) or {}).get("amount") or 0
+                if got == target:
+                    share = game.get("_share", league["scalePercent"])
                     pinny_key = (_norm_event(game.get("pinnacleEvent")), limit["market"])
                     pinnacle_prev = _lm_last_pinnacle.get(pinny_key)
                     _lm_last_pinnacle[pinny_key] = limit["pinnacle"]
                     _log_lm_change(
-                        {**league, "scalePercent": game.get("_share", league["scalePercent"])},
-                        game, limit, target,
-                        int(previous) if previous is not None else None,
+                        {**league, "scalePercent": share}, game, limit, target,
+                        int(previous) if previous else None,
                         "applied", None, pinnacle_previous=pinnacle_prev,
                     )
                     applied += 1
                     written += 1
+                else:
+                    skipped_games += 1
+                    name = str(game.get("pinnacleEvent") or "")
+                    if name and name not in waiting:
+                        waiting.append(name)
+
         note = f"{plan['matched']} games matched, {applied} limits moved"
         if waiting:
             shown = ", ".join(waiting[:3]) + (f" +{len(waiting) - 3} more" if len(waiting) > 3 else "")
@@ -5772,12 +5794,30 @@ def set_game_limit(request_data):
     event = str(request_data.get("event", ""))[:160]
     pinnacle = request_data.get("pinnacle")
 
+    lm_league_id = lm247_api.PINNACLE_TO_LM_LEAGUE.get(slug)
     client = lm247_api.open_session(allow_writes=True)
+    board = (
+        lm247_api.league_lines(client, lm_league_id, store_id)
+        if lm_league_id else {}
+    )
     results = []
     for wager in wagers:
-        outcome = client.circle_game_line(
-            game_number, store_id, lm247_api.DEFAULT_PERIOD, wager, amount
+        current = board.get((game_number, lm247_api.DEFAULT_PERIOD, wager)) or {}
+        previous = current.get("amount")
+        lm247_api.post_circle(
+            client, game_number, store_id, lm247_api.DEFAULT_PERIOD,
+            wager, amount, current,
         )
+        # Verify against the resolved board, not the per-store line.
+        after = (
+            lm247_api.league_lines(client, lm_league_id, store_id)
+            if lm_league_id else {}
+        )
+        got = (after.get((game_number, lm247_api.DEFAULT_PERIOD, wager)) or {}).get("amount")
+        outcome = {
+            "ok": got == amount, "previous": previous,
+            "note": None if got == amount else "did not hold on the board",
+        }
         results.append(outcome)
         with database_session() as db:
             db.add(LmAutopilotChange(
@@ -5817,6 +5857,346 @@ def run_lm_autopilot():
         except Exception:
             logger.exception("LM247 autopilot cycle failed")
         shutdown_event.wait(max(60, lm_autopilot_interval_minutes * 60))
+
+
+# ---------------------------------------------------------------------------
+# Bet alerts: watch chosen agents' players and tell the desk to move the line
+# ---------------------------------------------------------------------------
+#
+# Source is AccessHigh's own pending-wagers report, the one behind the agent
+# panel's "Pending" screen. Its player view lists every player with open
+# tickets and the agent they sit under; its list view returns a player's open
+# tickets with the line, price and matchup. Neither has a "since" filter - the
+# date in the URL is a paging cursor - so a new bet is simply a ticket number
+# this deployment has not seen before, and the first pass records the open
+# book silently rather than announcing all of it.
+bet_alert_interval_seconds = max(
+    10, int(os.getenv("BET_ALERT_INTERVAL_SECONDS", "30") or 30)
+)
+bet_alerts_enabled = (
+    os.getenv("BET_ALERTS", "").strip().lower() not in {"off", "false", "0", "no"}
+)
+# Tickets placed more than this long before the watcher first saw them are
+# history, not news, and are recorded without an alert.
+bet_alert_grace_minutes = int(os.getenv("BET_ALERT_GRACE_MINUTES", "15") or 15)
+_bet_alert_player_state = {}   # player id -> (PendingBets, AmountBase)
+
+
+def _pending_pages(path_template, cap=25):
+    """Walk a pending-report listing page by page. Yields items."""
+    page, last = 1, "null"
+    while page <= cap:
+        response = api_request(
+            "GET", f"{partner_api}/{path_template.format(page=page, last=last)}",
+            timeout=40,
+        )
+        response.raise_for_status()
+        payload = response.json().get("Payload") or {}
+        for item in payload.get("i") or []:
+            yield item
+        if payload.get("n") or not payload.get("i"):
+            return
+        page += 1
+        last = payload.get("d") or "null"
+
+
+def pending_players():
+    """Every player on the book with open tickets, with their agent."""
+    agent = int(auth_context()["id"])
+    return list(_pending_pages(
+        "agent/reports/pending/player/-1/7/false/0/0/false/{page}/{last}/0"
+        f"?idAgent={agent}"
+    ))
+
+
+def player_open_tickets(player_id):
+    """One player's open tickets, flattened to one row per wager."""
+    agent = int(auth_context()["id"])
+    rows = []
+    for item in _pending_pages(
+        f"agent/reports/pending/list/{int(player_id)}/-1/7/false/0/0/false/"
+        "{page}/{last}/0" f"?idAgent={agent}"
+    ):
+        summary = str(item.get("d") or "")
+        for wager in item.get("w") or []:
+            legs = wager.get("dl") or []
+            first = legs[0] if legs else {}
+            rows.append({
+                "ticket": safe_int(wager.get("tn")),
+                "customerId": safe_int(wager.get("i")),
+                "agentId": safe_int(wager.get("ai")),
+                "agentName": wager.get("an") or "",
+                "player": wager.get("cn") or "",
+                "playerName": wager.get("n") or "",
+                "website": wager.get("w") or "",
+                "wagerType": wager.get("t") or "",
+                "market": wager.get("d") or "",
+                "description": summary or wager.get("d") or "",
+                "risk": wager.get("tr"),
+                "toWin": wager.get("tw"),
+                "placedAt": wager.get("dt"),
+                "matchup": first.get("h") or "",
+                "league": first.get("ln") or "",
+                "sport": first.get("s") or "",
+                "gameTime": first.get("dt") or "",
+                "line": first.get("p"),
+                "price": first.get("f"),
+                "selection": first.get("d") or "",
+                "legs": len(legs),
+            })
+    return rows
+
+
+def _et_label(raw):
+    """AccessHigh's naive Eastern timestamps as the desk reads them."""
+    try:
+        moment = datetime.fromisoformat(str(raw)[:19]).replace(tzinfo=schedule_timezone)
+    except (TypeError, ValueError):
+        return str(raw or "")
+    return moment.strftime("%a %-m/%-d %-I:%M %p ET")
+
+
+def _placed_utc(raw):
+    try:
+        return datetime.fromisoformat(str(raw)[:19]).replace(
+            tzinfo=schedule_timezone
+        ).astimezone(timezone.utc).replace(tzinfo=None)
+    except (TypeError, ValueError):
+        return None
+
+
+def bet_alert_message(row, cents):
+    money = lambda v: f"${float(v):,.0f}" if v not in (None, "") else "?"
+    who = row["player"] + (f" ({row['playerName']})" if row.get("playerName") else "")
+    lines = [
+        f"BET ALERT - move the line {cents}c",
+        f"Agent: {row['agentName']} | Player: {who}",
+        f"{row['description']} | {row['market']} | {row['wagerType']}"
+        + (f" ({row['legs']} legs)" if row.get("legs", 0) > 1 else ""),
+    ]
+    if row.get("matchup"):
+        lines.append(
+            f"{row['league']}: {row['matchup']}"
+            + (f" - {_et_label(row['gameTime'])}" if row.get("gameTime") else "")
+        )
+    lines.append(
+        f"Risk {money(row['risk'])} to win {money(row['toWin'])}"
+        f" | ticket {row['ticket']} | placed {_et_label(row['placedAt'])}"
+    )
+    return "\n".join(lines)
+
+
+def bet_alert_rules():
+    with database_session() as db:
+        return [{
+            "id": r.id, "agentId": r.agent_id, "agentName": r.agent_name,
+            "cents": r.cents, "minRisk": r.min_risk, "enabled": r.enabled,
+            "lastRunAt": (
+                eastern_timestamp(r.last_run_at.replace(tzinfo=timezone.utc))
+                if r.last_run_at else None
+            ),
+            "lastNote": r.last_note,
+        } for r in db.execute(select(BetAlertRule)).scalars().all()]
+
+
+def run_bet_alert_cycle():
+    """One pass: new tickets under watched agents become alerts."""
+    if not bet_alerts_enabled:
+        return 0
+    rules = [r for r in bet_alert_rules() if r["enabled"]]
+    if not rules:
+        return 0
+    by_agent = {int(r["agentId"]): r for r in rules}
+
+    with database_session() as db:
+        user = db.scalars(select(User).order_by(User.id)).first()
+    if user is None:
+        return 0
+    try:
+        auth = build_worker_auth(user)
+    except PermissionError:
+        auth = refresh_worker_auth(user.id)
+    token = current_auth.set(auth)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    grace = now - timedelta(minutes=bet_alert_grace_minutes)
+    alerted = 0
+    try:
+        try:
+            players = pending_players()
+        except PermissionError:
+            auth = refresh_worker_auth(user.id)
+            current_auth.set(auth)
+            players = pending_players()
+
+        watched = [p for p in players if safe_int(p.get("AgentId")) in by_agent]
+        checked = 0
+        for player in watched:
+            pid = safe_int(player.get("Id"))
+            state = (safe_int(player.get("PendingBets")), player.get("AmountBase"))
+            if _bet_alert_player_state.get(pid) == state:
+                continue   # nothing new for this player since last pass
+            _bet_alert_player_state[pid] = state
+            checked += 1
+            try:
+                tickets = player_open_tickets(pid)
+            except Exception:
+                logger.warning("Bet alerts: could not read tickets for %s", pid, exc_info=True)
+                continue
+            with database_session() as db:
+                known = {
+                    t for t in db.execute(
+                        select(BetAlertSeen.ticket_number).where(
+                            BetAlertSeen.customer_id == pid
+                        )
+                    ).scalars().all()
+                }
+                for row in tickets:
+                    ticket = row["ticket"]
+                    if not ticket or ticket in known:
+                        continue
+                    rule = by_agent.get(row["agentId"]) or by_agent.get(
+                        safe_int(player.get("AgentId"))
+                    )
+                    placed = _placed_utc(row["placedAt"])
+                    is_news = placed is not None and placed >= grace
+                    too_small = (
+                        rule and rule["minRisk"]
+                        and (row["risk"] is None or float(row["risk"]) < rule["minRisk"])
+                    )
+                    should_alert = bool(rule) and is_news and not too_small
+                    db.add(BetAlertSeen(
+                        ticket_number=ticket, customer_id=pid,
+                        agent_id=row["agentId"], placed_at=placed, alerted=should_alert,
+                    ))
+                    known.add(ticket)
+                    if not should_alert:
+                        continue
+                    cents = rule["cents"]
+                    message = bet_alert_message(row, cents)
+                    sent = True
+                    try:
+                        send_telegram_success_message(message)
+                    except Exception:
+                        sent = False
+                        logger.warning("Bet alert Telegram failed", exc_info=True)
+                    db.add(BetAlertEvent(
+                        ticket_number=ticket, agent_id=row["agentId"],
+                        agent_name=row["agentName"], player=row["player"],
+                        website=row["website"], wager_type=row["wagerType"],
+                        market=row["market"], description=row["description"][:255],
+                        matchup=row["matchup"][:200], league=row["league"][:80],
+                        game_time=_et_label(row["gameTime"]) if row["gameTime"] else None,
+                        risk=row["risk"], to_win=row["toWin"],
+                        placed_at=_et_label(row["placedAt"]), cents=cents,
+                        notified=sent, note=None if sent else "Telegram send failed",
+                    ))
+                    alerted += 1
+                db.commit()
+
+        with database_session() as db:
+            for rule in rules:
+                stored = db.get(BetAlertRule, rule["id"])
+                if stored is None:
+                    continue
+                mine = [p for p in watched if safe_int(p.get("AgentId")) == rule["agentId"]]
+                stored.last_run_at = now
+                stored.last_note = (
+                    f"{len(mine)} players with open bets"
+                    + (f", {sum(safe_int(p.get('PendingBets')) for p in mine)} tickets" if mine else "")
+                )[:255]
+            db.commit()
+    finally:
+        current_auth.reset(token)
+        try:
+            auth["http"].close()
+        except Exception:
+            pass
+    if alerted:
+        logger.info("Bet alerts: raised %d", alerted)
+    return alerted
+
+
+def bet_alert_log(limit=100):
+    with database_session() as db:
+        rows = db.execute(
+            select(BetAlertEvent).order_by(BetAlertEvent.created_at.desc()).limit(limit)
+        ).scalars().all()
+        return [{
+            "at": eastern_timestamp(r.created_at.replace(tzinfo=timezone.utc)),
+            "agentName": r.agent_name, "player": r.player, "website": r.website,
+            "wagerType": r.wager_type, "market": r.market,
+            "description": r.description, "matchup": r.matchup, "league": r.league,
+            "gameTime": r.game_time, "risk": r.risk, "toWin": r.to_win,
+            "placedAt": r.placed_at, "cents": r.cents, "notified": r.notified,
+            "ticket": r.ticket_number, "note": r.note,
+        } for r in rows]
+
+
+def bet_alert_view():
+    auth = auth_context()
+    try:
+        agents = [
+            {"id": safe_int(a.get("id")), "name": a.get("name") or f"Agent {a.get('id')}"}
+            for a in load_agents()
+        ]
+    except Exception:
+        agents = []
+    agents.append({"id": safe_int(auth["id"]), "name": auth["username"]})
+    seen, unique = set(), []
+    for a in sorted(agents, key=lambda a: str(a["name"]).casefold()):
+        if a["id"] and a["id"] not in seen:
+            seen.add(a["id"]); unique.append(a)
+    return {
+        "enabled": bet_alerts_enabled,
+        "intervalSeconds": bet_alert_interval_seconds,
+        "agents": unique,
+        "rules": bet_alert_rules(),
+        "log": bet_alert_log(),
+    }
+
+
+def save_bet_alerts(request_data):
+    """Replace the watched-agent list with what the page sent."""
+    auth_context()
+    items = request_data.get("rules") or []
+    with database_session() as db:
+        existing = {r.agent_id: r for r in db.execute(select(BetAlertRule)).scalars().all()}
+        keep = set()
+        for item in items:
+            try:
+                agent_id = int(item["agentId"])
+                cents = max(1, min(100, int(item.get("cents", 10))))
+                min_risk = max(0, int(item.get("minRisk", 0) or 0))
+            except (KeyError, TypeError, ValueError):
+                continue
+            keep.add(agent_id)
+            row = existing.get(agent_id)
+            if row is None:
+                row = BetAlertRule(id=uuid.uuid4().hex, agent_id=agent_id,
+                                   agent_name=str(item.get("agentName", agent_id))[:120])
+                db.add(row)
+            row.agent_name = str(item.get("agentName", row.agent_name))[:120]
+            row.cents = cents
+            row.min_risk = min_risk
+            row.enabled = bool(item.get("enabled", True))
+        for agent_id, row in existing.items():
+            if agent_id not in keep:
+                db.delete(row)
+        db.commit()
+    return {"message": f"Watching {len(keep)} agent{'' if len(keep) == 1 else 's'}"}
+
+
+def run_bet_alerts():
+    if not bet_alerts_enabled:
+        logger.info("Bet alerts disabled")
+        return
+    shutdown_event.wait(20)
+    while not shutdown_event.is_set():
+        try:
+            run_bet_alert_cycle()
+        except Exception:
+            logger.exception("Bet alert cycle failed")
+        shutdown_event.wait(bet_alert_interval_seconds)
 
 
 def run_schedule_worker():
@@ -6722,6 +7102,24 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 )
             return
 
+        if path == "/api/bet-alerts":
+            try:
+                self.send_json(200, bet_alert_view())
+            except PermissionError as error:
+                self.send_json(401, {"error": str(error)})
+            except Exception as error:
+                self.server_error("Bet alerts load failed", error, "Bet alerts are unavailable")
+            return
+
+        if path == "/api/bet-alerts/log":
+            try:
+                self.send_json(200, {"log": bet_alert_log()})
+            except PermissionError as error:
+                self.send_json(401, {"error": str(error)})
+            except Exception as error:
+                self.server_error("Bet alert log failed", error, "Log unavailable")
+            return
+
         if path == "/api/lm-autopilot/log":
             try:
                 self.send_json(200, {"log": lm_autopilot_change_log()})
@@ -6908,6 +7306,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             "/api/schedules",
             "/api/schedules/hierarchy",
             "/api/schedules/ramp",
+            "/api/bet-alerts",
             "/api/lm-autopilot",
             "/api/lm-autopilot/set-game",
             "/api/trackers",
@@ -6933,6 +7332,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 if path == "/api/limits/hierarchy/preview"
                 else save_hierarchy_limit_changes(request_data)
                 if path == "/api/limits/hierarchy"
+                else save_bet_alerts(request_data)
+                if path == "/api/bet-alerts"
                 else set_game_limit(request_data)
                 if path == "/api/lm-autopilot/set-game"
                 else save_lm_autopilot(request_data)
@@ -7222,6 +7623,8 @@ limit_tracker = threading.Thread(target=run_limit_tracker, daemon=True)
 limit_tracker.start()
 lm_autopilot = threading.Thread(target=run_lm_autopilot, daemon=True)
 lm_autopilot.start()
+bet_alert_watcher = threading.Thread(target=run_bet_alerts, daemon=True)
+bet_alert_watcher.start()
 server = ThreadingHTTPServer((server_host, server_port), DashboardHandler)
 
 def stop_server(_signum, _frame):

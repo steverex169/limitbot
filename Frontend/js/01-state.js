@@ -11,6 +11,7 @@ const state = {
      strength of an answer that has not arrived would blank the page. */
   trackableLeagues: null,
   lmAutopilot: null,
+  betAlerts: null,
   agents: [],
   selectedAgentId: null,
   rows: [],

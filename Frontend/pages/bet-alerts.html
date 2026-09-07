@@ -1,0 +1,34 @@
+    <section id="betAlertsView" class="panel bet-alerts-panel" hidden aria-hidden="true">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">ALERTS</p>
+          <h2>Bet alerts</h2>
+          <p>Pick agents to watch. When one of their players places a bet, Telegram gets told what was bet and to move the line.</p>
+        </div>
+      </div>
+
+      <div class="bet-alerts">
+        <div class="ba-head">
+          <div>
+            <strong>Watched agents</strong>
+            <small id="baStatus" class="ba-status">Loading&hellip;</small>
+          </div>
+          <div class="ba-add">
+            <select id="baAgentPick" aria-label="Agent to watch">
+              <option value="">Add an agent&hellip;</option>
+            </select>
+            <button id="baAdd" type="button" class="button secondary">Add</button>
+          </div>
+        </div>
+        <div id="baRules" class="ba-rules"></div>
+        <div id="baMessage" class="message" role="status" hidden></div>
+        <div class="ramp-actions">
+          <button id="baSave" type="button" class="button primary">Save watch list</button>
+        </div>
+
+        <div class="ba-log-wrap">
+          <span class="ramp-label">Alerts sent</span>
+          <div id="baLog" class="ba-log"></div>
+        </div>
+      </div>
+    </section>

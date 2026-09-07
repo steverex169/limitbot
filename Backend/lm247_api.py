@@ -466,6 +466,81 @@ class LM247Client:
         return self._request("POST", DATA_API + UPDATE_PATH, json=body)
 
 
+def league_lines(client: "LM247Client", lm_league_id: int,
+                 store_id: int = STORE_WAR) -> dict[tuple, dict[str, Any]]:
+    """Every line on a league's board, keyed (gameId, period, wagerType).
+
+    This is the resolved view the desk sees - linesByLeagues, not the per-store
+    linesByGames or gameLine, both of which return the store's own empty values
+    while it follows the master. The circled amount that actually holds is
+    IsCircledAmount here, and it reflects our writes: a circle posted to the
+    store shows up in this feed even when the store follows the master line.
+    """
+    payload = client._data(
+        "linesmanager/linesByLeagues",
+        **{"leagues": int(lm_league_id), "storeid": int(store_id)},
+    )
+    out: dict[tuple, dict[str, Any]] = {}
+    for game in payload.get("Payload") or []:
+        gid = game.get("GameId")
+        if gid is None:
+            continue
+        for period in game.get("Periods") or []:
+            pnum = int(period.get("Period", 0) or 0)
+            for line in period.get("Lines") or []:
+                out[(int(gid), pnum, int(line.get("WagerType", 0) or 0))] = {
+                    "amount": int(line.get("IsCircledAmount") or 0),
+                    "isCircled": bool(line.get("IsCircled")),
+                    "points": line.get("Points"),
+                    "home": line.get("Home"),
+                    "away": line.get("Away"),
+                    "draw": line.get("Draw"),
+                    "followMaster": line.get("FollowMaster"),
+                    "hasLine": bool(line.get("Home") or line.get("Points")),
+                }
+    return out
+
+
+def post_circle(client: "LM247Client", game_number: int, store_id: int,
+                period: int, wager_type: int, amount: int,
+                line: dict[str, Any] | None = None) -> bool:
+    """Post one circled amount. Returns whether LM247 accepted the request.
+
+    Echoes the real line prices (from league_lines) so a store that does NOT
+    follow the master keeps its price; a store that does ignores them anyway.
+    Whether the write *held* is decided by re-reading league_lines, not by the
+    IsSuccess this returns - IsSuccess means accepted, not applied.
+    """
+    allowed, reason = write_permitted()
+    if client._allow_writes is False:
+        raise LM247WriteRefused("This client was opened read-only")
+    if not allowed:
+        raise LM247WriteRefused(reason)
+    line = line or {}
+    body = {
+        "GameNum": int(game_number),
+        "StoreId": int(store_id),
+        "Period": int(period),
+        "ShadeId": -1,
+        "WagerType": int(wager_type),
+        "Line": {
+            "WagerType": int(wager_type),
+            "Points": line.get("points") or 0,
+            "Home": line.get("home") or 0,
+            "Away": line.get("away") or 0,
+            "Draw": line.get("draw"),
+        },
+        "Autopilot": {"AutopilotSelected": 0, "AutopilotActive": False, "Adjust": 0},
+        "Options": {
+            "KeepOpenMinutes": 0, "CircledValue": int(amount),
+            "Status": 8, "TeamTotalAutoCalculations": False,
+        },
+        "FollowMaster": None, "ShadeAction": None,
+    }
+    result = client._request("POST", DATA_API + UPDATE_PATH, json=body)
+    return bool((result or {}).get("Payload", {}).get("IsSuccess"))
+
+
 def open_session(*, allow_writes: bool = False) -> "LM247Client":
     """A logged-in client, or raise. The worker's single entry point."""
     client = LM247Client(allow_writes=allow_writes)

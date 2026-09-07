@@ -30,6 +30,13 @@ function isBuildRampRoute() {
   return normalizedPath === "/build_ramp";
 }
 
+function isBetAlertsRoute() {
+  const normalizedPath =
+    window.location.pathname.replace(/\/+$/, "") || "/";
+
+  return normalizedPath === "/bet_alerts";
+}
+
 function isTelegramAlertsRoute() {
   const normalizedPath =
     window.location.pathname.replace(/\/+$/, "") || "/";
@@ -45,11 +52,13 @@ function applyDashboardRoute() {
     state.tradingMonitorEnabled && isTradingMonitorRoute();
   const telegramAlertsActive = isTelegramAlertsRoute();
   const buildRampActive = isBuildRampRoute();
+  const betAlertsActive = isBetAlertsRoute();
   const dashboardActive =
     !activityLogsActive &&
     !comparisonActive &&
     !tradingActive &&
     !telegramAlertsActive &&
+    !betAlertsActive &&
     !buildRampActive;
 
   if (!tradingActive && tradingRefreshTimer) {
@@ -79,6 +88,14 @@ function applyDashboardRoute() {
       "aria-hidden",
       String(!tradingActive)
     );
+  }
+
+  if (elements.betAlertsView) {
+    elements.betAlertsView.hidden = !betAlertsActive;
+    elements.betAlertsView.setAttribute("aria-hidden", String(!betAlertsActive));
+    if (betAlertsActive && typeof loadBetAlerts === "function") {
+      loadBetAlerts().catch(() => { });
+    }
   }
 
   if (elements.buildRampView) {
@@ -165,6 +182,15 @@ function applyDashboardRoute() {
       elements.tradingMonitorLink.setAttribute("aria-current", "page");
     } else {
       elements.tradingMonitorLink.removeAttribute("aria-current");
+    }
+  }
+
+  if (elements.betAlertsLink) {
+    elements.betAlertsLink.classList.toggle("active", betAlertsActive);
+    if (betAlertsActive) {
+      elements.betAlertsLink.setAttribute("aria-current", "page");
+    } else {
+      elements.betAlertsLink.removeAttribute("aria-current");
     }
   }
 

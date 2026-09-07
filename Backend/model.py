@@ -336,3 +336,79 @@ class LmAutopilotChange(Base):
     # "applied", "failed"; skips are not recorded.
     outcome: Mapped[str] = mapped_column(String(16), default="applied")
     note: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
+class BetAlertRule(Base):
+    """One agent whose players' bets raise an alert.
+
+    Picked from the agent tree. `cents` is what the alert tells the desk to
+    move the line by; `min_risk` lets a rule ignore small tickets. There is no
+    master switch: a rule that is enabled is watching, and none enabled means
+    the watcher idles.
+    """
+
+    __tablename__ = "bet_alert_rules"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    agent_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    agent_name: Mapped[str] = mapped_column(String(120))
+    cents: Mapped[int] = mapped_column(Integer, default=10)
+    min_risk: Mapped[int] = mapped_column(Integer, default=0)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_note: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class BetAlertSeen(Base):
+    """Every open ticket the watcher has already looked at.
+
+    The pending report has no "since" filter - its date is a paging cursor -
+    so a new bet is a ticket number not in this table. Kept in the database
+    rather than memory so a restart does not re-alert the whole open book.
+    """
+
+    __tablename__ = "bet_alert_seen"
+
+    ticket_number: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    customer_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    agent_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    placed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    first_seen: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
+    alerted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class BetAlertEvent(Base):
+    """One alert that was raised - what was bet and what the desk was told."""
+
+    __tablename__ = "bet_alert_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
+    ticket_number: Mapped[int] = mapped_column(BigInteger, index=True)
+    agent_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    agent_name: Mapped[str] = mapped_column(String(120))
+    player: Mapped[str] = mapped_column(String(120))
+    website: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    wager_type: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    market: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    description: Mapped[str] = mapped_column(String(255))
+    matchup: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    league: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    game_time: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    risk: Mapped[float | None] = mapped_column(Float, nullable=True)
+    to_win: Mapped[float | None] = mapped_column(Float, nullable=True)
+    placed_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    cents: Mapped[int] = mapped_column(Integer, default=10)
+    notified: Mapped[bool] = mapped_column(Boolean, default=False)
+    note: Mapped[str | None] = mapped_column(String(255), nullable=True)
