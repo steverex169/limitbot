@@ -315,6 +315,17 @@ function renderLmApLeagues(data) {
     main.append(enable, mode, scaleWrap, marketWrap);
     row.append(main);
 
+    /* What the last cycle found for this league - matched, moved, and which
+       picked games are still waiting on LM247 to post a line. Without this
+       a pick that has not landed yet just looks like nothing happened. */
+    if (league.lastNote) {
+      const status = document.createElement("div");
+      status.className = "lm-ap-league-note";
+      const when = String(league.lastRunAt || "").replace(/^\S+\s/, "");
+      status.textContent = (when ? `Last check ${when} — ` : "") + league.lastNote;
+      row.append(status);
+    }
+
     // The per-game picker, hidden unless mode is per_game.
     const games = document.createElement("div");
     games.className = "lm-ap-pergame";

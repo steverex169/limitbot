@@ -5370,6 +5370,11 @@ def lm_autopilot_leagues():
             "markets": [m for m in (r.markets or "").split(",") if m],
             "mode": r.mode or "all",
             "selectedGames": _parse_selected_games(r.selected_games),
+            "lastNote": r.last_note,
+            "lastRunAt": (
+                eastern_timestamp(r.last_run_at.replace(tzinfo=timezone.utc))
+                if r.last_run_at else None
+            ),
         } for r in rows]
 
 
@@ -5433,6 +5438,7 @@ def run_lm_autopilot_cycle():
         )
         applied = 0
         skipped_games = 0
+        waiting = []   # games with no LM247 line to circle yet
         for game in plan["games"]:
             if per_game is not None:
                 pick = per_game.get(_norm_event(game.get("pinnacleEvent")))
@@ -5470,10 +5476,15 @@ def run_lm_autopilot_cycle():
                     if outcome.get("skipped"):
                         continue  # board already holds it - nothing changed
                     if not outcome.get("ok"):
-                        # Accepted but did not hold (e.g. a game whose line has
-                        # closed). Not a change, so it never touches the log -
-                        # only successful moves are recorded.
+                        # Accepted but did not hold - almost always a game LM247
+                        # has no line on yet (it follows the master until close
+                        # to game day). Not a change, so it never touches the
+                        # log; the league note names it so the page can say
+                        # "waiting for a line" rather than nothing at all.
                         skipped_games += 1
+                        name = str(game.get("pinnacleEvent") or "")
+                        if name and name not in waiting:
+                            waiting.append(name)
                         continue
 
                     previous = outcome.get("previous")
@@ -5488,12 +5499,15 @@ def run_lm_autopilot_cycle():
                     )
                     applied += 1
                     written += 1
-        _note_lm_league(
-            league["id"], now,
-            f"{plan['matched']} games matched, {applied} limits moved"
-            + (f", {skipped_games} not circleable" if skipped_games else "")
-            + (f", {plan['unmatched']} unmatched" if plan["unmatched"] else ""),
-        )
+        note = f"{plan['matched']} games matched, {applied} limits moved"
+        if waiting:
+            shown = ", ".join(waiting[:3]) + (f" +{len(waiting) - 3} more" if len(waiting) > 3 else "")
+            note += f" · waiting for an LM247 line on: {shown}"
+        elif skipped_games:
+            note += f", {skipped_games} not circleable"
+        if plan["unmatched"]:
+            note += f", {plan['unmatched']} not on LM247"
+        _note_lm_league(league["id"], now, note)
 
     try:
         client.close() if hasattr(client, "close") else None
@@ -5601,7 +5615,8 @@ def lm_autopilot_view():
             "markets": saved["markets"] if saved else ["moneyLine"],
             "mode": saved["mode"] if saved else "all",
             "selectedGames": saved["selectedGames"] if saved else [],
-            "lastNote": None,
+            "lastNote": saved["lastNote"] if saved else None,
+            "lastRunAt": saved["lastRunAt"] if saved else None,
         })
     return {
         "masterEnabled": lm_autopilot_master_enabled(),

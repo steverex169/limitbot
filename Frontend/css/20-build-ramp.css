@@ -747,3 +747,10 @@
 .lm-ap-log-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .lm-ap-sound { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink2, #52514e); cursor: pointer; user-select: none; }
 .lm-ap-sound input { width: 15px; height: 15px; }
+
+.lm-ap-league-note {
+  padding: 6px 14px 8px;
+  font-size: 12px;
+  color: var(--ink2, #52514e);
+  border-top: 1px dashed var(--grid, #e1e0d9);
+}
