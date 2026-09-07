@@ -131,7 +131,7 @@ site cannot reach the other's schedules or limits.
   env grants capability and the page is the day-to-day control. The API is
   IP-allowlisted to the server, so no proxy is needed (`LM247_PROXY` stays
   empty); `LM_AUTOPILOT_INTERVAL_MINUTES` (default 5), `LM_AUTOPILOT_WINDOW_HOURS`
-  (default 48) and `LM_AUTOPILOT_MIN_CHANGE_PERCENT` (default 8) tune the cycle.
+  (default 168, a week) and `LM_AUTOPILOT_MIN_CHANGE_PERCENT` (default 8) tune the cycle.
 - `LIMIT_TRACKER`: set `off` to stop the live tracker thread. `TRACKER_INTERVAL_MINUTES`
   (default 10) is how often tracked limits are compared with Pinnacle,
   `TRACKER_WINDOW_HOURS` (default 12) how close to kick-off a fixture must be

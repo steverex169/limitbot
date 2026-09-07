@@ -5317,7 +5317,10 @@ lm_autopilot_interval_minutes = int(
 lm_autopilot_min_change_percent = float(
     os.getenv("LM_AUTOPILOT_MIN_CHANGE_PERCENT", "8") or 8
 )
-lm_autopilot_window_hours = float(os.getenv("LM_AUTOPILOT_WINDOW_HOURS", "48") or 48)
+# A week, so Saturday's college and NFL slates can be picked from Monday and
+# ramp up as Pinnacle raises them - which is the point. Pinnacle only posts
+# baseball a day ahead, so a wide window costs nothing there.
+lm_autopilot_window_hours = float(os.getenv("LM_AUTOPILOT_WINDOW_HOURS", "168") or 168)
 # Remembers the last failure logged per game+market, so a game whose line is
 # closing does not add an identical "failed" row every five minutes. Cleared
 # for a market as soon as it succeeds.
