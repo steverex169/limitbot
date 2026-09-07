@@ -231,8 +231,16 @@ partner_name = os.getenv("PARTNER_NAME", "").strip() or (
 # BetWar does not use the lines comparison page. Keep the shared application
 # deployment-aware instead of maintaining a second frontend or only hiding a
 # link while leaving the route and APIs active.
-pinnacle_comparison_enabled = partner_host != "betwar.ag"
-trading_monitor_enabled = partner_host != "betwar.ag"
+# The Pinnacle-vs-partner comparison and Trading Monitor pages read OddsPapi
+# and the player site; neither is used any more now that Build a Ramp follows
+# Pinnacle's own feed. Off on both sites by default, and opt-in per deployment
+# for anyone who still wants them.
+def _feature_on(name):
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+pinnacle_comparison_enabled = _feature_on("PINNACLE_COMPARISON")
+trading_monitor_enabled = _feature_on("TRADING_MONITOR")
 partner_origin = f"https://{partner_host}"
 partner_api = f"{partner_origin}/partner-api/partner"
 
