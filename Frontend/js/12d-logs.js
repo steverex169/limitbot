@@ -27,7 +27,41 @@ async function loadLogs() {
   }
   setLogsMessage("");
   state.logs = data.log || [];
+  populateLogsDates();
   renderLogs();
+}
+
+/* The days that actually appear in the log, newest first, so the filter only
+   ever offers a day there is something to see. The date is the first token of
+   the ET timestamp the server already formatted, so no timezone maths. */
+function populateLogsDates() {
+  const pick = elements.logsDate;
+  if (!pick) return;
+  const current = pick.value;
+  const days = [];
+  const seen = new Set();
+  for (const r of state.logs || []) {
+    const day = String(r.at || "").slice(0, 10);
+    if (day && !seen.has(day)) { seen.add(day); days.push(day); }
+  }
+  pick.replaceChildren();
+  const any = document.createElement("option");
+  any.value = "all";
+  any.textContent = "Any day";
+  pick.append(any);
+  for (const day of days) {
+    const opt = document.createElement("option");
+    opt.value = day;
+    opt.textContent = labelDay(day);
+    pick.append(opt);
+  }
+  pick.value = [...pick.options].some((o) => o.value === current) ? current : "all";
+}
+
+function labelDay(iso) {
+  const d = new Date(iso + "T12:00:00");
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
 function makeLogsNote(text) {
@@ -41,7 +75,9 @@ function renderLogs() {
   const host = elements.logsTable;
   if (!host) return;
   const filter = elements.logsFilter ? elements.logsFilter.value : "all";
+  const day = elements.logsDate ? elements.logsDate.value : "all";
   let rows = state.logs || [];
+  if (day !== "all") rows = rows.filter((r) => String(r.at || "").slice(0, 10) === day);
   if (filter === "failed") rows = rows.filter((r) => r.status === "failed");
   else if (filter !== "all") rows = rows.filter((r) => r.source === filter);
 
@@ -107,6 +143,9 @@ function renderLogs() {
 
 if (elements.logsFilter) {
   elements.logsFilter.addEventListener("change", renderLogs);
+}
+if (elements.logsDate) {
+  elements.logsDate.addEventListener("change", renderLogs);
 }
 if (elements.logsRefresh) {
   elements.logsRefresh.addEventListener("click", () => loadLogs());

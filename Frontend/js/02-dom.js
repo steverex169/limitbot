@@ -87,6 +87,7 @@ const elements = {
   baLog: document.querySelector("#baLog"),
   logsView: document.querySelector("#logsView"),
   logsLink: document.querySelector("#logsLink"),
+  logsDate: document.querySelector("#logsDate"),
   logsFilter: document.querySelector("#logsFilter"),
   logsRefresh: document.querySelector("#logsRefresh"),
   logsMessage: document.querySelector("#logsMessage"),
