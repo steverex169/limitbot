@@ -2969,12 +2969,26 @@ def preview_hierarchy_limit_changes(request_data):
 
 
 def check_hierarchy_impact(changes, agent_ids):
-    response = api_request(
-        "POST",
-        f"{partner_api}/Backbone/CheckAffectedAccounts/",
-        json=hierarchy_payload(changes, agent_ids, include_changes=False),
-        timeout=30,
-    )
+    # AccessHigh rate-limits the whole partner API under a burst, and a
+    # scheduled batch fires several all-agent jobs seconds apart. The save step
+    # already retries a 429; this preview step, which runs first, did not - so a
+    # 429 here failed the job before it ever reached the save. Give it the same
+    # backoff, so a throttled preview waits rather than dropping the limit.
+    payload = hierarchy_payload(changes, agent_ids, include_changes=False)
+    for attempt in range(hierarchy_save_retries):
+        response = api_request(
+            "POST",
+            f"{partner_api}/Backbone/CheckAffectedAccounts/",
+            json=payload,
+            timeout=30,
+        )
+        if response.status_code != 429 or attempt == hierarchy_save_retries - 1:
+            break
+        delay = rate_limit_retry_delay(response, attempt)
+        logger.info(
+            "AccessHigh rate limited the impact check; retrying in %.1fs", delay
+        )
+        time.sleep(delay)
     response.raise_for_status()
     data = response.json()
     if data.get("Errors"):
