@@ -1,0 +1,21 @@
+    <section id="logsView" class="panel logs-panel" hidden aria-hidden="true">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">AUDIT</p>
+          <h2>Logs</h2>
+          <p>Every limit change, newest first &mdash; what it was, what it became, who did it, and whether it applied.</p>
+        </div>
+        <div class="logs-head-controls">
+          <select id="logsFilter" aria-label="Filter the log">
+            <option value="all">All events</option>
+            <option value="failed">Only failures</option>
+            <option value="schedule">Only schedules</option>
+            <option value="manual">Only manual</option>
+            <option value="tracker">Only tracker</option>
+          </select>
+          <button id="logsRefresh" type="button" class="button secondary">Refresh</button>
+        </div>
+      </div>
+      <div id="logsMessage" class="message" role="status" hidden></div>
+      <div id="logsTable" class="logs-table"></div>
+    </section>

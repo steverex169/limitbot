@@ -103,6 +103,11 @@ class LimitChange(Base):
     target_scope: Mapped[str] = mapped_column(String(20), default="selected")
     affected_agents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     affected_customers: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # "applied" (the default, what this table always held), "failed", or
+    # "no_change" - so the log can show what did NOT apply, not only what did.
+    status: Mapped[str] = mapped_column(String(16), default="applied", index=True)
+    # For a failure, why - the error, in plain words.
+    note: Mapped[str | None] = mapped_column(String(255), nullable=True)
     changed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, index=True
     )

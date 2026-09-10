@@ -37,6 +37,13 @@ function isBetAlertsRoute() {
   return normalizedPath === "/bet_alerts";
 }
 
+function isLogsRoute() {
+  const normalizedPath =
+    window.location.pathname.replace(/\/+$/, "") || "/";
+
+  return normalizedPath === "/logs";
+}
+
 function isTelegramAlertsRoute() {
   const normalizedPath =
     window.location.pathname.replace(/\/+$/, "") || "/";
@@ -53,12 +60,14 @@ function applyDashboardRoute() {
   const telegramAlertsActive = isTelegramAlertsRoute();
   const buildRampActive = isBuildRampRoute();
   const betAlertsActive = isBetAlertsRoute();
+  const logsActive = isLogsRoute();
   const dashboardActive =
     !activityLogsActive &&
     !comparisonActive &&
     !tradingActive &&
     !telegramAlertsActive &&
     !betAlertsActive &&
+    !logsActive &&
     !buildRampActive;
 
   if (!tradingActive && tradingRefreshTimer) {
@@ -88,6 +97,14 @@ function applyDashboardRoute() {
       "aria-hidden",
       String(!tradingActive)
     );
+  }
+
+  if (elements.logsView) {
+    elements.logsView.hidden = !logsActive;
+    elements.logsView.setAttribute("aria-hidden", String(!logsActive));
+    if (logsActive && typeof loadLogs === "function") {
+      loadLogs().catch(() => { });
+    }
   }
 
   if (elements.betAlertsView) {
@@ -182,6 +199,15 @@ function applyDashboardRoute() {
       elements.tradingMonitorLink.setAttribute("aria-current", "page");
     } else {
       elements.tradingMonitorLink.removeAttribute("aria-current");
+    }
+  }
+
+  if (elements.logsLink) {
+    elements.logsLink.classList.toggle("active", logsActive);
+    if (logsActive) {
+      elements.logsLink.setAttribute("aria-current", "page");
+    } else {
+      elements.logsLink.removeAttribute("aria-current");
     }
   }
 

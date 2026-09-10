@@ -1,0 +1,16 @@
+/* 23-logs.css — the audit Logs page. */
+.logs-panel .panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.logs-head-controls { display: inline-flex; gap: 8px; align-items: center; }
+.logs-head-controls select { min-width: 150px; }
+.logs-table { overflow-x: auto; margin-top: 12px; }
+.logs-grid { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 13px; }
+.logs-grid th, .logs-grid td { padding: 8px 12px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--grid, #ecebe4); }
+.logs-grid th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink2, #52514e); position: sticky; top: 0; background: var(--surface, #fff); }
+.logs-grid tbody tr:hover td { background: color-mix(in srgb, var(--series1, #2a78d6) 6%, transparent); }
+/* Result column reads at a glance. */
+.logs-grid td:last-child { font-weight: 600; }
+.log-applied td:last-child { color: #0ca30c; }
+.log-failed td:last-child { color: #d03b3b; }
+.log-failed td { background: color-mix(in srgb, #d03b3b 5%, transparent); }
+.log-no_change td:last-child { color: var(--muted, #898781); font-weight: 500; }
+@media (max-width: 720px) { .logs-grid { font-size: 12px; } .logs-grid th, .logs-grid td { padding: 6px 8px; } }

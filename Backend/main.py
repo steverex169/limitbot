@@ -77,6 +77,8 @@ page_routes = frozenset({
     "/build_ramp/",
     "/bet_alerts",
     "/bet_alerts/",
+    "/logs",
+    "/logs/",
 })
 # Serialize logins per username only: a slow upstream response for one account
 # must not block every other user's login.
@@ -1708,8 +1710,11 @@ def record_limit_change(
     affected_agents=None,
     affected_customers=None,
     changed_at=None,
+    status="applied",
+    note=None,
 ):
-    """Log a limit that actually changed. Never let logging break the save."""
+    """Log one limit event - applied, failed, or no change. Never let logging
+    break the save."""
     try:
         source, schedule_id = current_change_source.get() or ("manual", None)
         auth = current_auth.get() or {}
@@ -1731,6 +1736,8 @@ def record_limit_change(
                 target_scope=target_scope,
                 affected_agents=affected_agents,
                 affected_customers=affected_customers,
+                status=status,
+                note=(note or None) and str(note)[:255],
                 changed_at=changed_at or utc_now_naive(),
             ))
             db.commit()
@@ -4897,6 +4904,23 @@ def execute_scheduled_job(job_id):
     except Exception as error:
         logger.exception("Scheduled limit failed: %s", job_id)
         record_job_result(job_id, error=error)
+        # Also record it as a failed row in the change log, so the Logs page
+        # shows what did NOT apply beside what did. current_change_source is
+        # still ("schedule", job_id) here, so the row is attributed correctly.
+        if request_data is not None:
+            try:
+                record_limit_change(
+                    request_data["accountId"], request_data["idOrganization"],
+                    request_data["idLeague"], request_data["idSportType"],
+                    request_data.get("periodNumber", 0), request_data["field"],
+                    request_data.get("limitMode", "normal"),
+                    None, request_data["value"],
+                    customer_support_agent=request_data.get("customerSupportAgent"),
+                    target_scope=target_scope,
+                    status="failed", note=str(error),
+                )
+            except Exception:
+                logger.warning("Could not log the failed schedule", exc_info=True)
         # A schedule that failed is the case most worth hearing about.
         if job is not None and request_data is not None:
             notify_schedule_outcome(job, request_data, f"Failed: {error}")
@@ -6247,6 +6271,63 @@ def run_schedule_worker():
         shutdown_event.wait(0.25)
 
 
+def activity_log_rows(limit=250):
+    """One chronological row per limit event - applied, failed or no change.
+
+    The Logs page reads this: every change the book has made, newest first,
+    with what it was, what it became, who or what did it, and whether it took.
+    League names are resolved from cached hierarchy only, so opening the log
+    never spends an AccessHigh request or risks a rate limit.
+    """
+    auth = auth_context()
+    with database_session() as db:
+        events = db.execute(
+            select(LimitChange)
+            .where(LimitChange.user_id == auth["userId"])
+            .order_by(LimitChange.changed_at.desc())
+            .limit(limit)
+        ).scalars().all()
+
+    # Resolve league names from whatever hierarchy is already cached; never
+    # fetch, so the log is instant and cannot be rate limited.
+    names = {}
+    for account_id in {int(e.account_id) for e in events}:
+        with data_lock:
+            cached = league_cache.get(account_id)
+        for row in cached or []:
+            key = (safe_int(row.get("IdOrganization")), safe_int(row.get("IdLeague")))
+            label = row.get("LeagueName") or row.get("leagueName") or row.get("Description")
+            if label and key not in names:
+                names[(account_id, *key)] = label
+
+    def league_of(e):
+        return (
+            names.get((int(e.account_id), safe_int(e.organization_id), safe_int(e.league_id)))
+            or f"League {e.league_id}"
+        )
+
+    rows = []
+    for e in events:
+        rows.append({
+            "at": eastern_timestamp(e.changed_at.replace(tzinfo=timezone.utc)),
+            "atSort": e.changed_at.replace(tzinfo=timezone.utc).isoformat(),
+            "source": e.source,
+            "status": getattr(e, "status", "applied") or "applied",
+            "league": league_of(e),
+            "market": limit_field_labels.get(e.field, e.field),
+            "mode": e.limit_mode,
+            "period": e.period_number,
+            "oldValue": e.old_value,
+            "newValue": e.new_value,
+            "scope": e.target_scope,
+            "agents": e.affected_agents,
+            "customers": e.affected_customers,
+            "customerSupportAgent": e.customer_support_agent,
+            "note": getattr(e, "note", None),
+        })
+    return rows
+
+
 def schedule_status_rows(account_id):
     auth = auth_context()
     # Schedule history is database-backed and must remain available even when
@@ -7133,6 +7214,15 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self.server_error("Bet alerts load failed", error, "Bet alerts are unavailable")
             return
 
+        if path == "/api/logs":
+            try:
+                self.send_json(200, {"log": activity_log_rows()})
+            except PermissionError as error:
+                self.send_json(401, {"error": str(error)})
+            except Exception as error:
+                self.server_error("Log load failed", error, "The log is unavailable")
+            return
+
         if path == "/api/bet-alerts/log":
             try:
                 self.send_json(200, {"log": bet_alert_log()})
@@ -7450,6 +7540,8 @@ def migrate_limit_change_columns():
         "target_scope": "VARCHAR(20) NOT NULL DEFAULT 'selected'",
         "affected_agents": "INTEGER NULL",
         "affected_customers": "INTEGER NULL",
+        "status": "VARCHAR(16) NOT NULL DEFAULT 'applied'",
+        "note": "VARCHAR(255) NULL",
     }
     with engine.begin() as connection:
         for column_name, column_type in additions.items():

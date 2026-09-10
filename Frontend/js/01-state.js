@@ -12,6 +12,7 @@ const state = {
   trackableLeagues: null,
   lmAutopilot: null,
   betAlerts: null,
+  logs: [],
   agents: [],
   selectedAgentId: null,
   rows: [],
