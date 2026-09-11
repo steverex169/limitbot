@@ -5959,6 +5959,180 @@ def set_game_limit(request_data):
     }
 
 
+def _starts_today_eastern(starts_at):
+    """True when an ISO/UTC timestamp falls on today's Eastern date."""
+    try:
+        dt = datetime.fromisoformat(str(starts_at).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(schedule_timezone).date() == \
+        datetime.now(schedule_timezone).date()
+
+
+def lm_autopilot_today():
+    """Every matched game that starts TODAY (Eastern), grouped by league, with
+    each market's Pinnacle number and the target at the league's saved share.
+
+    One response drives the whole Build a Ramp board, so the page shows all of
+    today's games across every league on load without the operator picking a
+    league or a mode. A league whose feed errors is returned with its games
+    empty and an error string rather than failing the whole board.
+    """
+    now_stamp = eastern_timestamp(datetime.now(timezone.utc))
+    if not lm247_api.enabled():
+        return {
+            "ready": False, "leagues": [], "totalToday": 0,
+            "storeId": lm247_api.STORE_WAR, "generatedAt": now_stamp,
+            "markets": ["moneyLine", "spread", "total", "teamTotal"],
+        }
+
+    configured = {lg["slug"]: lg for lg in lm_autopilot_leagues()}
+    out_leagues = []
+    for league in lm_autopilot_available_leagues():
+        slug = league["slug"]
+        saved = configured.get(slug)
+        scale = saved["scalePercent"] if saved else 70
+        markets = saved["markets"] if saved else ["moneyLine"]
+        entry = {
+            "slug": slug,
+            "leagueName": league["leagueName"],
+            "scalePercent": scale,
+            "markets": markets,
+            "enabled": bool(saved and saved["enabled"]),
+            "carried": league["carried"],
+            "games": [],
+            "error": None,
+        }
+        try:
+            readings = pinnacle_api.league_readings(
+                slug, window_hours=lm_autopilot_window_hours
+            )
+            client = lm247_api.open_session(allow_writes=False)
+            lm_games = lm247_api.games_for_matching(
+                client, lm247_api.PINNACLE_TO_LM_LEAGUE[slug], lm247_api.STORE_WAR
+            )
+            plan = per_game_ramp.plan_from_snapshots(
+                readings, lm_games, scale_percent=scale, period="Full Game",
+            )
+            entry["games"] = [
+                game for game in plan["games"]
+                if _starts_today_eastern(game.get("startsAt"))
+            ]
+        except (pinnacle_api.PinnacleError, lm247_api.LM247Error) as error:
+            entry["error"] = str(error)
+        out_leagues.append(entry)
+
+    return {
+        "ready": True,
+        "storeId": lm247_api.STORE_WAR,
+        "generatedAt": now_stamp,
+        "totalToday": sum(len(lg["games"]) for lg in out_leagues),
+        "markets": ["moneyLine", "spread", "total", "teamTotal"],
+        "leagues": out_leagues,
+    }
+
+
+def apply_game_limits(request_data):
+    """Circle every listed market of one game to its target, in one action.
+
+    The page's per-game Apply button: a deliberate operator override that
+    pushes all of a game's markets at once, at whatever amounts the board is
+    showing. Reads the resolved board once before and once after, so each
+    market is proven to have held rather than trusting the accepted write.
+    Logged per market alongside the autopilot's own changes, marked manual.
+    """
+    auth_context()
+    ok, reason = lm247_api.write_permitted()
+    if not ok:
+        raise ValueError(reason)
+    try:
+        game_number = int(request_data["gameNumber"])
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("A game is required")
+
+    slug = str(request_data.get("slug", ""))
+    event = str(request_data.get("event", ""))[:160]
+    store_id = int(request_data.get("storeId", lm247_api.STORE_WAR))
+    lm_league_id = lm247_api.PINNACLE_TO_LM_LEAGUE.get(slug)
+    if not lm_league_id:
+        raise ValueError("Unknown league")
+
+    items = []
+    for raw in request_data.get("markets") or []:
+        market = str(raw.get("market", ""))
+        wagers = lm247_api.PINNACLE_TO_WAGER.get(market)
+        try:
+            amount = int(raw.get("amount"))
+        except (TypeError, ValueError):
+            continue
+        if not wagers or amount < 0 or amount > 10_000_000:
+            continue
+        items.append({
+            "market": market, "wagers": wagers, "amount": amount,
+            "pinnacle": raw.get("pinnacle"),
+        })
+    if not items:
+        raise ValueError("No valid markets to apply")
+
+    client = lm247_api.open_session(allow_writes=True)
+    before = lm247_api.league_lines(client, lm_league_id, store_id)
+    for item in items:
+        for wager in item["wagers"]:
+            current = before.get((game_number, lm247_api.DEFAULT_PERIOD, wager)) or {}
+            lm247_api.post_circle(
+                client, game_number, store_id, lm247_api.DEFAULT_PERIOD,
+                wager, item["amount"], current,
+            )
+    # One resolved re-read proves every market at once.
+    after = lm247_api.league_lines(client, lm_league_id, store_id)
+    league_name = {
+        lg["slug"]: lg["leagueName"] for lg in lm_autopilot_available_leagues()
+    }.get(slug, slug)
+
+    applied = 0
+    failed = 0
+    with database_session() as db:
+        for item in items:
+            held = all(
+                (after.get((game_number, lm247_api.DEFAULT_PERIOD, w)) or {}).get("amount")
+                == item["amount"]
+                for w in item["wagers"]
+            )
+            previous = (
+                before.get((game_number, lm247_api.DEFAULT_PERIOD, item["wagers"][0])) or {}
+            ).get("amount")
+            applied += 1 if held else 0
+            failed += 0 if held else 1
+            db.add(LmAutopilotChange(
+                store_id=store_id,
+                league_slug=slug,
+                league_name=league_name,
+                game_number=game_number,
+                event=event,
+                market=item["market"],
+                period=lm247_api.DEFAULT_PERIOD,
+                pinnacle_limit=float(item["pinnacle"]) if item["pinnacle"] else None,
+                scale_percent=0,
+                old_value=int(previous) if previous is not None else None,
+                new_value=item["amount"],
+                outcome="applied" if held else "failed",
+                note="manual",
+            ))
+        db.commit()
+
+    return {
+        "message": (
+            f"Applied {applied} market{'' if applied == 1 else 's'} on "
+            f"{event or game_number}" + (f" ({failed} did not hold)" if failed else "")
+        ),
+        "applied": failed == 0,
+        "appliedCount": applied,
+        "failedCount": failed,
+    }
+
+
 def run_lm_autopilot():
     if not lm247_api.enabled():
         logger.info("LM247 autopilot disabled (LM247 not enabled)")
@@ -7308,6 +7482,18 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self.server_error("Log load failed", error, "Log unavailable")
             return
 
+        if path == "/api/lm-autopilot/today":
+            try:
+                self.send_json(200, lm_autopilot_today())
+            except PermissionError as error:
+                self.send_json(401, {"error": str(error)})
+            except Exception as error:
+                self.server_error(
+                    "LM247 today board failed", error,
+                    "Today's games are unavailable",
+                )
+            return
+
         if path == "/api/lm-autopilot/games":
             try:
                 slug = (query.get("slug") or [""])[0]
@@ -7488,6 +7674,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             "/api/bet-alerts",
             "/api/lm-autopilot",
             "/api/lm-autopilot/set-game",
+            "/api/lm-autopilot/apply-game",
             "/api/trackers",
             "/api/trackers/delete",
             "/api/schedules/cancel",
@@ -7515,6 +7702,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 if path == "/api/bet-alerts"
                 else set_game_limit(request_data)
                 if path == "/api/lm-autopilot/set-game"
+                else apply_game_limits(request_data)
+                if path == "/api/lm-autopilot/apply-game"
                 else save_lm_autopilot(request_data)
                 if path == "/api/lm-autopilot"
                 else create_limit_trackers(request_data)

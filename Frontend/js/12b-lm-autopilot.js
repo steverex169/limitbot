@@ -1,13 +1,18 @@
 /* 12b-lm-autopilot.js
- * The LM247 per-game autopilot panel on Build a Ramp: the master switch, the
- * per-league on/off + share + markets, the Save, and the log of limits it has
- * moved. Its own file, loaded right after the tracker builder it sits above. */
+ * Build a Ramp. On open it loads every game that starts TODAY across all
+ * leagues and lays them out grouped by league: each game's markets show
+ * Pinnacle's number and the target at your share, with a one-click Apply that
+ * circles that game in LM247. The autopilot master switch keeps every enabled
+ * league set on its own; the board is what you read and act on by hand. */
 
+const LM_AP_MARKETS = [
+  ["moneyLine", "ML"],
+  ["spread", "Spread"],
+  ["total", "Total"],
+  ["teamTotal", "TT"],
+];
 const LM_AP_MARKET_LABELS = {
-  moneyLine: "Money line",
-  spread: "Spread",
-  total: "Total",
-  teamTotal: "Team total",
+  moneyLine: "Money line", spread: "Spread", total: "Total", teamTotal: "Team total",
 };
 
 function setLmApMessage(text, kind) {
@@ -20,206 +25,364 @@ function setLmApMessage(text, kind) {
   box.className = "message" + (kind ? ` ${kind}` : "");
 }
 
+/* Pinnacle's number at our share, rounded to a hundred - the exact rule the
+ * server uses (per_game_ramp.scale_limit), so a target recomputed live when
+ * the share changes matches what a save would store and what Apply sends. */
+function rampScaleLimit(pinnacle, pct) {
+  const value = Number(pinnacle) * (Number(pct) / 100);
+  if (!(value > 0)) {
+    return 100;
+  }
+  return Math.max(100, Math.round(value / 100) * 100);
+}
+
+function rampTime(startsAt) {
+  if (!startsAt) {
+    return "";
+  }
+  const when = new Date(startsAt);
+  if (isNaN(when.getTime())) {
+    return "";
+  }
+  return when
+    .toLocaleTimeString("en-US", {
+      timeZone: "America/New_York", hour: "numeric", minute: "2-digit",
+    })
+    .replace(" AM", "a")
+    .replace(" PM", "p");
+}
+
+function rampNum(value) {
+  return value == null ? null : Number(value).toLocaleString();
+}
+
+/* --------------------------------------------------------------------------
+ * Load: the config/state/log in one call, today's games in another, together.
+ * ------------------------------------------------------------------------ */
 async function loadLmAutopilot() {
-  if (!elements.lmApLeagues) {
+  if (!elements.rampBoard) {
     return;
   }
-  let data;
+  let view;
+  let today;
   try {
-    const response = await fetch("/api/lm-autopilot", { cache: "no-store" });
-    data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.error || "Could not load the autopilot");
+    const [viewResp, todayResp] = await Promise.all([
+      fetch("/api/lm-autopilot", { cache: "no-store" }),
+      fetch("/api/lm-autopilot/today", { cache: "no-store" }),
+    ]);
+    view = await viewResp.json();
+    today = await todayResp.json();
+    if (!viewResp.ok) {
+      throw new Error(view.error || "Could not load the autopilot");
+    }
+    if (!todayResp.ok) {
+      throw new Error(today.error || "Could not load today's games");
     }
   } catch (error) {
     setLmApMessage(error.message, "error");
     return;
   }
-  state.lmAutopilot = data;
-  renderLmApStatus(data);
-  renderLmApLeagues(data);
-  renderLmApLog(data.log || []);
+  state.lmAutopilot = view;
+  state.rampToday = today;
+  renderRampBar(view, today);
+  renderRampBoard(view, today);
+  renderLmApLog(view.log || []);
 }
 
-function renderLmApGameLeagueOptions(data) {
-  const select = elements.lmApGameLeague;
-  if (!select) {
-    return;
+function renderRampBar(view, today) {
+  if (elements.lmApMaster) {
+    elements.lmApMaster.checked = !!view.masterEnabled;
   }
-  const current = select.value;
-  select.replaceChildren();
-  const first = document.createElement("option");
-  first.value = "";
-  first.textContent = "Choose a league…";
-  select.append(first);
-  for (const league of data.leagues || []) {
-    const opt = document.createElement("option");
-    opt.value = league.slug;
-    opt.textContent = league.leagueName;
-    select.append(opt);
+  if (elements.lmApMasterLabel) {
+    elements.lmApMasterLabel.textContent = view.masterEnabled ? "On" : "Off";
   }
-  select.value = current;
-}
-
-async function loadLmApGames(slug) {
-  const pick = elements.lmApGamePick;
-  const host = elements.lmApGames;
-  if (!pick || !host) {
-    return;
+  if (elements.rampAsOf) {
+    const n = today.totalToday || 0;
+    elements.rampAsOf.textContent = today.ready
+      ? `${n} game${n === 1 ? "" : "s"} today · as of ${today.generatedAt || ""}`
+      : "LM247 is not connected on this deployment";
   }
-  host.replaceChildren();
-  pick.disabled = true;
-  pick.replaceChildren(makeOption("", "Choose a game…"));
-  state.lmApGamesBySlug = null;
-  if (!slug) {
-    return;
-  }
-  pick.replaceChildren(makeOption("", "Loading games…"));
-
-  let data;
-  try {
-    const response = await fetch(
-      `/api/lm-autopilot/games?${new URLSearchParams({ slug })}`,
-      { cache: "no-store" }
-    );
-    data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.error || "Could not load games");
+  if (elements.lmApStatus) {
+    if (!view.ready) {
+      elements.lmApStatus.textContent = "the switch will not write here";
+      elements.lmApStatus.classList.add("lm-ap-warn");
+    } else {
+      elements.lmApStatus.textContent =
+        `checks Pinnacle every ${view.intervalMinutes || 5} min · store ${view.storeId}`;
+      elements.lmApStatus.classList.remove("lm-ap-warn");
     }
-  } catch (error) {
-    pick.replaceChildren(makeOption("", "Choose a game…"));
-    host.replaceChildren(makeRampCount(error.message));
-    return;
-  }
-
-  if (data.ready === false) {
-    /* The games can only be matched once LM247 is connected. Say that plainly
-       rather than letting an empty list read as "no games today". */
-    pick.replaceChildren(makeOption("", "Choose a game…"));
-    host.replaceChildren(
-      makeRampCount("LM247 is not connected yet — once its login is added on the server, games appear here (the master switch can stay off while you pick them).")
-    );
-    return;
-  }
-
-  const games = data.games || [];
-  state.lmApGamesData = data;
-  pick.replaceChildren(makeOption("", `Choose a game… (${games.length})`));
-  games.forEach((game, index) => {
-    pick.append(makeOption(String(index), game.pinnacleEvent));
-  });
-  pick.disabled = games.length === 0;
-  if (!games.length) {
-    host.replaceChildren(makeRampCount("No matched games in the window right now."));
   }
 }
 
-function makeOption(value, text) {
-  const opt = document.createElement("option");
-  opt.value = value;
-  opt.textContent = text;
-  return opt;
+function renderRampBoard(view, today) {
+  const host = elements.rampBoard;
+  host.replaceChildren();
+
+  if (!today.ready) {
+    host.append(rampNote(
+      "LM247 is not connected on this deployment, so there are no games to " +
+      "set here. This page runs on the BetWar site."
+    ));
+    return;
+  }
+  const leagues = today.leagues || [];
+  if (!leagues.some((l) => (l.games || []).length) &&
+      !leagues.some((l) => l.error)) {
+    host.append(rampNote("No games start today in any league."));
+    return;
+  }
+
+  for (const league of leagues) {
+    host.append(renderRampLeague(league));
+  }
 }
 
-function makeRampCount(text) {
+function rampNote(text) {
   const p = document.createElement("p");
   p.className = "ramp-count";
   p.textContent = text;
   return p;
 }
 
-function renderLmApOneGame(index) {
-  const host = elements.lmApGames;
-  const data = state.lmApGamesData;
-  host.replaceChildren();
-  if (!data || index === "" || index == null) {
-    return;
+function renderRampLeague(league) {
+  const wrap = document.createElement("div");
+  wrap.className = "ramp-league";
+  wrap.dataset.slug = league.slug;
+  wrap.dataset.storeId = league.storeId || (state.rampToday?.storeId ?? "");
+
+  // ---- League bar: auto toggle, count, share, market picks ----
+  const bar = document.createElement("div");
+  bar.className = "ramp-league-bar";
+
+  const auto = document.createElement("label");
+  auto.className = "ramp-league-auto";
+  auto.title = "Let the autopilot keep this league set on its own";
+  const autoBox = document.createElement("input");
+  autoBox.type = "checkbox";
+  autoBox.className = "rl-enabled";
+  autoBox.checked = !!league.enabled;
+  const name = document.createElement("strong");
+  name.textContent = league.leagueName;
+  auto.append(autoBox, name);
+
+  const count = document.createElement("span");
+  count.className = "ramp-league-count";
+  count.textContent = `${(league.games || []).length} today`;
+
+  const scaleWrap = document.createElement("label");
+  scaleWrap.className = "ramp-league-scale";
+  scaleWrap.append(document.createTextNode("% "));
+  const scale = document.createElement("input");
+  scale.type = "number";
+  scale.min = "1";
+  scale.max = "200";
+  scale.step = "5";
+  scale.value = league.scalePercent ?? 70;
+  scale.className = "rl-scale";
+  scale.title = "Share of Pinnacle's number";
+  scaleWrap.append(scale);
+
+  const marketWrap = document.createElement("span");
+  marketWrap.className = "ramp-league-markets";
+  for (const [key, label] of LM_AP_MARKETS) {
+    const m = document.createElement("label");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.className = "rl-market";
+    box.value = key;
+    box.checked = (league.markets || []).includes(key);
+    m.append(box, document.createTextNode(label));
+    marketWrap.append(m);
   }
-  const game = (data.games || [])[Number(index)];
-  if (!game) {
-    return;
+
+  bar.append(auto, count, scaleWrap, marketWrap);
+  wrap.append(bar);
+
+  // ---- Body: error, empty, or the games table ----
+  const body = document.createElement("div");
+  body.className = "ramp-league-body";
+  if (league.error) {
+    const warn = rampNote(`Could not load: ${league.error}`);
+    warn.classList.add("lm-ap-warn");
+    body.append(warn);
+  } else if (!(league.games || []).length) {
+    body.append(rampNote("No games start today in this league."));
+  } else {
+    body.append(renderRampGames(league));
   }
-  const card = document.createElement("div");
-  card.className = "lm-ap-game";
+  wrap.append(body);
 
-  const head = document.createElement("div");
-  head.className = "lm-ap-game-head";
-  const title = document.createElement("strong");
-  title.textContent = game.pinnacleEvent;
-  head.append(title);
-  if (game.hoursToStart != null) {
-    const when = document.createElement("small");
-    when.textContent = `${Number(game.hoursToStart).toFixed(1)}h to start`;
-    head.append(when);
+  // ---- Wiring: live target recompute, dim off-markets, debounced save ----
+  const recompute = () => recomputeLeagueTargets(wrap);
+  scale.addEventListener("input", recompute);
+  scale.addEventListener("change", scheduleRampSave);
+  autoBox.addEventListener("change", scheduleRampSave);
+  for (const box of marketWrap.querySelectorAll(".rl-market")) {
+    box.addEventListener("change", () => {
+      dimOffMarkets(wrap);
+      scheduleRampSave();
+    });
   }
-  card.append(head);
-
-  for (const limit of game.limits) {
-    const row = document.createElement("div");
-    row.className = "lm-ap-game-market";
-
-    const label = document.createElement("span");
-    label.className = "lm-ap-gm-name";
-    label.textContent = LM_AP_MARKET_LABELS[limit.market] || limit.market;
-
-    const pinny = document.createElement("span");
-    pinny.className = "lm-ap-gm-pinny";
-    pinny.textContent = `Pinnacle ${Number(limit.pinnacle).toLocaleString()}` +
-      (limit.line ? ` (${limit.line})` : "");
-
-    const input = document.createElement("input");
-    input.type = "number";
-    input.min = "0";
-    input.step = "100";
-    input.value = limit.target;
-    input.className = "lm-ap-gm-input";
-    input.setAttribute("aria-label",
-      `${LM_AP_MARKET_LABELS[limit.market] || limit.market} limit`);
-
-    const set = document.createElement("button");
-    set.type = "button";
-    set.className = "button secondary lm-ap-gm-set";
-    set.textContent = "Set";
-    set.addEventListener("click", () =>
-      applyLmApGameLimit(set, {
-        slug: data.slug,
-        storeId: data.storeId,
-        gameNumber: game.gameNumber,
-        event: game.pinnacleEvent,
-        market: limit.market,
-        pinnacle: limit.pinnacle,
-        amount: Number(input.value),
-      })
-    );
-
-    row.append(label, pinny, input, set);
-    card.append(row);
-  }
-  host.append(card);
+  dimOffMarkets(wrap);
+  return wrap;
 }
 
-async function applyLmApGameLimit(button, payload) {
-  if (!Number.isFinite(payload.amount) || payload.amount < 0) {
-    setLmApMessage("Enter a valid amount.", "error");
+function renderRampGames(league) {
+  const table = document.createElement("table");
+  table.className = "ramp-games";
+
+  const thead = document.createElement("thead");
+  const hr = document.createElement("tr");
+  ["Game", "Time", ...LM_AP_MARKETS.map(([, l]) => l), ""].forEach((h, i) => {
+    const th = document.createElement("th");
+    th.textContent = h;
+    if (i >= 2 && i < 2 + LM_AP_MARKETS.length) {
+      th.dataset.market = LM_AP_MARKETS[i - 2][0];
+      th.className = "rl-col";
+    }
+    hr.append(th);
+  });
+  thead.append(hr);
+  table.append(thead);
+
+  const tbody = document.createElement("tbody");
+  for (const game of league.games) {
+    const byMarket = {};
+    for (const limit of game.limits || []) {
+      byMarket[limit.market] = limit;
+    }
+    const tr = document.createElement("tr");
+    tr.dataset.game = game.gameNumber;
+    tr.dataset.event = game.pinnacleEvent;
+
+    const nameCell = document.createElement("td");
+    nameCell.className = "rl-game-name";
+    nameCell.textContent = game.pinnacleEvent;
+    tr.append(nameCell);
+
+    const timeCell = document.createElement("td");
+    timeCell.className = "rl-game-time";
+    timeCell.textContent = rampTime(game.startsAt);
+    if (game.hoursToStart != null) {
+      timeCell.title = `${Number(game.hoursToStart).toFixed(1)}h to start`;
+    }
+    tr.append(timeCell);
+
+    for (const [key] of LM_AP_MARKETS) {
+      const td = document.createElement("td");
+      td.className = "rl-cell";
+      td.dataset.market = key;
+      const limit = byMarket[key];
+      if (!limit) {
+        td.textContent = "—";
+        td.classList.add("rl-cell-empty");
+      } else {
+        td.dataset.pinnacle = limit.pinnacle;
+        const target = document.createElement("span");
+        target.className = "rl-target";
+        target.textContent = rampNum(limit.target);
+        const pin = document.createElement("small");
+        pin.className = "rl-pin";
+        pin.textContent = rampNum(limit.pinnacle) +
+          (limit.line != null ? ` · ${limit.line}` : "");
+        td.append(target, pin);
+      }
+      tr.append(td);
+    }
+
+    const applyCell = document.createElement("td");
+    applyCell.className = "rl-apply-cell";
+    const apply = document.createElement("button");
+    apply.type = "button";
+    apply.className = "button secondary rl-apply";
+    apply.textContent = "Apply";
+    apply.addEventListener("click", () => applyRampGame(apply, tr));
+    applyCell.append(apply);
+    tr.append(applyCell);
+
+    tbody.append(tr);
+  }
+  table.append(tbody);
+  return table;
+}
+
+/* Recompute every target cell in a league from its current share, live as the
+ * number is typed - no round trip, since the rounding rule is mirrored above. */
+function recomputeLeagueTargets(leagueEl) {
+  const pct = Number(leagueEl.querySelector(".rl-scale")?.value) || 0;
+  for (const cell of leagueEl.querySelectorAll(".rl-cell")) {
+    const pinnacle = cell.dataset.pinnacle;
+    const target = cell.querySelector(".rl-target");
+    if (pinnacle && target) {
+      target.textContent = rampNum(rampScaleLimit(pinnacle, pct));
+    }
+  }
+}
+
+/* Grey the market columns this league is not set to write, so what the
+ * autopilot and Apply will touch is obvious at a glance. */
+function dimOffMarkets(leagueEl) {
+  const on = new Set(
+    [...leagueEl.querySelectorAll(".rl-market")]
+      .filter((b) => b.checked)
+      .map((b) => b.value)
+  );
+  for (const el of leagueEl.querySelectorAll(".rl-cell, .rl-col")) {
+    el.classList.toggle("rl-off", !on.has(el.dataset.market));
+  }
+}
+
+async function applyRampGame(button, row) {
+  const leagueEl = row.closest(".ramp-league");
+  const slug = leagueEl.dataset.slug;
+  const storeId = leagueEl.dataset.storeId;
+  const pct = Number(leagueEl.querySelector(".rl-scale")?.value) || 0;
+  const on = new Set(
+    [...leagueEl.querySelectorAll(".rl-market")]
+      .filter((b) => b.checked)
+      .map((b) => b.value)
+  );
+  const markets = [];
+  for (const cell of row.querySelectorAll(".rl-cell")) {
+    const key = cell.dataset.market;
+    const pinnacle = cell.dataset.pinnacle;
+    if (!on.has(key) || !pinnacle) {
+      continue;
+    }
+    markets.push({
+      market: key,
+      pinnacle: Number(pinnacle),
+      amount: rampScaleLimit(pinnacle, pct),
+    });
+  }
+  if (!markets.length) {
+    setLmApMessage("Tick at least one market for this league first.", "error");
     return;
   }
+
   button.disabled = true;
   const original = button.textContent;
   button.textContent = "Setting…";
   try {
-    const response = await fetch("/api/lm-autopilot/set-game", {
+    const response = await fetch("/api/lm-autopilot/apply-game", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        slug,
+        storeId: Number(storeId) || undefined,
+        gameNumber: Number(row.dataset.game),
+        event: row.dataset.event,
+        markets,
+      }),
     });
     const data = await response.json();
     if (!response.ok) {
-      throw new Error(data.error || "Could not set the limit");
+      throw new Error(data.error || "Could not set the limits");
     }
-    setLmApMessage(data.message, "success");
-    button.textContent = "Set ✓";
-    setTimeout(() => { button.textContent = original; button.disabled = false; }, 1500);
-    loadLmAutopilot().catch(() => { });
+    setLmApMessage(data.message, data.applied ? "success" : "error");
+    button.textContent = data.applied ? "Set ✓" : "Partial";
+    setTimeout(() => { button.textContent = original; button.disabled = false; }, 1600);
+    refreshLmApLogLive().catch(() => { });
   } catch (error) {
     setLmApMessage(error.message, "error");
     button.textContent = original;
@@ -227,213 +390,90 @@ async function applyLmApGameLimit(button, payload) {
   }
 }
 
-function renderLmApStatus(data) {
-  if (elements.lmApMaster) {
-    elements.lmApMaster.checked = !!data.masterEnabled;
+/* --------------------------------------------------------------------------
+ * Saving the config (auto on/off, share, markets per league). Debounced so
+ * typing a share or ticking markets does not fire a save per keystroke.
+ * ------------------------------------------------------------------------ */
+let rampSaveTimer = null;
+function scheduleRampSave() {
+  if (rampSaveTimer) {
+    clearTimeout(rampSaveTimer);
   }
-  if (elements.lmApMasterLabel) {
-    elements.lmApMasterLabel.textContent = data.masterEnabled ? "On" : "Off";
-  }
-  if (elements.lmApStatus) {
-    if (!data.ready) {
-      /* The credentials/enable flag are a deploy concern, so say plainly that
-         the switch does nothing until they are set rather than letting it look
-         broken. */
-      elements.lmApStatus.textContent =
-        "LM247 is not connected on this deployment — the switch will not write.";
-      elements.lmApStatus.classList.add("lm-ap-warn");
-    } else {
-      elements.lmApStatus.textContent =
-        `Checks Pinnacle every ${data.intervalMinutes || 5} min · ` +
-        `rewrites once it moves more than ${data.minChangePercent || 8}% · store ${data.storeId}`;
-      elements.lmApStatus.classList.remove("lm-ap-warn");
-    }
-  }
+  rampSaveTimer = setTimeout(() => { saveLmAutopilot(); }, 600);
 }
 
-function renderLmApLeagues(data) {
-  const host = elements.lmApLeagues;
-  host.replaceChildren();
-  const markets = data.markets || ["moneyLine", "spread", "total", "teamTotal"];
-
-  for (const league of data.leagues || []) {
-    const row = document.createElement("div");
-    row.className = "lm-ap-league-wrap";
-    row.dataset.slug = league.slug;
-
-    const main = document.createElement("div");
-    main.className = "lm-ap-league";
-
-    const enable = document.createElement("label");
-    enable.className = "lm-ap-enable";
-    const enableBox = document.createElement("input");
-    enableBox.type = "checkbox";
-    enableBox.className = "lm-ap-enabled";
-    enableBox.checked = !!league.enabled;
-    const name = document.createElement("strong");
-    name.textContent = league.leagueName;
-    enable.append(enableBox, name);
-    if (league.carried === false) {
-      const warn = document.createElement("small");
-      warn.className = "lm-ap-warn";
-      warn.textContent = " not on LM247 right now";
-      enable.append(warn);
-    }
-
-    // Mode: all games, or per game.
-    const mode = document.createElement("select");
-    mode.className = "lm-ap-mode";
-    mode.append(makeOption("all", "All games"));
-    mode.append(makeOption("per_game", "Per game"));
-    mode.value = league.mode === "per_game" ? "per_game" : "all";
-
-    const scaleWrap = document.createElement("label");
-    scaleWrap.className = "lm-ap-scale";
-    scaleWrap.append(document.createTextNode("% of Pinnacle "));
-    const scale = document.createElement("input");
-    scale.type = "number";
-    scale.min = "1";
-    scale.max = "200";
-    scale.step = "5";
-    scale.value = league.scalePercent ?? 70;
-    scale.className = "lm-ap-scale-input";
-    scaleWrap.append(scale);
-
-    const marketWrap = document.createElement("div");
-    marketWrap.className = "lm-ap-markets";
-    for (const market of markets) {
-      const m = document.createElement("label");
-      const box = document.createElement("input");
-      box.type = "checkbox";
-      box.className = "lm-ap-market";
-      box.value = market;
-      box.checked = (league.markets || []).includes(market);
-      m.append(box, document.createTextNode(LM_AP_MARKET_LABELS[market] || market));
-      marketWrap.append(m);
-    }
-
-    main.append(enable, mode, scaleWrap, marketWrap);
-    row.append(main);
-
-    /* What the last cycle found for this league - matched, moved, and which
-       picked games are still waiting on LM247 to post a line. Without this
-       a pick that has not landed yet just looks like nothing happened. */
-    if (league.lastNote) {
-      const status = document.createElement("div");
-      status.className = "lm-ap-league-note";
-      const when = String(league.lastRunAt || "").replace(/^\S+\s/, "");
-      status.textContent = (when ? `Last check ${when} — ` : "") + league.lastNote;
-      row.append(status);
-    }
-
-    // The per-game picker, hidden unless mode is per_game.
-    const games = document.createElement("div");
-    games.className = "lm-ap-pergame";
-    games.hidden = mode.value !== "per_game";
-    row.append(games);
-
-    // Remember the saved per-game selection so a first render can pre-check.
-    row._selectedGames = league.selectedGames || [];
-    if (mode.value === "per_game") {
-      loadPerGamePicker(league.slug, games, row._selectedGames, scale.value);
-    }
-    mode.addEventListener("change", () => {
-      const on = mode.value === "per_game";
-      games.hidden = !on;
-      // The share field is the whole-league default in all-games mode; in
-      // per-game mode each game carries its own, so dim the league one.
-      scaleWrap.style.opacity = on ? "0.5" : "1";
-      if (on && !games.dataset.loaded) {
-        loadPerGamePicker(league.slug, games, row._selectedGames, scale.value);
-      }
+function collectRampLeagues() {
+  const leagues = [];
+  for (const el of elements.rampBoard.querySelectorAll(".ramp-league")) {
+    const slug = el.dataset.slug;
+    const source = (state.rampToday?.leagues || []).find((l) => l.slug === slug);
+    leagues.push({
+      slug,
+      leagueName: source ? source.leagueName : slug,
+      enabled: el.querySelector(".rl-enabled")?.checked || false,
+      scalePercent: Number(el.querySelector(".rl-scale")?.value) || 70,
+      markets: [...el.querySelectorAll(".rl-market")]
+        .filter((b) => b.checked)
+        .map((b) => b.value),
+      mode: "all",
+      selectedGames: [],
     });
-    if (mode.value === "per_game") {
-      scaleWrap.style.opacity = "0.5";
-    }
-
-    host.append(row);
   }
+  return leagues;
 }
 
-async function loadPerGamePicker(slug, host, selected, defaultShare) {
-  host.dataset.loaded = "1";
-  host.replaceChildren(makeRampCount("Loading games…"));
-  let data;
+async function saveLmAutopilot() {
+  if (!elements.rampBoard) {
+    return;
+  }
+  const payload = {
+    masterEnabled: elements.lmApMaster?.checked || false,
+    leagues: collectRampLeagues(),
+  };
+  /* Turning the autopilot on is the one action that starts live writes across
+   * a whole league, so it gets a confirm the per-league edits do not. */
+  if (payload.masterEnabled && !state.lmAutopilot?.masterEnabled) {
+    const on = payload.leagues.filter((l) => l.enabled && l.markets.length);
+    const ok = window.confirm(
+      "Turn the autopilot ON?\n\n" +
+      `It will keep every game in ${on.length} league` +
+      `${on.length === 1 ? "" : "s"} set to your share of Pinnacle, live, ` +
+      "and re-check every few minutes. Turn it off here any time."
+    );
+    if (!ok) {
+      if (elements.lmApMaster) {
+        elements.lmApMaster.checked = false;
+      }
+      if (elements.lmApMasterLabel) {
+        elements.lmApMasterLabel.textContent = "Off";
+      }
+      return;
+    }
+  }
   try {
-    const response = await fetch(
-      `/api/lm-autopilot/games?${new URLSearchParams({ slug })}`,
-      { cache: "no-store" }
-    );
-    data = await response.json();
+    const response = await fetch("/api/lm-autopilot", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
     if (!response.ok) {
-      throw new Error(data.error || "Could not load games");
+      throw new Error(data.error || "Could not save");
     }
+    // Keep the local copy in step so the next ON-confirm reads right.
+    if (state.lmAutopilot) {
+      state.lmAutopilot.masterEnabled = payload.masterEnabled;
+    }
+    setLmApMessage(data.message || "Saved", "success");
+    setTimeout(() => setLmApMessage("", ""), 2000);
   } catch (error) {
-    host.replaceChildren(makeRampCount(error.message));
-    host.dataset.loaded = "";
-    return;
-  }
-  if (data.ready === false) {
-    host.replaceChildren(
-      makeRampCount("LM247 is not connected yet — once its login is added on the server, games appear here (the master switch can stay off while you pick them).")
-    );
-    host.dataset.loaded = "";
-    return;
-  }
-  const norm = (e) => String(e || "").trim().replace(/\s+/g, " ").toLowerCase();
-  const chosen = new Map(
-    (selected || []).map((g) => [norm(g.event), g.scalePercent])
-  );
-  host.replaceChildren();
-  const games = data.games || [];
-  if (!games.length) {
-    host.append(makeRampCount("No matched games in the window right now."));
-    return;
-  }
-  for (const game of games) {
-    const line = document.createElement("label");
-    line.className = "lm-ap-pg-row";
-    line.dataset.gameNumber = game.gameNumber;
-    line.dataset.event = game.pinnacleEvent;
-
-    const box = document.createElement("input");
-    box.type = "checkbox";
-    box.className = "lm-ap-pg-check";
-    box.checked = chosen.has(norm(game.pinnacleEvent));
-
-    const label = document.createElement("span");
-    label.className = "lm-ap-pg-name";
-    label.textContent = game.pinnacleEvent;
-
-    const when = document.createElement("small");
-    when.className = "lm-ap-pg-when";
-    when.textContent = game.hoursToStart != null
-      ? `${Number(game.hoursToStart).toFixed(0)}h` : "";
-
-    const shareWrap = document.createElement("span");
-    shareWrap.className = "lm-ap-pg-share";
-    shareWrap.append(document.createTextNode("% "));
-    const share = document.createElement("input");
-    share.type = "number";
-    share.min = "1";
-    share.max = "200";
-    share.step = "5";
-    share.className = "lm-ap-pg-share-input";
-    share.value = chosen.get(norm(game.pinnacleEvent)) ?? defaultShare ?? 70;
-    shareWrap.append(share);
-
-    line.append(box, label, when, shareWrap);
-    host.append(line);
+    setLmApMessage(error.message, "error");
   }
 }
 
-/*
- * A chime when a new limit lands, on this page only. Browsers refuse to play
- * sound until the person has interacted with the page, so the audio context
- * is created on the first click or key and simply resumed after that; a
- * change arriving before any interaction is still shown, just silently.
- * The tone is synthesised rather than a file, so nothing has to be served.
- */
+/* --------------------------------------------------------------------------
+ * The change log + a chime when a new limit lands (unchanged behaviour).
+ * ------------------------------------------------------------------------ */
 let lmApAudio = null;
 let lmApLastSeenKey = null;
 
@@ -466,7 +506,6 @@ function lmApChime() {
   if (!lmApAudio || lmApAudio.state !== "running") {
     return;
   }
-  /* Two rising notes, twice - reads as an alert rather than a click. */
   const ctx = lmApAudio;
   const start = ctx.currentTime;
   [[880, 0], [1320, 0.16], [880, 0.5], [1320, 0.66]].forEach(([freq, at]) => {
@@ -484,9 +523,7 @@ function lmApChime() {
 }
 
 function lmApLogKey(row) {
-  return row
-    ? `${row.changedAt}|${row.event}|${row.market}|${row.newValue}`
-    : "";
+  return row ? `${row.changedAt}|${row.event}|${row.market}|${row.newValue}` : "";
 }
 
 function renderLmApLog(log) {
@@ -494,8 +531,6 @@ function renderLmApLog(log) {
   if (!host) {
     return;
   }
-  /* First render sets the baseline silently; after that, a different newest
-     row means a limit landed since we last looked. */
   const newestKey = lmApLogKey(log[0]);
   if (lmApLastSeenKey === null) {
     lmApLastSeenKey = newestKey;
@@ -505,10 +540,7 @@ function renderLmApLog(log) {
   }
   host.replaceChildren();
   if (!log.length) {
-    const empty = document.createElement("p");
-    empty.className = "ramp-count";
-    empty.textContent = "No limit changes yet.";
-    host.append(empty);
+    host.append(rampNote("No limit changes yet."));
     return;
   }
   const table = document.createElement("table");
@@ -522,10 +554,9 @@ function renderLmApLog(log) {
   });
   head.append(hr);
   table.append(head);
-  const num = (v) => (v == null ? null : Number(v).toLocaleString());
   const move = (from, to) => {
-    const a = num(from);
-    const b = num(to);
+    const a = rampNum(from);
+    const b = rampNum(to);
     if (b == null) return "—";
     return a != null && a !== b ? `${a} → ${b}` : b;
   };
@@ -538,8 +569,8 @@ function renderLmApLog(log) {
       row.event,
       LM_AP_MARKET_LABELS[row.market] || row.market,
       move(row.pinnacleOld, row.pinnacle),
-      `${move(row.oldValue, row.newValue)} (${row.scalePercent}%)`,
-      row.outcome === "failed" ? "failed" : "",
+      `${move(row.oldValue, row.newValue)}${row.scalePercent ? ` (${row.scalePercent}%)` : ""}`,
+      row.outcome === "failed" ? "failed" : (row.note === "manual" ? "manual" : ""),
     ];
     for (const value of cells) {
       const td = document.createElement("td");
@@ -558,95 +589,6 @@ function renderLmApLog(log) {
   host.append(table);
 }
 
-async function saveLmAutopilot() {
-  if (!elements.lmApLeagues) {
-    return;
-  }
-  const leagues = [];
-  for (const row of elements.lmApLeagues.querySelectorAll(".lm-ap-league-wrap")) {
-    const source = (state.lmAutopilot?.leagues || []).find(
-      (l) => l.slug === row.dataset.slug
-    );
-    const mode = row.querySelector(".lm-ap-mode")?.value || "all";
-    const selectedGames = mode === "per_game"
-      ? [...row.querySelectorAll(".lm-ap-pg-row")]
-          .filter((r) => r.querySelector(".lm-ap-pg-check")?.checked)
-          .map((r) => ({
-            gameNumber: Number(r.dataset.gameNumber),
-            event: r.dataset.event,
-            scalePercent: Number(r.querySelector(".lm-ap-pg-share-input")?.value) || 70,
-          }))
-      : [];
-    leagues.push({
-      slug: row.dataset.slug,
-      leagueName: source ? source.leagueName : row.dataset.slug,
-      enabled: row.querySelector(".lm-ap-enabled")?.checked || false,
-      scalePercent: Number(row.querySelector(".lm-ap-scale-input")?.value) || 70,
-      markets: [...row.querySelectorAll(".lm-ap-market")]
-        .filter((b) => b.checked)
-        .map((b) => b.value),
-      mode,
-      selectedGames,
-    });
-  }
-  const payload = {
-    masterEnabled: elements.lmApMaster?.checked || false,
-    leagues,
-  };
-  /* Turning the master on is the one action here that starts real writes on a
-     live book, so it gets a confirm the per-league edits do not. */
-  if (payload.masterEnabled && !state.lmAutopilot?.masterEnabled) {
-    const on = leagues.filter((l) => l.enabled && l.markets.length);
-    const ok = window.confirm(
-      `Turn the LM247 autopilot ON?\n\n` +
-      `It will start setting per-game limits on ${on.length} league` +
-      `${on.length === 1 ? "" : "s"} from Pinnacle, live. ` +
-      `Turn it off here at any time.`
-    );
-    if (!ok) {
-      // They backed out of turning it on, so put the switch back to off -
-      // otherwise it sits visually on while the server stays off.
-      if (elements.lmApMaster) {
-        elements.lmApMaster.checked = false;
-      }
-      if (elements.lmApMasterLabel) {
-        elements.lmApMasterLabel.textContent = "Off";
-      }
-      return;
-    }
-  }
-
-  if (elements.lmApSave) {
-    elements.lmApSave.disabled = true;
-    elements.lmApSave.textContent = "Saving…";
-  }
-  try {
-    const response = await fetch("/api/lm-autopilot", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.error || "Could not save the autopilot");
-    }
-    setLmApMessage(data.message || "Saved", "success");
-    await loadLmAutopilot();
-  } catch (error) {
-    setLmApMessage(error.message, "error");
-  } finally {
-    if (elements.lmApSave) {
-      elements.lmApSave.disabled = false;
-      elements.lmApSave.textContent = "Save autopilot";
-    }
-  }
-}
-
-/*
- * The log updates on its own while the page is open, so a new circle appears
- * without a manual refresh. Polls the cheap log-only endpoint (no LM247 call)
- * every 20s, and only while the Build a Ramp view is actually visible.
- */
 async function refreshLmApLogLive() {
   const view = elements.buildRampView;
   if (!view || view.hidden || !elements.lmApLog) {
@@ -665,42 +607,19 @@ async function refreshLmApLogLive() {
 }
 setInterval(refreshLmApLogLive, 20000);
 
-/*
- * The game lists refresh themselves as well, so a slate that comes onto the
- * board mid-week appears without a reload. Every five minutes each open
- * per-game picker is re-fetched; whatever is already ticked, and the share
- * typed next to it, is read off the page first and carried over, so a
- * refresh never undoes work in progress.
- */
-function lmApPickerState(host) {
-  return [...host.querySelectorAll(".lm-ap-pg-row")]
-    .filter((r) => r.querySelector(".lm-ap-pg-check")?.checked)
-    .map((r) => ({
-      event: r.dataset.event,
-      scalePercent: Number(r.querySelector(".lm-ap-pg-share-input")?.value) || 70,
-    }));
-}
-
-async function refreshLmApPickers() {
+/* The board itself refreshes every few minutes so a game coming onto the slate
+ * appears, and Pinnacle's numbers stay current, without a manual reload. */
+setInterval(() => {
   const view = elements.buildRampView;
-  if (!view || view.hidden || !elements.lmApLeagues) {
-    return;
+  if (view && !view.hidden) {
+    loadLmAutopilot().catch(() => { });
   }
-  for (const row of elements.lmApLeagues.querySelectorAll(".lm-ap-league-wrap")) {
-    const host = row.querySelector(".lm-ap-pergame");
-    const mode = row.querySelector(".lm-ap-mode")?.value;
-    if (!host || host.hidden || mode !== "per_game" || !host.dataset.loaded) {
-      continue;
-    }
-    const share = row.querySelector(".lm-ap-scale-input")?.value;
-    await loadPerGamePicker(row.dataset.slug, host, lmApPickerState(host), share);
-  }
-}
-setInterval(refreshLmApPickers, 5 * 60 * 1000);
+}, 3 * 60 * 1000);
 
 ["click", "keydown", "touchstart"].forEach((type) =>
   document.addEventListener(type, lmApUnlockAudio, { passive: true })
 );
+
 if (elements.lmApSound) {
   try {
     const saved = localStorage.getItem("lmApSound");
@@ -712,26 +631,30 @@ if (elements.lmApSound) {
     try {
       localStorage.setItem("lmApSound", elements.lmApSound.checked ? "1" : "0");
     } catch { /* ignore */ }
-    /* Ticking it on is itself a click, so this doubles as a test chime. */
     if (elements.lmApSound.checked) {
       lmApChime();
     }
   });
 }
 
-if (elements.lmApSave) {
-  elements.lmApSave.addEventListener("click", saveLmAutopilot);
+if (elements.rampRefresh) {
+  elements.rampRefresh.addEventListener("click", () => {
+    elements.rampRefresh.disabled = true;
+    elements.rampRefresh.textContent = "Refreshing…";
+    loadLmAutopilot().finally(() => {
+      elements.rampRefresh.disabled = false;
+      elements.rampRefresh.textContent = "Refresh";
+    });
+  });
 }
+
 if (elements.lmApMaster) {
   elements.lmApMaster.addEventListener("change", () => {
     if (elements.lmApMasterLabel) {
       elements.lmApMasterLabel.textContent = elements.lmApMaster.checked ? "On" : "Off";
     }
-    /* Persist the switch the moment it is flipped, so turning it OFF takes
-       effect immediately and survives a reload - without this it only saved on
-       the separate "Save autopilot" click, so an un-saved OFF reverted to the
-       stored ON the next time the panel reloaded and the autopilot kept
-       running. saveLmAutopilot() still confirms before turning it ON. */
+    /* Persist the switch the moment it is flipped, so OFF takes effect at once
+     * and survives a reload; saveLmAutopilot() confirms before turning it ON. */
     saveLmAutopilot();
   });
 }

@@ -1,45 +1,37 @@
     <section id="buildRampView" class="panel build-ramp-panel" hidden aria-hidden="true">
-      <div class="panel-head">
-        <div>
-          <p class="eyebrow">AUTOMATION</p>
-          <h2>Build a ramp</h2>
-          <p>Set each game&#39;s limit in LM247 to your share of Pinnacle&#39;s own per-game number, live. Turn on a league below.</p>
-        </div>
-      </div>
+      <div class="ramp-board">
 
-      <div id="lmAutopilot" class="lm-autopilot">
-        <div class="lm-ap-head">
-          <div>
-            <strong>LM247 per-game autopilot</strong>
-            <small id="lmApStatus" class="lm-ap-status">Loading&hellip;</small>
+        <!-- Pinned control strip: autopilot switch, status, refresh, sound. -->
+        <div class="ramp-bar">
+          <div class="ramp-bar-title">
+            <h2>Build a Ramp</h2>
+            <small id="rampAsOf" class="ramp-asof">Loading today&rsquo;s games&hellip;</small>
           </div>
-          <label class="lm-ap-switch">
-            <input id="lmApMaster" type="checkbox">
-            <span class="lm-ap-slider" aria-hidden="true"></span>
-            <span id="lmApMasterLabel">Off</span>
-          </label>
-        </div>
-        <p class="ramp-note">
-          Sets each game&#39;s circled limit in LM247 to your share of Pinnacle&#39;s
-          own per-game number &mdash; the thing Metalic&#39;s one-limit-per-league
-          cannot do. Turn on a league, choose its share and markets. Nothing is
-          written while the master switch is off.
-        </p>
-        <div id="lmApLeagues" class="lm-ap-leagues"></div>
-        <div id="lmApMessage" class="message" role="status" hidden></div>
-        <div class="ramp-actions">
-          <button id="lmApSave" type="button" class="button primary">Save autopilot</button>
-        </div>
-        <div class="lm-ap-log-wrap">
-          <div class="lm-ap-log-head">
-            <span class="ramp-label">Limit changes it has made</span>
-            <label class="lm-ap-sound" title="Play a chime here when a new limit is applied">
+          <div class="ramp-bar-controls">
+            <label class="lm-ap-switch" title="Autopilot keeps every enabled league's games set to your share of Pinnacle, on its own">
+              <input id="lmApMaster" type="checkbox">
+              <span class="lm-ap-slider" aria-hidden="true"></span>
+              <span class="ramp-switch-text">Autopilot <span id="lmApMasterLabel">Off</span></span>
+            </label>
+            <small id="lmApStatus" class="lm-ap-status"></small>
+            <button id="rampRefresh" type="button" class="button secondary ramp-refresh">Refresh</button>
+            <label class="lm-ap-sound" title="Chime here when a limit is applied">
               <input id="lmApSound" type="checkbox" checked>
-              <span>&#128276; Sound on new limit</span>
+              <span>&#128276;</span>
             </label>
           </div>
-          <div id="lmApLog" class="lm-ap-log"></div>
         </div>
-      </div>
 
+        <div id="lmApMessage" class="message" role="status" hidden></div>
+
+        <!-- All of today's games, every league, filled in on load. -->
+        <div id="rampBoard" class="ramp-board-leagues" aria-live="polite"></div>
+
+        <!-- The record of what has been set, out of the way until wanted. -->
+        <details id="rampLogWrap" class="ramp-log-wrap">
+          <summary>Recent limit changes</summary>
+          <div id="lmApLog" class="lm-ap-log"></div>
+        </details>
+
+      </div>
     </section>

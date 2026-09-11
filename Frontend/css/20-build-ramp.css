@@ -754,3 +754,115 @@
   color: var(--ink2, #52514e);
   border-top: 1px dashed var(--grid, #e1e0d9);
 }
+
+/* ===========================================================================
+ * Build a Ramp board: today's games, every league, laid out on open.
+ * Uses the defined theme vars (--surface/--line/--muted/--ink/--blue/--green)
+ * so it reads correctly in light and dark without per-class overrides.
+ * ======================================================================== */
+.ramp-board { display: flex; flex-direction: column; gap: 14px; }
+
+.ramp-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 12px 2px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.ramp-bar-title h2 { margin: 0; font-size: 20px; letter-spacing: -0.01em; color: var(--ink); }
+.ramp-asof { display: block; margin-top: 2px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ramp-bar-controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.ramp-switch-text { white-space: nowrap; color: var(--ink); }
+.ramp-switch-text #lmApMasterLabel { color: var(--muted); font-weight: 700; }
+.lm-ap-switch input:checked ~ .ramp-switch-text #lmApMasterLabel { color: var(--green, #2ea043); }
+.ramp-refresh { padding: 6px 14px; font-size: 13px; }
+.ramp-bar .lm-ap-status { margin-top: 0; color: var(--muted); }
+
+.ramp-board-leagues { display: flex; flex-direction: column; gap: 14px; }
+
+.ramp-league {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.ramp-league:has(.rl-enabled:checked) {
+  border-color: color-mix(in srgb, var(--green, #2ea043) 50%, var(--line));
+}
+
+.ramp-league-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--muted) 8%, transparent);
+  border-bottom: 1px solid var(--line);
+}
+.ramp-league:has(.rl-enabled:checked) .ramp-league-bar {
+  background: color-mix(in srgb, var(--green, #2ea043) 9%, transparent);
+}
+.ramp-league-auto { display: inline-flex; align-items: center; gap: 9px; cursor: pointer; }
+.ramp-league-auto input { width: 17px; height: 17px; cursor: pointer; flex: none; }
+.ramp-league-auto strong { font-size: 15px; color: var(--ink); }
+.ramp-league-count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ramp-league-scale { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); white-space: nowrap; margin-left: auto; }
+.rl-scale { width: 62px; text-align: right; }
+.ramp-league-markets { display: flex; gap: 7px; flex-wrap: wrap; }
+.ramp-league-markets label {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 12px;
+  padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px;
+  cursor: pointer; user-select: none; color: var(--muted);
+  transition: background .12s ease, border-color .12s ease, color .12s ease;
+}
+.ramp-league-markets label:has(input:checked) {
+  background: color-mix(in srgb, var(--blue, #2a78d6) 14%, transparent);
+  border-color: color-mix(in srgb, var(--blue, #2a78d6) 50%, transparent);
+  color: var(--blue, #2a78d6); font-weight: 600;
+}
+.ramp-league-markets input { width: 13px; height: 13px; }
+
+.ramp-league-body { overflow-x: auto; }
+.ramp-league-body > .ramp-count { padding: 12px 14px; margin: 0; color: var(--muted); font-size: 13px; }
+
+table.ramp-games { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+table.ramp-games th, table.ramp-games td {
+  padding: 6px 10px; text-align: right; white-space: nowrap;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+}
+table.ramp-games thead th { font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); font-weight: 600; }
+table.ramp-games tbody tr:last-child td { border-bottom: 0; }
+table.ramp-games tbody tr:hover { background: color-mix(in srgb, var(--blue, #2a78d6) 5%, transparent); }
+.rl-game-name { text-align: left; font-weight: 600; font-size: 13px; color: var(--ink); }
+.rl-game-time { text-align: left; color: var(--muted); font-size: 12px; }
+
+.rl-cell { line-height: 1.15; min-width: 74px; }
+.rl-target { display: block; font-weight: 700; font-size: 13px; color: var(--ink); }
+.rl-pin { display: block; font-size: 10.5px; color: var(--muted); }
+.rl-cell-empty { color: var(--muted); opacity: 0.5; }
+.rl-off { opacity: 0.34; }
+
+.rl-apply-cell { text-align: right; }
+.rl-apply { padding: 4px 12px; font-size: 12px; }
+
+.ramp-log-wrap { border: 1px solid var(--line); border-radius: 12px; padding: 4px 14px; }
+.ramp-log-wrap > summary { cursor: pointer; padding: 8px 0; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
+.ramp-log-wrap[open] > summary { border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.ramp-log-wrap .lm-ap-log { overflow-x: auto; padding-bottom: 8px; }
+.ramp-log-wrap .lm-ap-log table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.ramp-log-wrap .lm-ap-log th, .ramp-log-wrap .lm-ap-log td { padding: 7px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); }
+.ramp-log-wrap .lm-ap-log th:nth-child(-n+4), .ramp-log-wrap .lm-ap-log td:nth-child(-n+4) { text-align: left; }
+.ramp-log-wrap .lm-ap-log th { font-size: 12px; color: var(--muted); font-weight: 600; }
+
+@media (max-width: 720px) {
+  .ramp-bar { position: static; }
+  .ramp-league-bar { gap: 10px; }
+  .ramp-league-scale { margin-left: 0; }
+  .rl-pin { font-size: 10px; }
+  table.ramp-games th, table.ramp-games td { padding: 6px 7px; }
+}
