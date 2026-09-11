@@ -243,6 +243,18 @@ def _feature_on(name):
 
 pinnacle_comparison_enabled = _feature_on("PINNACLE_COMPARISON")
 trading_monitor_enabled = _feature_on("TRADING_MONITOR")
+
+# Confine every all-agent (hierarchy cascade) write to one sub-tree instead of
+# the whole book. The aceshigh login (966170) sits above ACESLINES, BETWAR,
+# ACESPOST, JTUNESPPH and VOLUME; an unscoped all-agent save cascades into every
+# one of them, which is how a scheduled ramp flung house limits onto desks that
+# are not ours (a CS desk complaint on 10 Sep). Set LIMIT_SCOPE_AGENT_ID to the
+# sub-tree root the deployment is allowed to touch - e.g. 967987 (ACESLINES) on
+# the aceshigh-app box - and the cascade is filtered to that agent and its
+# descendants only, never the root house account or sibling books. Unset (0)
+# keeps the original whole-tree behaviour, so nothing changes until it is set.
+limit_scope_agent_id = int(os.getenv("LIMIT_SCOPE_AGENT_ID", "0") or 0)
+
 partner_origin = f"https://{partner_host}"
 partner_api = f"{partner_origin}/partner-api/partner"
 
@@ -2887,9 +2899,44 @@ def hierarchy_agent_ids(force_fresh=False):
                     if hierarchy_refresh_times.get(key) == now:
                         hierarchy_refresh_times.pop(key, None)
 
+    agents = load_agents()
+    if limit_scope_agent_id > 0:
+        # Confine the cascade to the configured sub-tree: the scope agent plus
+        # everyone whose parent chain climbs to it. Deliberately exclude the
+        # logged-in root house account, so an all-agent write can never touch a
+        # sibling book (JTUNESPPH, VOLUME, ...) or the top-level house.
+        return scoped_hierarchy_agent_ids(agents, limit_scope_agent_id)
+
     ids = [safe_int(auth["id"])]
-    ids.extend(safe_int(agent.get("id")) for agent in load_agents())
+    ids.extend(safe_int(agent.get("id")) for agent in agents)
     return sorted({agent_id for agent_id in ids if agent_id > 0})
+
+
+def scoped_hierarchy_agent_ids(agents, scope_root):
+    """Agent ids inside one sub-tree: the scope root and its descendants.
+
+    Fails safe: if the scope root is not present in the loaded tree the result
+    is empty, and callers raise "no agents available" rather than fall back to
+    the whole book - an unresolved scope must never widen back into a flung
+    house limit.
+    """
+    scope_root = safe_int(scope_root)
+    parents = {}
+    for agent in agents:
+        aid = safe_int(agent.get("id"))
+        if aid > 0:
+            parents[aid] = safe_int(agent.get("parentId"))
+
+    keep = {scope_root} if scope_root in parents else set()
+    for aid in parents:
+        cur, seen = aid, set()
+        while cur > 0 and cur not in seen:
+            seen.add(cur)
+            if cur == scope_root:
+                keep.add(aid)
+                break
+            cur = parents.get(cur, 0)
+    return sorted(agent_id for agent_id in keep if agent_id > 0)
 
 
 def hierarchy_payload(changes, agent_ids, include_changes):
