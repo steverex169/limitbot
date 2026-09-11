@@ -766,14 +766,30 @@ def save_user_preferences(auth, request_data):
 def authenticate(username, password):
     with login_serialization_lock(username):
         upstream = upstream_session()
-        login_response = upstream.post(
-            login_url,
-            headers=login_headers,
-            data={"username": username, "password": password},
-            allow_redirects=False,
-            timeout=30,
-        )
+        # A batch of scheduled jobs fires in the same minute and each one whose
+        # stored token has aged out re-logs in here. AccessHigh rate-limits the
+        # identity endpoints per account, so the burst draws a 429 and a
+        # scheduled limit was dropped (betwar Pro Football team total, 6pm
+        # 11 Sep). The save and impact steps already back off a 429; give the
+        # two login calls the same treatment so a throttled login waits and
+        # retries rather than failing the job.
+        for attempt in range(hierarchy_save_retries):
+            login_response = upstream.post(
+                login_url,
+                headers=login_headers,
+                data={"username": username, "password": password},
+                allow_redirects=False,
+                timeout=30,
+            )
+            if login_response.status_code != 429 or attempt == hierarchy_save_retries - 1:
+                break
+            time.sleep(rate_limit_retry_delay(login_response, attempt))
 
+        if login_response.status_code == 429:
+            raise RuntimeError(
+                "AccessHigh rate-limited the login; the scheduled limit will "
+                "retry on its next run"
+            )
         if login_response.status_code != 302:
             raise ValueError("Invalid AccessHigh username or password")
 
@@ -785,12 +801,16 @@ def authenticate(username, password):
         if not fresh_tokens:
             raise ValueError("Invalid AccessHigh username or password")
 
-        token_response = upstream.post(
-            token_url,
-            headers=token_headers,
-            json={"token": fresh_tokens[0], "version": "2.2.20"},
-            timeout=30,
-        )
+        for attempt in range(hierarchy_save_retries):
+            token_response = upstream.post(
+                token_url,
+                headers=token_headers,
+                json={"token": fresh_tokens[0], "version": "2.2.20"},
+                timeout=30,
+            )
+            if token_response.status_code != 429 or attempt == hierarchy_save_retries - 1:
+                break
+            time.sleep(rate_limit_retry_delay(token_response, attempt))
         token_response.raise_for_status()
         token_data = token_response.json()
 
