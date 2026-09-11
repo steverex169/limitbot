@@ -604,6 +604,14 @@ async function saveLmAutopilot() {
       `Turn it off here at any time.`
     );
     if (!ok) {
+      // They backed out of turning it on, so put the switch back to off -
+      // otherwise it sits visually on while the server stays off.
+      if (elements.lmApMaster) {
+        elements.lmApMaster.checked = false;
+      }
+      if (elements.lmApMasterLabel) {
+        elements.lmApMasterLabel.textContent = "Off";
+      }
       return;
     }
   }
@@ -719,5 +727,11 @@ if (elements.lmApMaster) {
     if (elements.lmApMasterLabel) {
       elements.lmApMasterLabel.textContent = elements.lmApMaster.checked ? "On" : "Off";
     }
+    /* Persist the switch the moment it is flipped, so turning it OFF takes
+       effect immediately and survives a reload - without this it only saved on
+       the separate "Save autopilot" click, so an un-saved OFF reverted to the
+       stored ON the next time the panel reloaded and the autopilot kept
+       running. saveLmAutopilot() still confirms before turning it ON. */
+    saveLmAutopilot();
   });
 }
