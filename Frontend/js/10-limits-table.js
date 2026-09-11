@@ -279,6 +279,9 @@ function renderRows() {
 
     tableRow.className =
       `row-level-${row.level || 0}`;
+    // Tag every rendered row so a period button on the schedules table can
+    // scroll to and flash exactly the league or period it targets.
+    tableRow.dataset.rowKey = rowKey(row);
 
     if (isParentLimitRow(row)) {
       tableRow.classList.add("parent-header-row");
@@ -547,3 +550,108 @@ function applyFilters() {
   renderRows();
 }
 
+
+
+/* ---------------------------------------------------------------------------
+ * Jump to a league/period's setup in the limits table.
+ *
+ * The schedules table's period buttons call this: it reveals the league (the
+ * table shows nothing until a parent league group is picked), expands its
+ * periods when a period other than Full Game is asked for, then scrolls to and
+ * flashes the exact row so the operator lands on that period's editable cells.
+ * ------------------------------------------------------------------------ */
+function parentKeyForLeagueRow(target) {
+  /* The parent-limit group a league sits under - what the limitFilter select
+     needs so applyFilters keeps the league. Mirrors applyFilters' own walk:
+     the nearest preceding parent row, or an explicit parent on the row. */
+  let current = "";
+  for (const row of state.rows) {
+    if (isParentLimitRow(row)) {
+      current = normalizeLimitKey(getRowDisplayName(row));
+      continue;
+    }
+    if (row === target) {
+      return normalizeLimitKey(getExplicitParentLimit(row)) || current;
+    }
+  }
+  return normalizeLimitKey(getExplicitParentLimit(target)) || "";
+}
+
+function flashLimitRow(targetKey) {
+  const panel = document.getElementById("limitsPanel");
+  const row = elements.leagueRows?.querySelector(
+    `tr[data-row-key="${(window.CSS && CSS.escape) ? CSS.escape(targetKey) : targetKey}"]`
+  );
+  const target = row || panel;
+  if (!target) {
+    return;
+  }
+  target.scrollIntoView({ behavior: "smooth", block: "center" });
+  if (row) {
+    row.classList.remove("row-flash");
+    // Force a reflow so the animation restarts if the row was flashed before.
+    void row.offsetWidth;
+    row.classList.add("row-flash");
+    setTimeout(() => row.classList.remove("row-flash"), 2400);
+  }
+}
+
+async function jumpToPeriodSetup(sched, period) {
+  if (!elements.leagueRows) {
+    return;
+  }
+  // Match on account + organization + league + Full-game period. Sport-type is
+  // deliberately left out: period rows report it as 0 while a schedule carries
+  // a real value, so requiring it to match would miss the row.
+  const baseRow = state.rows.find((row) =>
+    Number(row.accountId) === Number(sched.accountId) &&
+    Number(row.idOrganization) === Number(sched.idOrganization) &&
+    Number(row.idLeague) === Number(sched.idLeague) &&
+    Number(row.periodNumber || 0) === 0
+  );
+  if (!baseRow) {
+    showMessage(
+      "This league is not in the limits table for the selected agent. " +
+      "Pick that agent to set its period limits.",
+      "error"
+    );
+    return;
+  }
+
+  // Reveal the league: the table needs its parent group picked and, if a
+  // search is in force, one that does not exclude it.
+  const parentKey = parentKeyForLeagueRow(baseRow);
+  if (parentKey && elements.limitFilter &&
+      [...elements.limitFilter.options].some((o) => o.value === parentKey)) {
+    elements.limitFilter.value = parentKey;
+  }
+  if (elements.searchInput) {
+    elements.searchInput.value = getRowDisplayName(baseRow).split(" -- ")[0].trim();
+  }
+  applyFilters();
+
+  const targetPeriod = Number(period?.periodNumber || 0);
+  if (targetPeriod !== 0 && !state.expandedRows.has(rowKey(baseRow))) {
+    try {
+      await togglePeriods(baseRow);
+    } catch (error) {
+      showMessage(error.message || "Could not load league periods", "error");
+    }
+  } else {
+    renderRows();
+  }
+
+  // For a sub-period, build the key from the period row's own ids (it came from
+  // the same /api/periods the limits table expands from, so they line up).
+  const targetKey = targetPeriod === 0
+    ? rowKey(baseRow)
+    : rowKey({
+        accountId: period.accountId ?? sched.accountId,
+        idOrganization: period.idOrganization,
+        idLeague: period.idLeague,
+        idSportType: period.idSportType,
+        periodNumber: targetPeriod,
+      });
+  // Let the render settle before scrolling to the row.
+  requestAnimationFrame(() => flashLimitRow(targetKey));
+}

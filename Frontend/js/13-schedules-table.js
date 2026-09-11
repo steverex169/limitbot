@@ -4,6 +4,114 @@
 
 const expandedScheduleLeagues = new Set();
 
+/* Period quick-buttons on a league header. Each period of a league (Full game,
+ * 1st half, 2nd half, quarters) keeps its own separate limits; these buttons
+ * jump the operator to that period's row in the limits table to set them, so
+ * they can move back and forth between periods. The period list is fetched
+ * once per league (the same /api/periods the limits table uses) and cached. */
+const schedulePeriodsCache = new Map();
+
+function schedulePeriodKey(sched) {
+  return `${sched.accountId}:${sched.idOrganization}:${sched.idLeague}`;
+}
+
+function shortenPeriodLabel(description, periodNumber) {
+  const d = String(description || "").toLowerCase();
+  if (/(1st|first)\s*half/.test(d)) return "1H";
+  if (/(2nd|second)\s*half/.test(d)) return "2H";
+  if (/(1st|first)\s*quarter/.test(d)) return "1Q";
+  if (/(2nd|second)\s*quarter/.test(d)) return "2Q";
+  if (/(3rd|third)\s*quarter/.test(d)) return "3Q";
+  if (/(4th|fourth)\s*quarter/.test(d)) return "4Q";
+  if (/(1st|first)\s*5|5\s*inning/.test(d)) return "F5";
+  if (/quarter/.test(d)) return "Q";
+  if (/inning/.test(d)) return "INN";
+  const text = String(description || "").trim();
+  return text ? text.replace(/\s+/g, " ").slice(0, 7) : `P${periodNumber}`;
+}
+
+function makeSchedulePeriodButton(label, title, active, onClick) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "schedule-period-btn" + (active ? " is-active" : "");
+  btn.textContent = label;
+  btn.title = title;
+  btn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onClick();
+  });
+  return btn;
+}
+
+async function fetchSchedulePeriods(sched) {
+  const key = schedulePeriodKey(sched);
+  if (schedulePeriodsCache.has(key)) {
+    return schedulePeriodsCache.get(key);
+  }
+  const query = new URLSearchParams({
+    accountId: sched.accountId,
+    idOrganization: sched.idOrganization,
+    idLeague: sched.idLeague,
+  });
+  try {
+    const response = await fetch(`/api/periods?${query}`, { cache: "no-store" });
+    const data = await response.json().catch(() => ({}));
+    const rows = response.ok && Array.isArray(data.rows) ? data.rows : [];
+    schedulePeriodsCache.set(key, rows);
+    return rows;
+  } catch {
+    return [];
+  }
+}
+
+function addSchedulePeriodButtons(container, sched, rows, currentPeriod) {
+  const seen = new Set();
+  for (const row of rows) {
+    const periodNumber = Number(row.periodNumber || 0);
+    if (!periodNumber || seen.has(periodNumber)) {
+      continue;
+    }
+    seen.add(periodNumber);
+    container.append(makeSchedulePeriodButton(
+      shortenPeriodLabel(row.periodDescription, periodNumber),
+      `${row.periodDescription || `Period ${periodNumber}`} — set this period's limits`,
+      currentPeriod === periodNumber,
+      // Carry the period row's OWN ids: its sport-type is 0 where the schedule
+      // carries a real one, so the limits-table row key must come from here.
+      () => jumpToPeriodSetup(sched, {
+        periodNumber,
+        periodDescription: row.periodDescription,
+        accountId: row.accountId ?? sched.accountId,
+        idOrganization: row.idOrganization,
+        idLeague: row.idLeague,
+        idSportType: row.idSportType,
+      })
+    ));
+  }
+}
+
+function renderSchedulePeriodButtons(container, sched) {
+  container.replaceChildren();
+  const currentPeriod = Number(sched.periodNumber || 0);
+  container.append(makeSchedulePeriodButton(
+    "FG", "Full game — set this period's limits", currentPeriod === 0,
+    () => jumpToPeriodSetup(sched, null)
+  ));
+  const cached = schedulePeriodsCache.get(schedulePeriodKey(sched));
+  if (cached) {
+    addSchedulePeriodButtons(container, sched, cached, currentPeriod);
+    return;
+  }
+  const loading = document.createElement("span");
+  loading.className = "schedule-period-loading";
+  loading.textContent = "…";
+  container.append(loading);
+  fetchSchedulePeriods(sched).then((rows) => {
+    loading.remove();
+    addSchedulePeriodButtons(container, sched, rows, currentPeriod);
+  });
+}
+
 /*
  * The Time dropdown lists the times something is actually scheduled at, so it
  * can never offer an hour that matches nothing. The current choice is kept if
@@ -137,6 +245,7 @@ function renderSchedules() {
     const leagueHeader = document.createElement("tr");
     leagueHeader.className = "schedule-league-row";
     const leagueHeaderCell = document.createElement("td");
+    leagueHeaderCell.className = "schedule-league-cell";
     leagueHeaderCell.colSpan = table?.classList.contains("hide-team-total")
       ? 11
       : 13;
@@ -162,6 +271,14 @@ function renderSchedules() {
       renderSchedules();
     });
     leagueHeaderCell.append(leagueToggle);
+
+    /* Period quick-buttons: FG / 1H / 2H / … for this league, each jumping to
+     * that period's setup so its limits are set separately. */
+    const periodBar = document.createElement("span");
+    periodBar.className = "schedule-period-buttons";
+    renderSchedulePeriodButtons(periodBar, league.groups[0][0]);
+    leagueHeaderCell.append(periodBar);
+
     leagueHeader.append(leagueHeaderCell);
     elements.scheduleRows.append(leagueHeader);
 
