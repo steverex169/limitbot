@@ -191,17 +191,32 @@
   transform: rotate(90deg);
 }
 
-/* League header laid out as: [expand toggle] [period buttons] on one row. */
+/* League header laid out as: [toggle: chevron + name] [period buttons] … [count]
+   The flex lives on this inner wrapper, never on the <td> (that would drop the
+   cell's colSpan and collapse the header into the first column). */
 .schedule-league-cell {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding-right: 14px;
+  gap: 10px;
+  padding: 0 14px;
+  min-height: 46px;
 }
 .schedule-league-cell .schedule-league-toggle {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   width: auto;
+  grid-template-columns: 20px minmax(0, auto);
+  min-height: 0;
+  padding: 6px 8px 6px 0;
+  border-radius: 7px;
+}
+.schedule-league-count {
+  flex: none;
+  margin-left: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 .schedule-period-buttons {
   display: flex;

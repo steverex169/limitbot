@@ -244,11 +244,16 @@ function renderSchedules() {
   for (const [leagueKey, league] of groupedByLeague) {
     const leagueHeader = document.createElement("tr");
     leagueHeader.className = "schedule-league-row";
+    // Keep the cell a real table cell so the colSpan holds; the flex layout
+    // lives on an inner wrapper. (display:flex on the <td> itself drops its
+    // table-cell behaviour, which collapsed the header into the first column.)
     const leagueHeaderCell = document.createElement("td");
-    leagueHeaderCell.className = "schedule-league-cell";
     leagueHeaderCell.colSpan = table?.classList.contains("hide-team-total")
       ? 11
       : 13;
+    const leagueBar = document.createElement("div");
+    leagueBar.className = "schedule-league-cell";
+
     const leagueToggle = document.createElement("button");
     leagueToggle.type = "button";
     leagueToggle.className = "schedule-league-toggle";
@@ -259,9 +264,7 @@ function renderSchedules() {
     chevron.textContent = "›";
     const leagueTitle = document.createElement("strong");
     leagueTitle.textContent = league.name;
-    const leagueCount = document.createElement("span");
-    leagueCount.textContent = `${league.groups.length} ${league.groups.length === 1 ? "schedule" : "schedules"}`;
-    leagueToggle.append(chevron, leagueTitle, leagueCount);
+    leagueToggle.append(chevron, leagueTitle);
     leagueToggle.addEventListener("click", () => {
       if (expandedScheduleLeagues.has(leagueKey)) {
         expandedScheduleLeagues.delete(leagueKey);
@@ -270,14 +273,19 @@ function renderSchedules() {
       }
       renderSchedules();
     });
-    leagueHeaderCell.append(leagueToggle);
 
-    /* Period quick-buttons: FG / 1H / 2H / … for this league, each jumping to
-     * that period's setup so its limits are set separately. */
+    /* Period quick-buttons: FG / 1H / 2H / … right after the name, each jumping
+     * to that period's setup so its limits are set separately. */
     const periodBar = document.createElement("span");
     periodBar.className = "schedule-period-buttons";
     renderSchedulePeriodButtons(periodBar, league.groups[0][0]);
-    leagueHeaderCell.append(periodBar);
+
+    const leagueCount = document.createElement("span");
+    leagueCount.className = "schedule-league-count";
+    leagueCount.textContent = `${league.groups.length} ${league.groups.length === 1 ? "schedule" : "schedules"}`;
+
+    leagueBar.append(leagueToggle, periodBar, leagueCount);
+    leagueHeaderCell.append(leagueBar);
 
     leagueHeader.append(leagueHeaderCell);
     elements.scheduleRows.append(leagueHeader);

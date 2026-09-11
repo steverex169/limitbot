@@ -600,6 +600,15 @@ async function jumpToPeriodSetup(sched, period) {
   if (!elements.leagueRows) {
     return;
   }
+  // The limits table lives on the dashboard route, while the schedules table is
+  // its own page. Switch to the dashboard first, or the panel we scroll to is
+  // hidden and nothing appears to happen.
+  if (typeof applyDashboardRoute === "function") {
+    if (window.location.pathname.replace(/\/+$/, "") !== "") {
+      window.history.pushState({}, "", "/");
+    }
+    applyDashboardRoute();
+  }
   // Match on account + organization + league + Full-game period. Sport-type is
   // deliberately left out: period rows report it as 0 while a schedule carries
   // a real value, so requiring it to match would miss the row.
