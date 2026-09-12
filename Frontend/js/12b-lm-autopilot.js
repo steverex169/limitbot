@@ -242,11 +242,11 @@ function renderRampGames(league) {
 
   const thead = document.createElement("thead");
   const hr = document.createElement("tr");
-  ["Game", "Time", ...LM_AP_MARKETS.map(([, l]) => l), ""].forEach((h, i) => {
+  ["Game", "Time", "%", ...LM_AP_MARKETS.map(([, l]) => l), ""].forEach((h, i) => {
     const th = document.createElement("th");
     th.textContent = h;
-    if (i >= 2 && i < 2 + LM_AP_MARKETS.length) {
-      th.dataset.market = LM_AP_MARKETS[i - 2][0];
+    if (i >= 3 && i < 3 + LM_AP_MARKETS.length) {
+      th.dataset.market = LM_AP_MARKETS[i - 3][0];
       th.className = "rl-col";
     }
     hr.append(th);
@@ -276,6 +276,19 @@ function renderRampGames(league) {
       timeCell.title = `${Number(game.hoursToStart).toFixed(1)}h to start`;
     }
     tr.append(timeCell);
+
+    /* Per-game % override: defaults to league %, can be changed before Apply */
+    const scaleCell = document.createElement("td");
+    scaleCell.className = "rl-game-scale";
+    const scaleInput = document.createElement("input");
+    scaleInput.type = "number";
+    scaleInput.min = "1";
+    scaleInput.max = "200";
+    scaleInput.step = "5";
+    scaleInput.value = league.scalePercent ?? 70;
+    scaleInput.title = "Override league % for this game only";
+    scaleCell.append(scaleInput);
+    tr.append(scaleCell);
 
     for (const [key] of LM_AP_MARKETS) {
       const td = document.createElement("td");
@@ -345,7 +358,9 @@ async function applyRampGame(button, row) {
   const leagueEl = row.closest(".ramp-league");
   const slug = leagueEl.dataset.slug;
   const storeId = leagueEl.dataset.storeId;
-  const pct = Number(leagueEl.querySelector(".rl-scale")?.value) || 0;
+  /* Use game-specific % if set, otherwise fall back to league % */
+  const gameScale = row.querySelector(".rl-game-scale input");
+  const pct = Number(gameScale?.value) || Number(leagueEl.querySelector(".rl-scale")?.value) || 0;
   const on = new Set(
     [...leagueEl.querySelectorAll(".rl-market")]
       .filter((b) => b.checked)

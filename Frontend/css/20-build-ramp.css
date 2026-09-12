@@ -852,6 +852,8 @@ table.ramp-games tbody tr:hover { background: color-mix(in srgb, var(--blue, #2a
 .rl-cell-empty { color: var(--muted); opacity: 0.5; }
 .rl-off { opacity: 0.34; }
 
+.rl-game-scale { text-align: center; min-width: 50px; }
+.rl-game-scale input { width: 45px; padding: 4px 6px; text-align: center; font-size: 12px; font-variant-numeric: tabular-nums; border: 1px solid var(--line); border-radius: 6px; }
 .rl-apply-cell { text-align: right; }
 .rl-apply { padding: 4px 12px; font-size: 12px; }
 
