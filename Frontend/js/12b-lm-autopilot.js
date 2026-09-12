@@ -22,7 +22,16 @@ function setLmApMessage(text, kind) {
   }
   box.textContent = text || "";
   box.hidden = !text;
-  box.className = "message" + (kind ? ` ${kind}` : "");
+  box.className = kind || "";
+
+  /* Auto-dismiss after 3 seconds */
+  if (text) {
+    clearTimeout(box._dismissTimeout);
+    box._dismissTimeout = setTimeout(() => {
+      box.hidden = true;
+      box.textContent = "";
+    }, 3000);
+  }
 }
 
 /* Pinnacle's number at our share, rounded to a hundred - the exact rule the
@@ -538,8 +547,11 @@ function renderLmApLog(log) {
     lmApLastSeenKey = newestKey;
     lmApChime();
   }
-  host.replaceChildren();
-  if (!log.length) {
+  if (log.length) {
+    host.replaceChildren();
+  } else if (host.querySelector("table")) {
+    return;
+  } else if (!host.textContent.trim()) {
     host.append(rampNote("No limit changes yet."));
     return;
   }

@@ -604,7 +604,7 @@
   margin-bottom: 14px;
 }
 .lm-ap-head strong { font-size: 15px; letter-spacing: -0.01em; }
-.lm-ap-status { display: block; color: var(--ink2, #52514e); font-size: 12px; margin-top: 3px; max-width: 60ch; }
+.lm-ap-status { display: block; color: var(--ink2, #cea93a); font-size: 12px; margin-top: 3px; max-width: 60ch; }
 .lm-ap-warn { color: #b45309; font-weight: 600; }
 
 /* A real toggle, so On/Off reads at a glance. */
@@ -745,8 +745,10 @@
 
 /* --- alarm toggle on the change log --- */
 .lm-ap-log-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.lm-ap-sound { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink2, #52514e); cursor: pointer; user-select: none; }
-.lm-ap-sound input { width: 15px; height: 15px; }
+.lm-ap-sound { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink); cursor: pointer; user-select: none; }
+.lm-ap-sound input { width: 16px; height: 16px; cursor: pointer; }
+.lm-ap-sound svg { width: 18px; height: 18px; color: var(--muted); transition: color 0.2s ease; }
+.lm-ap-sound input:checked ~ svg { color: var(--blue); }
 
 .lm-ap-league-note {
   padding: 6px 14px 8px;
@@ -760,7 +762,7 @@
  * Uses the defined theme vars (--surface/--line/--muted/--ink/--blue/--green)
  * so it reads correctly in light and dark without per-class overrides.
  * ======================================================================== */
-.ramp-board { display: flex; flex-direction: column; gap: 14px; }
+.ramp-board { display: flex; flex-direction: column; gap: 14px; height: 100%; min-height: 0; }
 
 .ramp-bar {
   position: sticky;
@@ -771,12 +773,13 @@
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
-  padding: 12px 2px;
+  padding: 16px 14px;
   background: var(--surface);
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent);
 }
-.ramp-bar-title h2 { margin: 0; font-size: 20px; letter-spacing: -0.01em; color: var(--ink); }
-.ramp-asof { display: block; margin-top: 2px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ramp-bar-title { flex: 1 1 auto; min-width: 0; }
+.ramp-bar-title h2 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; color: var(--ink); }
+.ramp-asof { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .ramp-bar-controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .ramp-switch-text { white-space: nowrap; color: var(--ink); }
 .ramp-switch-text #lmApMasterLabel { color: var(--muted); font-weight: 700; }
@@ -784,13 +787,14 @@
 .ramp-refresh { padding: 6px 14px; font-size: 13px; }
 .ramp-bar .lm-ap-status { margin-top: 0; color: var(--muted); }
 
-.ramp-board-leagues { display: flex; flex-direction: column; gap: 14px; }
+.ramp-board-leagues { display: flex; flex-direction: column; gap: 14px; flex: 1; overflow-y: auto; min-height: 0; padding-right: 8px; }
 
 .ramp-league {
   border: 1px solid var(--line);
   border-radius: 12px;
   overflow: hidden;
 }
+.rl-enabled { display: none; }
 .ramp-league:has(.rl-enabled:checked) {
   border-color: color-mix(in srgb, var(--green, #2ea043) 50%, var(--line));
 }
@@ -798,14 +802,15 @@
 .ramp-league-bar {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
   flex-wrap: wrap;
-  padding: 10px 14px;
-  background: color-mix(in srgb, var(--muted) 8%, transparent);
-  border-bottom: 1px solid var(--line);
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--muted) 4%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
 }
 .ramp-league:has(.rl-enabled:checked) .ramp-league-bar {
-  background: color-mix(in srgb, var(--green, #2ea043) 9%, transparent);
+  background: color-mix(in srgb, var(--green, #2ea043) 6%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--green, #2ea043) 25%, transparent);
 }
 .ramp-league-auto { display: inline-flex; align-items: center; gap: 9px; cursor: pointer; }
 .ramp-league-auto input { width: 17px; height: 17px; cursor: pointer; flex: none; }
@@ -842,8 +847,8 @@ table.ramp-games tbody tr:hover { background: color-mix(in srgb, var(--blue, #2a
 .rl-game-time { text-align: left; color: var(--muted); font-size: 12px; }
 
 .rl-cell { line-height: 1.15; min-width: 74px; }
-.rl-target { display: block; font-weight: 700; font-size: 13px; color: var(--ink); }
-.rl-pin { display: block; font-size: 10.5px; color: var(--muted); }
+.rl-target { display: block; font-weight: 800; font-size: 15px; color: #be185d; background: #fce7f3; padding: 4px 10px; border-radius: 5px; }
+.rl-pin { display: block; font-weight: 800; font-size: 14px; color: #92400e; background: #fed7aa; padding: 4px 10px; border-radius: 5px; }
 .rl-cell-empty { color: var(--muted); opacity: 0.5; }
 .rl-off { opacity: 0.34; }
 
@@ -858,6 +863,40 @@ table.ramp-games tbody tr:hover { background: color-mix(in srgb, var(--blue, #2a
 .ramp-log-wrap .lm-ap-log th, .ramp-log-wrap .lm-ap-log td { padding: 7px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); }
 .ramp-log-wrap .lm-ap-log th:nth-child(-n+4), .ramp-log-wrap .lm-ap-log td:nth-child(-n+4) { text-align: left; }
 .ramp-log-wrap .lm-ap-log th { font-size: 12px; color: var(--muted); font-weight: 600; }
+
+/* Floating toast notification — top right, auto-dismiss */
+#lmApMessage {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  max-width: 320px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+  animation: slideIn 0.3s ease-out;
+}
+#lmApMessage.success {
+  background: #d1fae5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+#lmApMessage.error {
+  background: #fee2e2;
+  color: #7f1d1d;
+  border: 1px solid #fecaca;
+}
+#lmApMessage.info {
+  background: #dbeafe;
+  color: #0c2340;
+  border: 1px solid #bfdbfe;
+}
+@keyframes slideIn {
+  from { transform: translateX(400px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
 
 @media (max-width: 720px) {
   .ramp-bar { position: static; }

@@ -4,18 +4,16 @@
 
 const expandedScheduleLeagues = new Set();
 
-/* Period quick-buttons on a league header. Each period of a league (Full game,
- * 1st half, 2nd half, quarters) keeps its own separate limits; these buttons
- * jump the operator to that period's row in the limits table to set them, so
- * they can move back and forth between periods. The period list is fetched
- * once per league (the same /api/periods the limits table uses) and cached. */
-const schedulePeriodsCache = new Map();
-
-function schedulePeriodKey(sched) {
-  return `${sched.accountId}:${sched.idOrganization}:${sched.idLeague}`;
-}
+/* Which period tab is open per league. A league with schedules on more than one
+ * period (Full game, 1st half, 2nd half, …) gets a tab per period on its
+ * header; picking one shows only that period's entries, so they read
+ * separately instead of all mixed in one list. Keyed by the league row key. */
+const selectedSchedulePeriod = new Map();
 
 function shortenPeriodLabel(description, periodNumber) {
+  if (Number(periodNumber || 0) === 0) {
+    return "FG";
+  }
   const d = String(description || "").toLowerCase();
   if (/(1st|first)\s*half/.test(d)) return "1H";
   if (/(2nd|second)\s*half/.test(d)) return "2H";
@@ -30,86 +28,36 @@ function shortenPeriodLabel(description, periodNumber) {
   return text ? text.replace(/\s+/g, " ").slice(0, 7) : `P${periodNumber}`;
 }
 
-function makeSchedulePeriodButton(label, title, active, onClick) {
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "schedule-period-btn" + (active ? " is-active" : "");
-  btn.textContent = label;
-  btn.title = title;
-  btn.addEventListener("click", (event) => {
-    event.stopPropagation();
-    onClick();
-  });
-  return btn;
+function periodTitle(description, periodNumber) {
+  if (Number(periodNumber || 0) === 0) {
+    return "Full game";
+  }
+  return description || `Period ${periodNumber}`;
 }
 
-async function fetchSchedulePeriods(sched) {
-  const key = schedulePeriodKey(sched);
-  if (schedulePeriodsCache.has(key)) {
-    return schedulePeriodsCache.get(key);
-  }
-  const query = new URLSearchParams({
-    accountId: sched.accountId,
-    idOrganization: sched.idOrganization,
-    idLeague: sched.idLeague,
-  });
-  try {
-    const response = await fetch(`/api/periods?${query}`, { cache: "no-store" });
-    const data = await response.json().catch(() => ({}));
-    const rows = response.ok && Array.isArray(data.rows) ? data.rows : [];
-    schedulePeriodsCache.set(key, rows);
-    return rows;
-  } catch {
-    return [];
-  }
-}
-
-function addSchedulePeriodButtons(container, sched, rows, currentPeriod) {
-  const seen = new Set();
-  for (const row of rows) {
-    const periodNumber = Number(row.periodNumber || 0);
-    if (!periodNumber || seen.has(periodNumber)) {
-      continue;
-    }
-    seen.add(periodNumber);
-    container.append(makeSchedulePeriodButton(
-      shortenPeriodLabel(row.periodDescription, periodNumber),
-      `${row.periodDescription || `Period ${periodNumber}`} — set this period's limits`,
-      currentPeriod === periodNumber,
-      // Carry the period row's OWN ids: its sport-type is 0 where the schedule
-      // carries a real one, so the limits-table row key must come from here.
-      () => jumpToPeriodSetup(sched, {
-        periodNumber,
-        periodDescription: row.periodDescription,
-        accountId: row.accountId ?? sched.accountId,
-        idOrganization: row.idOrganization,
-        idLeague: row.idLeague,
-        idSportType: row.idSportType,
-      })
-    ));
-  }
-}
-
-function renderSchedulePeriodButtons(container, sched) {
+/* Tabs for a league that has schedules on more than one period. Each shows that
+ * period's schedule count; picking one filters the rows to it. A single-period
+ * league gets no tabs. */
+function renderSchedulePeriodTabs(container, leagueKey, league, selected) {
   container.replaceChildren();
-  const currentPeriod = Number(sched.periodNumber || 0);
-  container.append(makeSchedulePeriodButton(
-    "FG", "Full game — set this period's limits", currentPeriod === 0,
-    () => jumpToPeriodSetup(sched, null)
-  ));
-  const cached = schedulePeriodsCache.get(schedulePeriodKey(sched));
-  if (cached) {
-    addSchedulePeriodButtons(container, sched, cached, currentPeriod);
+  if (league.periods.length <= 1) {
     return;
   }
-  const loading = document.createElement("span");
-  loading.className = "schedule-period-loading";
-  loading.textContent = "…";
-  container.append(loading);
-  fetchSchedulePeriods(sched).then((rows) => {
-    loading.remove();
-    addSchedulePeriodButtons(container, sched, rows, currentPeriod);
-  });
+  for (const pn of league.periods) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "schedule-period-btn" + (pn === selected ? " is-active" : "");
+    btn.textContent = shortenPeriodLabel(league.periodLabels.get(pn), pn);
+    const count = league.periodCounts.get(pn) || 0;
+    btn.title = `${periodTitle(league.periodLabels.get(pn), pn)} — ${count} schedule${count === 1 ? "" : "s"}`;
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      selectedSchedulePeriod.set(leagueKey, pn);
+      expandedScheduleLeagues.add(leagueKey);
+      renderSchedules();
+    });
+    container.append(btn);
+  }
 }
 
 /*
@@ -217,31 +165,58 @@ function renderSchedules() {
     return;
   }
 
+  // Bucket raw schedules by league, noting which periods each league carries.
+  // Filtering by period at the schedule level (before grouping) keeps each
+  // period's entries cleanly separate - a group key does not include the
+  // period, so grouping first could otherwise merge two periods into one row.
   const groupedByLeague = new Map();
-  for (const group of groupSchedules(schedules)) {
-    const first = group[0];
+  for (const schedule of schedules) {
     const leagueKey = JSON.stringify([
-      first.idLeague,
-      first.idSportType,
-      first.leagueName || "",
+      schedule.idLeague,
+      schedule.idSportType,
+      schedule.leagueName || "",
     ]);
-    const league = groupedByLeague.get(leagueKey);
-    if (league) {
-      league.groups.push(group);
-    } else {
-      groupedByLeague.set(leagueKey, {
-        name: first.leagueName || `League ${first.idLeague}`,
-        groups: [group],
-      });
+    let league = groupedByLeague.get(leagueKey);
+    if (!league) {
+      league = {
+        name: schedule.leagueName || `League ${schedule.idLeague}`,
+        schedules: [],
+        periodLabels: new Map(),
+        periodCounts: new Map(),
+      };
+      groupedByLeague.set(leagueKey, league);
+    }
+    league.schedules.push(schedule);
+    const pn = Number(schedule.periodNumber || 0);
+    if (!league.periodLabels.has(pn)) {
+      league.periodLabels.set(pn, schedule.periodDescription || "");
     }
   }
 
-  /* Within a league, run order rather than the order they were created. */
-  for (const league of groupedByLeague.values()) {
-    league.groups = sortScheduleGroups(league.groups);
-  }
-
   for (const [leagueKey, league] of groupedByLeague) {
+    // Periods present, Full game (0) first, then in period order.
+    league.periods = [...league.periodLabels.keys()].sort((a, b) => a - b);
+
+    // Which period tab is showing. Default to Full game when present.
+    let selected = selectedSchedulePeriod.get(leagueKey);
+    if (selected == null || !league.periodLabels.has(selected)) {
+      selected = league.periods.includes(0) ? 0 : league.periods[0];
+    }
+
+    // Group each period's schedules on their own, in run order, and count them
+    // for the tabs.
+    const periodGroups = new Map();
+    for (const pn of league.periods) {
+      const groups = sortScheduleGroups(
+        groupSchedules(
+          league.schedules.filter((s) => Number(s.periodNumber || 0) === pn)
+        )
+      );
+      periodGroups.set(pn, groups);
+      league.periodCounts.set(pn, groups.length);
+    }
+    const displayGroups = periodGroups.get(selected) || [];
+
     const leagueHeader = document.createElement("tr");
     leagueHeader.className = "schedule-league-row";
     // Keep the cell a real table cell so the colSpan holds; the flex layout
@@ -274,15 +249,15 @@ function renderSchedules() {
       renderSchedules();
     });
 
-    /* Period quick-buttons: FG / 1H / 2H / … right after the name, each jumping
-     * to that period's setup so its limits are set separately. */
+    /* Period tabs (FG / 1H / 2H / …), shown only when the league spans more than
+     * one period. Picking one shows just that period's entries. */
     const periodBar = document.createElement("span");
     periodBar.className = "schedule-period-buttons";
-    renderSchedulePeriodButtons(periodBar, league.groups[0][0]);
+    renderSchedulePeriodTabs(periodBar, leagueKey, league, selected);
 
     const leagueCount = document.createElement("span");
     leagueCount.className = "schedule-league-count";
-    leagueCount.textContent = `${league.groups.length} ${league.groups.length === 1 ? "schedule" : "schedules"}`;
+    leagueCount.textContent = `${displayGroups.length} ${displayGroups.length === 1 ? "schedule" : "schedules"}`;
 
     leagueBar.append(leagueToggle, periodBar, leagueCount);
     leagueHeaderCell.append(leagueBar);
@@ -294,7 +269,7 @@ function renderSchedules() {
       continue;
     }
 
-    for (const group of league.groups) {
+    for (const group of displayGroups) {
       const first = group[0];
     const row = document.createElement("tr");
     row.className = "activity-grid-row";

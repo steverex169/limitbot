@@ -60,16 +60,3 @@
   text-align: center;
 }
 
-
-/* When a schedules-table period button jumps here, the target league/period
- * row pulses briefly so the eye lands on the right cells to edit. */
-@keyframes limitRowFlash {
-  0%   { background-color: color-mix(in srgb, var(--blue) 34%, transparent); }
-  100% { background-color: transparent; }
-}
-tr.row-flash > td {
-  animation: limitRowFlash 2.2s ease-out;
-}
-tr.row-flash > td:first-child {
-  box-shadow: inset 3px 0 0 var(--blue);
-}
