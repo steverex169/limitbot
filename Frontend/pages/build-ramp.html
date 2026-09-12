@@ -28,26 +28,9 @@
         <div id="rampBoard" class="ramp-board-leagues" aria-live="polite"></div>
 
         <!-- The record of what has been set, out of the way until wanted. -->
-        <details id="rampLogWrap" class="ramp-log-wrap" open>
-          <summary>Recent limit changes</summary>
-          <div id="lmApLog" class="lm-ap-log">
-            <table>
-              <thead>
-                <tr><th>When</th><th>League</th><th>Game</th><th>Market</th><th>Pinnacle</th><th>Limit set</th><th></th></tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>just now</td>
-                  <td>MLB</td>
-                  <td>Brewers v Reds</td>
-                  <td>Money Line</td>
-                  <td><span style="font-weight: 800; font-size: 14px; color: #92400e; background: #fed7aa; padding: 4px 10px; border-radius: 5px;">15,000</span></td>
-                  <td><span style="font-weight: 800; font-size: 14px; color: #be185d; background: #fce7f3; padding: 4px 10px; border-radius: 5px;">10,500</span></td>
-                  <td></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+        <details id="rampLogWrap" class="ramp-log-wrap">
+          <summary>Recent limit changes <button id="lmApLogClear" type="button" class="ramp-log-clear">Clear</button></summary>
+          <div id="lmApLog" class="lm-ap-log"></div>
         </details>
 
       </div>

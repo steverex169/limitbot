@@ -863,6 +863,8 @@ table.ramp-games tbody tr:hover { background: color-mix(in srgb, var(--blue, #2a
 .ramp-log-wrap .lm-ap-log th, .ramp-log-wrap .lm-ap-log td { padding: 7px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); }
 .ramp-log-wrap .lm-ap-log th:nth-child(-n+4), .ramp-log-wrap .lm-ap-log td:nth-child(-n+4) { text-align: left; }
 .ramp-log-wrap .lm-ap-log th { font-size: 12px; color: var(--muted); font-weight: 600; }
+.ramp-log-clear { margin-left: 12px; padding: 2px 10px; font-size: 11px; font-weight: 600; color: #d03b3b; background: transparent; border: 1px solid #d03b3b; border-radius: 4px; cursor: pointer; transition: all 0.2s ease; }
+.ramp-log-clear:hover { background: #fee2e2; }
 
 /* Floating toast notification — top right, auto-dismiss */
 #lmApMessage {

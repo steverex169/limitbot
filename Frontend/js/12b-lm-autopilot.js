@@ -670,3 +670,13 @@ if (elements.lmApMaster) {
     saveLmAutopilot();
   });
 }
+
+/* Clear Recent Limit Changes log */
+document.querySelector("#lmApLogClear")?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (elements.lmApLog) {
+    elements.lmApLog.replaceChildren();
+    const note = rampNote("Log cleared.");
+    if (note) elements.lmApLog.append(note);
+  }
+});
